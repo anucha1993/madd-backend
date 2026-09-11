@@ -31,7 +31,9 @@ class DhlRateService
     {
         $from = $shipment['from'];
         $to = $shipment['to'];
-        $isDocument = $shipment['isDocument'];
+        // Customs declaration is needed if ANY package in the shipment is a non-document box —
+        // a single shipment can mix documents and boxes, so this isn't a shipment-wide flag.
+        $hasNonDocumentPackage = collect($shipment['packages'])->contains(fn ($pkg) => empty($pkg['isDocument']));
 
         $expandedPackages = [];
         foreach ($shipment['packages'] as $pkg) {
@@ -61,7 +63,7 @@ class DhlRateService
             'plannedShippingDateAndTime' => now()->toIso8601String(),
             'unitOfMeasurement' => 'metric',
             // Documents never need a customs declaration, even cross-border.
-            'isCustomsDeclarable' => ! $isDocument && $from['country'] !== $to['country'],
+            'isCustomsDeclarable' => $hasNonDocumentPackage && $from['country'] !== $to['country'],
             'estimatedDeliveryDate' => ['isRequested' => true, 'typeCode' => 'QDDC'],
             'getAdditionalInformation' => [['typeCode' => 'allValueAddedServices', 'isRequested' => true]],
             'returnStandardProductsOnly' => false,

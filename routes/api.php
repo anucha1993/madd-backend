@@ -7,12 +7,15 @@ use App\Http\Controllers\AgentAccountController;
 use App\Http\Controllers\AgentController;
 use App\Http\Controllers\BranchController;
 use App\Http\Controllers\ChargeCodeController;
+use App\Http\Controllers\CountryController;
+use App\Http\Controllers\DhlTrackingController;
 use App\Http\Controllers\InsuranceCountryCapController;
 use App\Http\Controllers\MarkupRuleController;
 use App\Http\Controllers\ProductWeightBandController;
 use App\Http\Controllers\ShippingController;
 use App\Http\Controllers\SupplyController;
 use App\Http\Controllers\ThaiSubdistrictController;
+use App\Http\Controllers\UpsTrackingController;
 use App\Http\Controllers\UserController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -39,8 +42,17 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::post('shipping/check-rate', [ShippingController::class, 'checkRate']);
 
+    Route::post('ups-tracking/track', [UpsTrackingController::class, 'track']);
+    Route::post('dhl-tracking/track', [DhlTrackingController::class, 'track']);
+
     Route::get('product-weight-bands', [ProductWeightBandController::class, 'index']);
     Route::apiResource('product-weight-bands', ProductWeightBandController::class)->only(['store', 'update', 'destroy']);
+
+    Route::post('countries/sync', [CountryController::class, 'sync']);
+    Route::get('countries/settings', [CountryController::class, 'settings']);
+    Route::put('countries/settings', [CountryController::class, 'updateSettings']);
+    Route::get('countries', [CountryController::class, 'index']);
+    Route::put('countries/{country}', [CountryController::class, 'update']);
 
     Route::apiResource('supplies', SupplyController::class);
 

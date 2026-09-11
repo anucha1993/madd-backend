@@ -31,12 +31,12 @@ class ShippingController extends Controller
             'destination_postcode' => ['nullable', 'string', 'max:20'],
             'destination_address' => ['nullable', 'string', 'max:1000'],
 
-            'is_document' => ['boolean'],
             'packages' => ['required', 'array', 'min:1'],
             'packages.*.weight' => ['required', 'numeric', 'min:0.01'],
-            'packages.*.length' => ['required_if:is_document,false', 'nullable', 'numeric', 'min:1'],
-            'packages.*.width' => ['required_if:is_document,false', 'nullable', 'numeric', 'min:1'],
-            'packages.*.height' => ['required_if:is_document,false', 'nullable', 'numeric', 'min:1'],
+            'packages.*.is_document' => ['boolean'],
+            'packages.*.length' => ['required_if:packages.*.is_document,false', 'nullable', 'numeric', 'min:1'],
+            'packages.*.width' => ['required_if:packages.*.is_document,false', 'nullable', 'numeric', 'min:1'],
+            'packages.*.height' => ['required_if:packages.*.is_document,false', 'nullable', 'numeric', 'min:1'],
             'packages.*.quantity' => ['nullable', 'integer', 'min:1'],
 
             'agent_account_ids' => ['nullable', 'array'],
@@ -44,8 +44,6 @@ class ShippingController extends Controller
             'service_codes' => ['nullable', 'array'],
             'service_codes.*' => ['string'],
         ]);
-
-        $isDocument = (bool) ($data['is_document'] ?? false);
 
         $shipment = [
             'from' => [
@@ -66,8 +64,8 @@ class ShippingController extends Controller
                 'width' => $pkg['width'] ?? null,
                 'height' => $pkg['height'] ?? null,
                 'quantity' => $pkg['quantity'] ?? 1,
+                'isDocument' => (bool) ($pkg['is_document'] ?? false),
             ], $data['packages']),
-            'isDocument' => $isDocument,
         ];
 
         $accountsQuery = AgentAccount::with('agent')->where('status', true);

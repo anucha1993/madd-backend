@@ -37,7 +37,6 @@ class UpsRateService
     {
         $from = $shipment['from'];
         $to = $shipment['to'];
-        $isDocument = $shipment['isDocument'];
 
         return [
             'RateRequest' => [
@@ -72,10 +71,13 @@ class UpsRateService
                     ],
                     'Service' => ['Code' => (string) ($shipment['serviceCode'] ?? '65')],
                     // UPS Letter/Document (01) has no Dimensions; Customer Supplied Package (02) requires them.
-                    'Package' => array_map(function (array $pkg) use ($isDocument) {
+                    // Each package carries its own isDocument flag — a single shipment can mix documents and boxes.
+                    'Package' => array_map(function (array $pkg) {
+                        $pkgIsDocument = (bool) ($pkg['isDocument'] ?? false);
+
                         return array_merge([
-                            'PackagingType' => ['Code' => $isDocument ? '01' : '02'],
-                        ], $isDocument ? [] : [
+                            'PackagingType' => ['Code' => $pkgIsDocument ? '01' : '02'],
+                        ], $pkgIsDocument ? [] : [
                             'Dimensions' => [
                                 'UnitOfMeasurement' => ['Code' => $pkg['dimensionUnit'] ?? 'CM'],
                                 'Length' => (string) ($pkg['length'] ?? ''),
