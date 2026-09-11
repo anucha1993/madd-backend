@@ -19,18 +19,30 @@ class UpsRateService
         return self::SERVICE_CODES;
     }
 
-    public function getAccessToken(string $clientId, string $clientSecret): string
+    public function getAccessToken(string $clientId, string $clientSecret, ?string $mode = null): string
     {
         $response = Http::asForm()
             ->withBasicAuth($clientId, $clientSecret)
             ->timeout(15)
-            ->post(config('services.ups.oauth_url'), ['grant_type' => 'client_credentials']);
+            ->post($this->upsUrl('oauth_url', $mode), ['grant_type' => 'client_credentials']);
 
         if (! $response->successful() || ! $response->json('access_token')) {
             throw new \RuntimeException('UPS OAuth failed: ' . ($response->json('error_description') ?? $response->status()));
         }
 
         return $response->json('access_token');
+    }
+
+    /**
+     * UPS uses a completely different host for test (wwwcie.ups.com) vs production
+     * (onlinetools.ups.com) credentials — accounts carry their own `mode` to pick the
+     * matching host for every UPS call (OAuth, rating, tracking).
+     */
+    private function upsUrl(string $key, ?string $mode): string
+    {
+        $suffix = $mode === 'test' ? '_test' : '';
+
+        return config("services.ups.{$key}{$suffix}");
     }
 
     private function buildRateRequest(array $shipment, string $negotiatedIndicator): array
@@ -194,7 +206,7 @@ class UpsRateService
             fn ($account, $i) => $pool->as((string) $i)->asForm()
                 ->withBasicAuth($account['client_id'], $account['client_secret'])
                 ->timeout(15)
-                ->post(config('services.ups.oauth_url'), ['grant_type' => 'client_credentials'])
+                ->post($this->upsUrl('oauth_url', $account['mode'] ?? null), ['grant_type' => 'client_credentials'])
         )->all());
 
         $tokens = [];
@@ -219,6 +231,7 @@ class UpsRateService
                     $shipmentForCall = array_merge($shipment, ['shipperNumber' => $shipperNumber, 'serviceCode' => $serviceCode]);
                     $specs["{$i}:{$serviceCode}:{$indicator}"] = [
                         'token' => $tokens[$i],
+                        'mode' => $account['mode'] ?? null,
                         'body' => $this->buildRateRequest($shipmentForCall, $indicator),
                     ];
                 }
@@ -226,7 +239,7 @@ class UpsRateService
         }
 
         $rateResponses = empty($specs) ? [] : Http::pool(fn (Pool $pool) => collect($specs)->map(
-            fn ($spec, $key) => $pool->as($key)->withToken($spec['token'])->timeout(20)->post(config('services.ups.rate_url'), $spec['body'])
+            fn ($spec, $key) => $pool->as($key)->withToken($spec['token'])->timeout(20)->post($this->upsUrl('rate_url', $spec['mode']), $spec['body'])
         )->all());
 
         $results = [];

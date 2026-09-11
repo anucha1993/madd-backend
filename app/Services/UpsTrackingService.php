@@ -11,7 +11,7 @@ class UpsTrackingService
     {
     }
 
-    public function trackByInquiry(string $clientId, string $clientSecret, string $inquiryNumber, array $options = []): array
+    public function trackByInquiry(string $clientId, string $clientSecret, string $inquiryNumber, array $options = [], ?string $mode = null): array
     {
         $query = array_filter([
             'returnPOD' => ($options['returnPOD'] ?? false) ? 'true' : null,
@@ -20,12 +20,13 @@ class UpsTrackingService
             'count' => $options['count'] ?? null,
         ], fn ($v) => $v !== null);
 
-        $url = rtrim(config('services.ups.tracking_url'), '/') . '/' . rawurlencode($inquiryNumber);
+        $base = $mode === 'test' ? config('services.ups.tracking_url_test') : config('services.ups.tracking_url');
+        $url = rtrim($base, '/') . '/' . rawurlencode($inquiryNumber);
 
-        return $this->request($clientId, $clientSecret, $url, $query);
+        return $this->request($clientId, $clientSecret, $url, $query, $mode);
     }
 
-    public function trackByReference(string $clientId, string $clientSecret, string $referenceNumber, array $options = []): array
+    public function trackByReference(string $clientId, string $clientSecret, string $referenceNumber, array $options = [], ?string $mode = null): array
     {
         $query = array_filter([
             'returnPOD' => ($options['returnPOD'] ?? false) ? 'true' : null,
@@ -34,14 +35,15 @@ class UpsTrackingService
             'toPickUpDate' => $options['toPickUpDate'] ?? null,
         ], fn ($v) => $v !== null);
 
-        $url = rtrim(config('services.ups.tracking_reference_url'), '/') . '/' . rawurlencode($referenceNumber);
+        $base = $mode === 'test' ? config('services.ups.tracking_reference_url_test') : config('services.ups.tracking_reference_url');
+        $url = rtrim($base, '/') . '/' . rawurlencode($referenceNumber);
 
-        return $this->request($clientId, $clientSecret, $url, $query);
+        return $this->request($clientId, $clientSecret, $url, $query, $mode);
     }
 
-    private function request(string $clientId, string $clientSecret, string $url, array $query): array
+    private function request(string $clientId, string $clientSecret, string $url, array $query, ?string $mode = null): array
     {
-        $token = $this->upsRateService->getAccessToken($clientId, $clientSecret);
+        $token = $this->upsRateService->getAccessToken($clientId, $clientSecret, $mode);
 
         $response = Http::withToken($token)
             ->withHeaders([

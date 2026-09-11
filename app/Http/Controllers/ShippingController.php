@@ -91,6 +91,7 @@ class ShippingController extends Controller
                 'username_acc' => $account->username_acc,
                 'client_id' => $account->client_id,
                 'client_secret' => $account->client_secret,
+                'mode' => $account->mode,
             ])->values()->all(),
             $shipment,
             $serviceCodes,
@@ -102,6 +103,7 @@ class ShippingController extends Controller
                 'username_acc' => $account->username_acc,
                 'basic_auth_username' => $account->basic_auth_username,
                 'basic_auth_password' => $account->basic_auth_password,
+                'mode' => $account->mode,
             ])->values()->all(),
             $shipment,
         );

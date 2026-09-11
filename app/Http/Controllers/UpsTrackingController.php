@@ -47,8 +47,8 @@ class UpsTrackingController extends Controller
 
         try {
             $result = ! empty($data['reference_number'])
-                ? $this->upsTrackingService->trackByReference($account->client_id, $account->client_secret, $data['reference_number'], $options)
-                : $this->upsTrackingService->trackByInquiry($account->client_id, $account->client_secret, $data['inquiry_number'], $options);
+                ? $this->upsTrackingService->trackByReference($account->client_id, $account->client_secret, $data['reference_number'], $options, $account->mode)
+                : $this->upsTrackingService->trackByInquiry($account->client_id, $account->client_secret, $data['inquiry_number'], $options, $account->mode);
         } catch (\RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 502);
         }

@@ -11,9 +11,9 @@ use Illuminate\Support\Facades\Http;
  */
 class DhlTrackingService
 {
-    public function trackByNumber(string $username, string $password, string $trackingNumber): array
+    public function trackByNumber(string $username, string $password, string $trackingNumber, ?string $mode = null): array
     {
-        $baseUrl = rtrim(config('services.dhl.api_url'), '/');
+        $baseUrl = rtrim($mode === 'test' ? config('services.dhl.api_url_test') : config('services.dhl.api_url'), '/');
 
         $response = Http::withBasicAuth($username, $password)
             ->timeout(20)

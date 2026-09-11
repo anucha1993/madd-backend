@@ -30,7 +30,7 @@ class DhlTrackingController extends Controller
         }
 
         try {
-            $result = $this->dhlTrackingService->trackByNumber($account->basic_auth_username, $account->basic_auth_password, $data['tracking_number']);
+            $result = $this->dhlTrackingService->trackByNumber($account->basic_auth_username, $account->basic_auth_password, $data['tracking_number'], $account->mode);
         } catch (\RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 502);
         }

@@ -84,13 +84,23 @@ class DhlRateService
                 'Message-Reference-Date' => now()->toRfc7231String(),
             ])
             ->timeout(20)
-            ->post(config('services.dhl.api_url') . '/rates', $this->buildRateRequest($account, $shipment));
+            ->post($this->dhlUrl($account['mode'] ?? null) . '/rates', $this->buildRateRequest($account, $shipment));
 
         if (! $response->successful()) {
             throw new \RuntimeException('DHL rate request failed: ' . ($response->json('detail') ?? $response->json('title') ?? $response->status()));
         }
 
         return $response->json();
+    }
+
+    /**
+     * DHL uses a different base path for test (.../mydhlapi/test) vs production
+     * (.../mydhlapi) credentials — accounts carry their own `mode` to pick the matching
+     * base URL for every DHL call (rating, tracking).
+     */
+    private function dhlUrl(?string $mode): string
+    {
+        return $mode === 'test' ? config('services.dhl.api_url_test') : config('services.dhl.api_url');
     }
 
     private const DHL_CHARGE_LABELS = [
@@ -216,7 +226,7 @@ class DhlRateService
                     'Message-Reference-Date' => now()->toRfc7231String(),
                 ])
                 ->timeout(20)
-                ->post(config('services.dhl.api_url') . '/rates', $this->buildRateRequest($account, $shipment));
+                ->post($this->dhlUrl($account['mode'] ?? null) . '/rates', $this->buildRateRequest($account, $shipment));
         })->all());
 
         $results = [];

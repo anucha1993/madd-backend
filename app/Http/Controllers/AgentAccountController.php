@@ -30,6 +30,7 @@ class AgentAccountController extends Controller
             'basic_auth_username' => ['nullable', 'string'],
             'basic_auth_password' => ['nullable', 'string'],
             'status' => ['boolean'],
+            'mode' => ['nullable', 'in:test,production'],
         ]);
 
         $account = AgentAccount::create($data);
@@ -53,6 +54,7 @@ class AgentAccountController extends Controller
             'basic_auth_username' => ['nullable', 'string'],
             'basic_auth_password' => ['nullable', 'string'],
             'status' => ['boolean'],
+            'mode' => ['nullable', 'in:test,production'],
         ]);
 
         // Blank secret fields mean "leave unchanged", not "clear the value".
@@ -95,7 +97,7 @@ class AgentAccountController extends Controller
             $response = Http::asForm()
                 ->withBasicAuth($account->client_id, $account->client_secret)
                 ->timeout(15)
-                ->post(config('services.ups.oauth_url'), ['grant_type' => 'client_credentials']);
+                ->post($account->mode === 'test' ? config('services.ups.oauth_url_test') : config('services.ups.oauth_url'), ['grant_type' => 'client_credentials']);
 
             if ($response->successful() && $response->json('access_token')) {
                 return response()->json(['success' => true, 'message' => 'เชื่อมต่อ UPS OAuth สำเร็จ — Client ID/Secret ใช้งานได้']);
@@ -133,7 +135,7 @@ class AgentAccountController extends Controller
         try {
             $response = Http::withBasicAuth($account->basic_auth_username, $account->basic_auth_password)
                 ->timeout(15)
-                ->post(config('services.dhl.api_url') . '/rates', $body);
+                ->post(($account->mode === 'test' ? config('services.dhl.api_url_test') : config('services.dhl.api_url')) . '/rates', $body);
 
             if ($response->successful() && $response->json('products')) {
                 return response()->json(['success' => true, 'message' => 'เชื่อมต่อ DHL สำเร็จ — Basic Auth ใช้งานได้']);

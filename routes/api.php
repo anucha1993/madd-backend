@@ -5,6 +5,7 @@ use App\Http\Controllers\AddonCategoryController;
 use App\Http\Controllers\AddonItemController;
 use App\Http\Controllers\AgentAccountController;
 use App\Http\Controllers\AgentController;
+use App\Http\Controllers\AiController;
 use App\Http\Controllers\BranchController;
 use App\Http\Controllers\ChargeCodeController;
 use App\Http\Controllers\CountryController;
@@ -44,6 +45,12 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::post('ups-tracking/track', [UpsTrackingController::class, 'track']);
     Route::post('dhl-tracking/track', [DhlTrackingController::class, 'track']);
+
+    Route::get('ai/settings', [AiController::class, 'settings']);
+    Route::put('ai/settings', [AiController::class, 'updateSettings']);
+    Route::put('ai/toggle', [AiController::class, 'toggleEnabled']);
+    Route::post('ai/parse-address', [AiController::class, 'parseAddress']);
+    Route::post('ai/rate-chat', [AiController::class, 'rateChat']);
 
     Route::get('product-weight-bands', [ProductWeightBandController::class, 'index']);
     Route::apiResource('product-weight-bands', ProductWeightBandController::class)->only(['store', 'update', 'destroy']);
