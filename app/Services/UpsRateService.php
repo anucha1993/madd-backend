@@ -14,6 +14,18 @@ class UpsRateService
         '11' => 'UPS Standard',
     ];
 
+    // The Rating API (SERVICE_CODES above) and the Time In Transit API use two
+    // DIFFERENT numbering schemes for the same products (e.g. Rating "65" vs TnT
+    // "28" both mean "Worldwide Saver") — so transit-time results must be matched
+    // by service NAME, not by code. Each entry lists the exact TnT
+    // serviceLevelDescription value(s) known to correspond to that rating service.
+    private const SERVICE_NAME_ALIASES = [
+        'Worldwide Saver' => ['UPS Worldwide Saver', 'UPS Express Saver'],
+        'Worldwide Express' => ['UPS Worldwide Express'],
+        'Worldwide Expedited' => ['UPS Worldwide Expedited'],
+        'UPS Standard' => ['UPS Standard'],
+    ];
+
     public function serviceLabels(): array
     {
         return self::SERVICE_CODES;
@@ -121,10 +133,92 @@ class UpsRateService
         return $response->json();
     }
 
+    private function buildTimeInTransitRequest(array $shipment): array
+    {
+        $from = $shipment['from'];
+        $to = $shipment['to'];
+        $isInternational = ($from['country'] ?? '') !== ($to['country'] ?? '');
+        $hasNonDocument = collect($shipment['packages'])->contains(fn ($pkg) => empty($pkg['isDocument']));
+        $totalWeight = collect($shipment['packages'])->sum(fn ($pkg) => ((float) ($pkg['weight'] ?? 0)) * max(1, (int) ($pkg['quantity'] ?? 1)));
+
+        $payload = array_filter([
+            'originCountryCode' => $from['country'] ?? null,
+            'originCityName' => $from['city'] ?? null,
+            'originPostalCode' => $from['postcode'] ?? null,
+            'destinationCountryCode' => $to['country'] ?? null,
+            'destinationCityName' => $to['city'] ?? null,
+            'destinationPostalCode' => $to['postcode'] ?? null,
+            'residentialIndicator' => '02',
+            'shipDate' => now()->addDay()->format('Y-m-d'),
+            'weight' => (string) max($totalWeight, 0.1),
+            'weightUnitOfMeasure' => 'KGS',
+            'billType' => $hasNonDocument ? '03' : '02',
+        ], fn ($v) => $v !== null && $v !== '');
+
+        // UPS requires a declared value for international non-document shipments — a
+        // placeholder is fine here since this call only estimates transit time, not price.
+        if ($isInternational && $hasNonDocument) {
+            $payload['shipmentContentsValue'] = (string) ($shipment['declaredValue'] ?? 1);
+            $payload['shipmentContentsCurrencyCode'] = $shipment['declaredValueCurrency'] ?? 'USD';
+        }
+
+        return $payload;
+    }
+
+    /**
+     * Estimated transit days / delivery date per UPS service, via the Time In Transit
+     * API — the Rating API alone does not reliably return this for every service.
+     * Returns a map keyed by the exact serviceLevelDescription text (see
+     * SERVICE_NAME_ALIASES for why matching must happen by name, not by code).
+     */
+    public function getTimeInTransit(string $token, array $shipment, ?string $mode = null): array
+    {
+        $response = Http::withToken($token)
+            ->withHeaders([
+                'transId' => (string) \Illuminate\Support\Str::uuid(),
+                'transactionSrc' => config('services.ups.transaction_src', 'testing'),
+            ])
+            ->timeout(15)
+            ->post($this->upsUrl('time_in_transit_url', $mode), $this->buildTimeInTransitRequest($shipment));
+
+        if (! $response->successful()) {
+            throw new \RuntimeException('UPS Time In Transit request failed: ' . ($response->json('response.errors.0.message') ?? $response->status()));
+        }
+
+        $byDescription = [];
+        foreach ($response->json('emsResponse.services') ?? [] as $service) {
+            $description = trim((string) ($service['serviceLevelDescription'] ?? ''));
+            if ($description === '' || isset($byDescription[$description])) continue;
+
+            $byDescription[$description] = [
+                'transitDays' => $service['totalTransitDays'] ?? $service['businessTransitDays'] ?? null,
+                'estimatedDelivery' => $service['deliveryDate'] ?? null,
+                'guaranteed' => ($service['guaranteeIndicator'] ?? '0') === '1',
+            ];
+        }
+
+        return $byDescription;
+    }
+
+    /**
+     * Look up a rating service's transit-time info from the TnT-by-description map,
+     * trying each known name alias for that service in priority order.
+     */
+    private function findTimeInTransit(array $byDescription, string $serviceLabel): ?array
+    {
+        foreach (self::SERVICE_NAME_ALIASES[$serviceLabel] ?? [] as $alias) {
+            if (isset($byDescription[$alias])) {
+                return $byDescription[$alias];
+            }
+        }
+
+        return null;
+    }
+
     private const CHARGE_CODE_LABELS = [
-        '375' => 'ค่าธรรมเนียมน้ำมัน (Fuel Surcharge)',
-        '270' => 'ค่าธรรมเนียมจัดการเพิ่มเติม (Additional Handling)',
-        '440' => 'ค่าธรรมเนียมพื้นที่ห่างไกล (Delivery Area Surcharge)',
+        '375' => 'Fuel Surcharge',
+        '270' => 'Additional Handling',
+        '440' => 'Delivery Area Surcharge',
     ];
 
     private function describeCharge(?array $item): string
@@ -133,7 +227,7 @@ class UpsRateService
         if (! empty($item['Description'])) return $item['Description'];
         if (! empty($item['Code']) && isset(self::CHARGE_CODE_LABELS[$item['Code']])) return self::CHARGE_CODE_LABELS[$item['Code']];
 
-        return ! empty($item['Code']) ? "ค่าธรรมเนียมอื่นๆ (code {$item['Code']})" : 'ค่าธรรมเนียมอื่นๆ';
+        return ! empty($item['Code']) ? "Other Charge (code {$item['Code']})" : 'Other Charge';
     }
 
     private function buildBreakdown(?array $baseCharge, ?array $itemizedCharges, string $currency): array
@@ -142,7 +236,7 @@ class UpsRateService
         if (isset($baseCharge['MonetaryValue'])) {
             $lines[] = [
                 'code' => 'BASE',
-                'description' => 'ค่าขนส่งพื้นฐาน (Base Freight)',
+                'description' => 'Base Freight',
                 'amount' => (float) $baseCharge['MonetaryValue'],
                 'currency' => $baseCharge['CurrencyCode'] ?? $currency,
             ];
@@ -185,6 +279,7 @@ class UpsRateService
             'negotiated' => $negotiated !== null ? (float) $negotiated : null,
             'billedWeight' => $rs['BillingWeight']['Weight'] ?? null,
             'billedWeightUnit' => $rs['BillingWeight']['UnitOfMeasurement']['Code'] ?? null,
+            'zone' => $rs['Zone'] ?? null,
             'chargeBreakdown' => $chargeBreakdown,
             'negotiatedChargeBreakdown' => $negotiatedChargeBreakdown,
         ];
@@ -283,6 +378,7 @@ class UpsRateService
                         'currency' => $publishedQuote['currency'],
                         'billedWeight' => $publishedQuote['billedWeight'],
                         'billedWeightUnit' => $publishedQuote['billedWeightUnit'],
+                        'zone' => $publishedQuote['zone'] ?? $negotiatedQuote['zone'] ?? null,
                         'published' => $publishedQuote['published'] ?? $negotiatedQuote['published'] ?? null,
                         'negotiated' => $negotiatedQuote['negotiated'] ?? $publishedQuote['negotiated'] ?? null,
                         'chargeBreakdown' => $negotiatedQuote['negotiatedChargeBreakdown'] ?? $publishedQuote['chargeBreakdown'],
@@ -298,6 +394,29 @@ class UpsRateService
                         'error' => $e->getMessage(),
                     ];
                 }
+            }
+        }
+
+        // Best-effort: transit time doesn't depend on the account, so one call
+        // (using whichever account authenticated first) is enough for the whole
+        // batch. Failures here must never break the price quotes themselves.
+        if (! empty($tokens)) {
+            $firstIndex = array_key_first($tokens);
+            try {
+                $transitByDescription = $this->getTimeInTransit($tokens[$firstIndex], $shipment, $accounts[$firstIndex]['mode'] ?? null);
+                foreach ($results as &$result) {
+                    if (empty($result['error'])) {
+                        $transit = $this->findTimeInTransit($transitByDescription, $result['serviceLabel']);
+                        if ($transit) {
+                            $result['transitDays'] = $transit['transitDays'];
+                            $result['estimatedDelivery'] = $transit['estimatedDelivery'];
+                            $result['guaranteed'] = $transit['guaranteed'];
+                        }
+                    }
+                }
+                unset($result);
+            } catch (\Throwable) {
+                // Ignore — rate quotes still stand without a transit-time estimate.
             }
         }
 

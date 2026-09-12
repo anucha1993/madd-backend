@@ -113,6 +113,7 @@ class AiController extends Controller
             {
               "destination_country_iso2": string|null,
               "destination_city": string|null,
+              "destination_postal_code": string|null,
               "weight_kg": number|null,
               "length_cm": number|null,
               "width_cm": number|null,
@@ -159,7 +160,7 @@ class AiController extends Controller
             'to' => [
                 'country' => $destinationCountry,
                 'city' => $destinationCity,
-                'postcode' => '',
+                'postcode' => $extracted['destination_postal_code'] ?? '',
                 // DHL's rate API rejects an empty addressLine1 — the city name is a
                 // reasonable placeholder since no street address exists at this stage.
                 'address' => $destinationCity,
@@ -209,15 +210,20 @@ class AiController extends Controller
         $replyPrompt = <<<'PROMPT'
             You are a friendly shipping-rate assistant for a Thai logistics company. Answer in
             Thai, conversational but concise (3-8 sentences). You are given a JSON list of
-            shipping quotes (carrier, service, account username, price, currency) plus the
-            user's original question. ALWAYS show BOTH carriers (UPS and DHL) separately if
-            both appear in the data — never omit one carrier just because the other is
-            cheaper. For each carrier, mention the cheapest option's service name, the account
-            username it came from, and the price. If a carrier has no valid quotes in the data,
-            say so briefly for that carrier instead of skipping it silently. Mention this is an
-            estimate from a standard Bangkok origin (actual price may vary with pickup
-            address). If the list is empty entirely, apologize and explain briefly why (e.g. no
-            active carrier accounts, or destination not understood). Never invent a price,
+            shipping quotes (carrier, service, account username, price, currency, transitDays,
+            estimatedDelivery) plus the user's original question. ALWAYS show BOTH carriers
+            (UPS and DHL) separately if both appear in the data — never omit one carrier just
+            because the other is cheaper. For each carrier, mention the cheapest option's
+            service name, the account username it came from, the price, and if transitDays or
+            estimatedDelivery is present, mention the estimated transit time / delivery date
+            too — but ONLY mention transit time/delivery date when the transitDays or
+            estimatedDelivery field is actually present and non-null for that specific quote;
+            if both are null/absent, do not state or guess a transit time for it. If a carrier
+            has no valid quotes in the data, say so briefly for that carrier instead of skipping
+            it silently. Mention this is an estimate from a standard Bangkok origin (actual
+            price and transit time may vary with the real pickup address). If the list is empty
+            entirely, apologize and explain briefly why (e.g. no active carrier accounts, or
+            destination not understood). Never invent a price, transit time, delivery date,
             carrier, or account not present in the data.
             PROMPT;
 

@@ -6,11 +6,13 @@ use App\Http\Controllers\AddonItemController;
 use App\Http\Controllers\AgentAccountController;
 use App\Http\Controllers\AgentController;
 use App\Http\Controllers\AiController;
+use App\Http\Controllers\BranchCarrierAccountController;
 use App\Http\Controllers\BranchController;
 use App\Http\Controllers\ChargeCodeController;
 use App\Http\Controllers\CountryController;
 use App\Http\Controllers\DhlTrackingController;
 use App\Http\Controllers\InsuranceCountryCapController;
+use App\Http\Controllers\ManifestOptionController;
 use App\Http\Controllers\MarkupRuleController;
 use App\Http\Controllers\ProductWeightBandController;
 use App\Http\Controllers\ShippingController;
@@ -35,6 +37,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('agent-accounts/{agentAccount}/test', [AgentAccountController::class, 'test']);
 
     Route::apiResource('branches', BranchController::class);
+    Route::get('branches/{branch}/carrier-accounts', [BranchCarrierAccountController::class, 'index']);
+    Route::put('branches/{branch}/carrier-accounts', [BranchCarrierAccountController::class, 'sync']);
     Route::apiResource('users', UserController::class);
 
     Route::get('thai-subdistricts/by-zipcode/{zipCode}', [ThaiSubdistrictController::class, 'byZipCode']);
@@ -72,4 +76,6 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::apiResource('addon-categories', AddonCategoryController::class)->only(['index', 'store', 'update', 'destroy']);
     Route::apiResource('addon-items', AddonItemController::class)->only(['index', 'store', 'update', 'destroy']);
+
+    Route::apiResource('manifest-options', ManifestOptionController::class)->only(['index', 'store', 'update', 'destroy']);
 });

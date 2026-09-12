@@ -40,6 +40,8 @@ return [
         'oauth_url_test' => env('UPS_OAUTH_URL_TEST', 'https://wwwcie.ups.com/security/v1/oauth/token'),
         'rate_url' => env('UPS_RATE_URL', 'https://onlinetools.ups.com/api/rating/v2409/rate'),
         'rate_url_test' => env('UPS_RATE_URL_TEST', 'https://wwwcie.ups.com/api/rating/v2409/rate'),
+        'time_in_transit_url' => env('UPS_TIME_IN_TRANSIT_URL', 'https://onlinetools.ups.com/api/shipments/v1/transittimes'),
+        'time_in_transit_url_test' => env('UPS_TIME_IN_TRANSIT_URL_TEST', 'https://wwwcie.ups.com/api/shipments/v1/transittimes'),
         'tracking_url' => env('UPS_TRACKING_URL', 'https://onlinetools.ups.com/api/track/v1/details'),
         'tracking_url_test' => env('UPS_TRACKING_URL_TEST', 'https://wwwcie.ups.com/api/track/v1/details'),
         'tracking_reference_url' => env('UPS_TRACKING_REFERENCE_URL', 'https://onlinetools.ups.com/api/track/v1/reference/details'),

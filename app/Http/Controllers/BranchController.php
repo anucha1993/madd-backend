@@ -9,7 +9,7 @@ class BranchController extends Controller
 {
     public function index()
     {
-        return Branch::withCount('users')->orderBy('name')->get();
+        return Branch::withCount(['users', 'carrierAccounts'])->orderBy('name')->get();
     }
 
     public function store(Request $request)

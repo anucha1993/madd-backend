@@ -104,19 +104,19 @@ class DhlRateService
     }
 
     private const DHL_CHARGE_LABELS = [
-        'BASE' => 'ค่าขนส่งพื้นฐาน (Base Freight)',
-        'SF' => 'ค่าธรรมเนียมเซ็นรับโดยตรง (Direct Signature)',
-        'FF' => 'ค่าธรรมเนียมน้ำมัน (Fuel Surcharge)',
-        'YK' => 'ค่าธรรมเนียมพรีเมียมส่งก่อนเวลา (12:00 Premium)',
-        'OF' => 'ค่าธรรมเนียมพื้นที่ห่างไกล (Remote Area Delivery)',
-        'FD' => 'ค่าธรรมเนียมลดคาร์บอน (GoGreen Plus)',
+        'BASE' => 'Base Freight',
+        'SF' => 'Direct Signature',
+        'FF' => 'Fuel Surcharge',
+        'YK' => '12:00 Premium',
+        'OF' => 'Remote Area Delivery',
+        'FD' => 'GoGreen Plus',
     ];
 
     private function describeDhlCharge(?array $item, string $code): string
     {
         if (isset(self::DHL_CHARGE_LABELS[$code])) return self::DHL_CHARGE_LABELS[$code];
 
-        return ! empty($item['name']) ? "{$item['name']} (code {$code})" : "ค่าธรรมเนียมอื่นๆ (code {$code})";
+        return ! empty($item['name']) ? "{$item['name']} (code {$code})" : "Other Charge (code {$code})";
     }
 
     /**

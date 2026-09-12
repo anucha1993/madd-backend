@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\AgentAccount;
+use App\Models\BranchCarrierAccount;
 use App\Services\DhlRateService;
 use App\Services\UpsRateService;
 use Illuminate\Http\Request;
@@ -69,6 +70,20 @@ class ShippingController extends Controller
         ];
 
         $accountsQuery = AgentAccount::with('agent')->where('status', true);
+
+        // Branches without "access all" restrict quoting to their assigned accounts
+        // (branches with no assignments configured yet fall back to every active account).
+        $user = $request->user();
+        if ($user && ! $user->can_access_all_branches) {
+            $branchIds = $user->branches()->pluck('branches.id');
+            $allowedAccountIds = BranchCarrierAccount::whereIn('branch_id', $branchIds)
+                ->pluck('agent_account_id');
+
+            if ($allowedAccountIds->isNotEmpty()) {
+                $accountsQuery->whereIn('id', $allowedAccountIds);
+            }
+        }
+
         if (! empty($data['agent_account_ids'])) {
             $accountsQuery->whereIn('id', $data['agent_account_ids']);
         }

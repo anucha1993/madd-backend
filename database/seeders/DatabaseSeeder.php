@@ -33,5 +33,6 @@ class DatabaseSeeder extends Seeder
         $this->call(MarkupRuleSeeder::class);
         $this->call(AddonCategorySeeder::class);
         $this->call(AddonItemSeeder::class);
+        $this->call(ManifestOptionSeeder::class);
     }
 }
