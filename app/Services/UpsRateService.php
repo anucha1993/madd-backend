@@ -96,8 +96,11 @@ class UpsRateService
                     'Service' => ['Code' => (string) ($shipment['serviceCode'] ?? '65')],
                     // UPS Letter/Document (01) has no Dimensions; Customer Supplied Package (02) requires them.
                     // Each package carries its own isDocument flag — a single shipment can mix documents and boxes.
-                    'Package' => array_map(function (array $pkg) {
+                    // Declared Value is a PACKAGE-level field (PackageServiceOptions) — each package declares
+                    // its own value, since a shipment's boxes can genuinely contain very different values.
+                    'Package' => array_map(function (array $pkg) use ($shipment) {
                         $pkgIsDocument = (bool) ($pkg['isDocument'] ?? false);
+                        $pkgDeclaredValue = (float) ($pkg['declaredValue'] ?? 0);
 
                         return array_merge([
                             'PackagingType' => ['Code' => $pkgIsDocument ? '01' : '02'],
@@ -113,7 +116,14 @@ class UpsRateService
                                 'UnitOfMeasurement' => ['Code' => $pkg['weightUnit'] ?? 'KGS'],
                                 'Weight' => (string) ($pkg['weight'] ?? ''),
                             ],
-                        ]);
+                        ], $pkgDeclaredValue > 0 ? [
+                            'PackageServiceOptions' => [
+                                'DeclaredValue' => [
+                                    'CurrencyCode' => $shipment['declaredValueCurrency'] ?? 'THB',
+                                    'MonetaryValue' => number_format($pkgDeclaredValue, 2, '.', ''),
+                                ],
+                            ],
+                        ] : []);
                     }, $shipment['packages']),
                 ],
             ],
@@ -158,7 +168,8 @@ class UpsRateService
         // UPS requires a declared value for international non-document shipments — a
         // placeholder is fine here since this call only estimates transit time, not price.
         if ($isInternational && $hasNonDocument) {
-            $payload['shipmentContentsValue'] = (string) ($shipment['declaredValue'] ?? 1);
+            $totalDeclaredValue = collect($shipment['packages'])->sum(fn ($pkg) => (float) ($pkg['declaredValue'] ?? 0));
+            $payload['shipmentContentsValue'] = (string) ($totalDeclaredValue > 0 ? $totalDeclaredValue : 1);
             $payload['shipmentContentsCurrencyCode'] = $shipment['declaredValueCurrency'] ?? 'USD';
         }
 
@@ -219,10 +230,12 @@ class UpsRateService
         '375' => 'Fuel Surcharge',
         '270' => 'Additional Handling',
         '440' => 'Delivery Area Surcharge',
+        '400' => 'Declared Value (Insurance)', // SubType "EVS" = Excess Value Surcharge
     ];
 
     private function describeCharge(?array $item): string
     {
+        if (! empty($item['Code']) && isset(self::CHARGE_CODE_LABELS[$item['Code']])) return self::CHARGE_CODE_LABELS[$item['Code']];
         if (! empty($item['SubType'])) return str_replace('_', ' ', $item['SubType']);
         if (! empty($item['Description'])) return $item['Description'];
         if (! empty($item['Code']) && isset(self::CHARGE_CODE_LABELS[$item['Code']])) return self::CHARGE_CODE_LABELS[$item['Code']];
@@ -230,7 +243,7 @@ class UpsRateService
         return ! empty($item['Code']) ? "Other Charge (code {$item['Code']})" : 'Other Charge';
     }
 
-    private function buildBreakdown(?array $baseCharge, ?array $itemizedCharges, string $currency): array
+    private function buildBreakdown(?array $baseCharge, ?array $itemizedCharges, string $currency, ?array $serviceOptionsCharge = null): array
     {
         $lines = [];
         if (isset($baseCharge['MonetaryValue'])) {
@@ -247,6 +260,17 @@ class UpsRateService
                 'description' => $this->describeCharge($item),
                 'amount' => (float) ($item['MonetaryValue'] ?? 0),
                 'currency' => $item['CurrencyCode'] ?? $currency,
+            ];
+        }
+        // ServiceOptionsCharges (e.g. Declared Value insurance) is usually already broken out
+        // in ItemizedCharges as Code 400 — only add this as a fallback if it isn't there yet.
+        $hasDeclaredValueLine = collect($itemizedCharges ?? [])->contains(fn ($item) => ($item['Code'] ?? null) === '400');
+        if (! $hasDeclaredValueLine && isset($serviceOptionsCharge['MonetaryValue']) && (float) $serviceOptionsCharge['MonetaryValue'] > 0) {
+            $lines[] = [
+                'code' => 'SERVICE_OPTIONS',
+                'description' => 'Declared Value (Insurance)',
+                'amount' => (float) $serviceOptionsCharge['MonetaryValue'],
+                'currency' => $serviceOptionsCharge['CurrencyCode'] ?? $currency,
             ];
         }
 
@@ -266,10 +290,11 @@ class UpsRateService
         $published = $rs['TotalCharges']['MonetaryValue'] ?? $rs['TransportationCharges']['MonetaryValue'] ?? null;
         $negotiated = $rs['NegotiatedRateCharges']['TotalCharge']['MonetaryValue'] ?? null;
 
-        $chargeBreakdown = $this->buildBreakdown($rs['BaseServiceCharge'] ?? null, $rs['ItemizedCharges'] ?? null, $currency);
+        $chargeBreakdown = $this->buildBreakdown($rs['BaseServiceCharge'] ?? null, $rs['ItemizedCharges'] ?? null, $currency, $rs['ServiceOptionsCharges'] ?? null);
         $negotiatedChargeBreakdown = isset($rs['NegotiatedRateCharges'])
-            ? $this->buildBreakdown($rs['NegotiatedRateCharges']['BaseServiceCharge'] ?? null, $rs['NegotiatedRateCharges']['ItemizedCharges'] ?? null, $currency)
+            ? $this->buildBreakdown($rs['NegotiatedRateCharges']['BaseServiceCharge'] ?? null, $rs['NegotiatedRateCharges']['ItemizedCharges'] ?? null, $currency, $rs['NegotiatedRateCharges']['ServiceOptionsCharges'] ?? $rs['ServiceOptionsCharges'] ?? null)
             : null;
+
 
         return [
             'serviceCode' => $rs['Service']['Code'] ?? null,

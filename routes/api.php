@@ -68,6 +68,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('supplies', SupplyController::class);
 
     Route::post('insurance-country-caps/import', [InsuranceCountryCapController::class, 'import']);
+    Route::get('insurance-country-caps/lookup', [InsuranceCountryCapController::class, 'lookup']);
     Route::apiResource('insurance-country-caps', InsuranceCountryCapController::class);
 
     Route::apiResource('charge-codes', ChargeCodeController::class)->only(['index', 'store', 'update', 'destroy']);

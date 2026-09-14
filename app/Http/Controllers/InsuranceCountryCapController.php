@@ -43,6 +43,21 @@ class InsuranceCountryCapController extends Controller
         return $insuranceCountryCap;
     }
 
+    /**
+     * Single exact-match lookup by country_code, used by Create Shipment to apply the
+     * destination country's coverage cap / sanction note when selling insurance.
+     */
+    public function lookup(Request $request)
+    {
+        $request->validate([
+            'country_code' => ['required', 'string', 'max:5'],
+        ]);
+
+        $cap = InsuranceCountryCap::whereRaw('LOWER(country_code) = ?', [strtolower($request->string('country_code'))])->first();
+
+        return response()->json($cap);
+    }
+
     public function update(Request $request, InsuranceCountryCap $insuranceCountryCap)
     {
         $data = $request->validate([

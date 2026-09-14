@@ -34,6 +34,9 @@ class DhlRateService
         // Customs declaration is needed if ANY package in the shipment is a non-document box —
         // a single shipment can mix documents and boxes, so this isn't a shipment-wide flag.
         $hasNonDocumentPackage = collect($shipment['packages'])->contains(fn ($pkg) => empty($pkg['isDocument']));
+        // Declared Value is set per package in the UI, but DHL's rate request only supports a
+        // single shipment-level monetaryAmount — sum the packages' own declared values.
+        $declaredValue = collect($shipment['packages'])->sum(fn ($pkg) => (float) ($pkg['declaredValue'] ?? 0));
 
         $expandedPackages = [];
         foreach ($shipment['packages'] as $pkg) {
@@ -58,7 +61,9 @@ class DhlRateService
                 'receiverDetails' => $this->buildAddressDetails($to),
             ],
             'accounts' => [['typeCode' => 'shipper', 'number' => $account['username_acc']]],
-            'valueAddedServices' => [['serviceCode' => 'SF']],
+            // 'II' (Insurance) must be explicitly requested alongside monetaryAmount below,
+            // otherwise DHL omits the insurance charge from detailedPriceBreakdown entirely.
+            'valueAddedServices' => $declaredValue > 0 ? [['serviceCode' => 'SF'], ['serviceCode' => 'II']] : [['serviceCode' => 'SF']],
             'payerCountryCode' => $from['country'],
             'plannedShippingDateAndTime' => now()->toIso8601String(),
             'unitOfMeasurement' => 'metric',
@@ -70,8 +75,18 @@ class DhlRateService
             'nextBusinessDay' => true,
             'productTypeCode' => 'all',
             'packages' => $expandedPackages,
+            // Requesting this makes DHL quote back the actual insurance charge (as an "II"
+            // line in detailedPriceBreakdown) instead of us estimating it.
+            ...($declaredValue > 0 ? [
+                'monetaryAmount' => [[
+                    'typeCode' => 'declaredValue',
+                    'value' => $declaredValue,
+                    'currency' => $shipment['declaredValueCurrency'] ?? 'THB',
+                ]],
+            ] : []),
         ];
     }
+
 
     private function getRate(array $account, array $shipment): array
     {
@@ -110,6 +125,7 @@ class DhlRateService
         'YK' => '12:00 Premium',
         'OF' => 'Remote Area Delivery',
         'FD' => 'GoGreen Plus',
+        'II' => 'Declared Value (Insurance)',
     ];
 
     private function describeDhlCharge(?array $item, string $code): string

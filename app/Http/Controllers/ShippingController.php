@@ -39,6 +39,11 @@ class ShippingController extends Controller
             'packages.*.width' => ['required_if:packages.*.is_document,false', 'nullable', 'numeric', 'min:1'],
             'packages.*.height' => ['required_if:packages.*.is_document,false', 'nullable', 'numeric', 'min:1'],
             'packages.*.quantity' => ['nullable', 'integer', 'min:1'],
+            // Declared Value is set PER PACKAGE (UPS insurance charge is a package-level field,
+            // per PackageServiceOptions.DeclaredValue) — sending it lets UPS/DHL quote back the
+            // actual insurance charge in chargeBreakdown, instead of it being estimated separately.
+            'packages.*.declared_value' => ['nullable', 'numeric', 'min:0'],
+            'declared_value_currency' => ['nullable', 'string', 'size:3'],
 
             'agent_account_ids' => ['nullable', 'array'],
             'agent_account_ids.*' => ['integer'],
@@ -66,7 +71,9 @@ class ShippingController extends Controller
                 'height' => $pkg['height'] ?? null,
                 'quantity' => $pkg['quantity'] ?? 1,
                 'isDocument' => (bool) ($pkg['is_document'] ?? false),
+                'declaredValue' => $pkg['declared_value'] ?? null,
             ], $data['packages']),
+            'declaredValueCurrency' => $data['declared_value_currency'] ?? 'THB',
         ];
 
         $accountsQuery = AgentAccount::with('agent')->where('status', true);
