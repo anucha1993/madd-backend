@@ -9,6 +9,8 @@ use App\Http\Controllers\AiController;
 use App\Http\Controllers\BranchCarrierAccountController;
 use App\Http\Controllers\BranchController;
 use App\Http\Controllers\ChargeCodeController;
+use App\Http\Controllers\CustomerAddressController;
+use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\CountryController;
 use App\Http\Controllers\DhlTrackingController;
 use App\Http\Controllers\InsuranceCountryCapController;
@@ -40,6 +42,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('branches/{branch}/carrier-accounts', [BranchCarrierAccountController::class, 'index']);
     Route::put('branches/{branch}/carrier-accounts', [BranchCarrierAccountController::class, 'sync']);
     Route::apiResource('users', UserController::class);
+
+    Route::apiResource('customers', CustomerController::class);
+    Route::get('customer-addresses', [CustomerAddressController::class, 'search']);
+    Route::get('customers/{customer}/addresses', [CustomerAddressController::class, 'index']);
+    Route::post('customers/{customer}/addresses', [CustomerAddressController::class, 'store']);
+    Route::put('customer-addresses/{address}', [CustomerAddressController::class, 'update']);
+    Route::delete('customer-addresses/{address}', [CustomerAddressController::class, 'destroy']);
 
     Route::get('thai-subdistricts/by-zipcode/{zipCode}', [ThaiSubdistrictController::class, 'byZipCode']);
     Route::get('thai-subdistricts/regions', [ThaiSubdistrictController::class, 'regions']);

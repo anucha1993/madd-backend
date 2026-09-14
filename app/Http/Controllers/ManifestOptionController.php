@@ -11,6 +11,7 @@ class ManifestOptionController extends Controller
     /** Fixed set of dropdown groups used on the Manifest form (per "คำที่ใช้ในฟอร์ม manifest" reference sheet). */
     public const GROUPS = [
         'customer_type', 'payment_option', 'zone', 'destination', 'charge_code', 'insurance_code', 'form_charge',
+        'bill_transportation_to', 'bill_duty_tax_to',
     ];
 
     public function index(Request $request)

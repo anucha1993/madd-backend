@@ -62,6 +62,14 @@ class ManifestOptionSeeder extends Seeder
             ['group' => 'form_charge', 'provider' => 'UPS', 'name' => 'FORM', 'code' => 'FORM', 'amount' => 535],
             ['group' => 'form_charge', 'provider' => 'UPS', 'name' => 'OT', 'code' => 'OT', 'amount' => 214],
             ['group' => 'form_charge', 'provider' => 'DHL', 'name' => 'FORM', 'code' => 'FORM', 'amount' => 343],
+
+            // Bill Transportation to / Bill Duty and Tax to — who pays the freight vs. duty/tax (Payment Info step).
+            ['group' => 'bill_transportation_to', 'provider' => null, 'name' => 'Shipper', 'code' => 'SHIPPER'],
+            ['group' => 'bill_transportation_to', 'provider' => null, 'name' => 'Receiver', 'code' => 'RECEIVER'],
+            ['group' => 'bill_transportation_to', 'provider' => null, 'name' => 'Third Party', 'code' => 'THIRD_PARTY'],
+            ['group' => 'bill_duty_tax_to', 'provider' => null, 'name' => 'Shipper', 'code' => 'SHIPPER'],
+            ['group' => 'bill_duty_tax_to', 'provider' => null, 'name' => 'Receiver', 'code' => 'RECEIVER'],
+            ['group' => 'bill_duty_tax_to', 'provider' => null, 'name' => 'Third Party', 'code' => 'THIRD_PARTY'],
         ];
 
         foreach (range(1, 10) as $zone) {

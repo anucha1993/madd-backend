@@ -28,7 +28,7 @@ class AuthController extends Controller
         $token = $user->createToken('madd-frontend')->plainTextToken;
 
         return response()->json([
-            'user' => $user,
+            'user' => $user->load('branches'),
             'token' => $token,
         ]);
     }

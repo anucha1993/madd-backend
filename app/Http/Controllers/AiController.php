@@ -73,6 +73,8 @@ class AiController extends Controller
               "company": string|null,
               "address1": string|null,
               "address2": string|null,
+              "subdistrict": string|null,
+              "district": string|null,
               "city": string|null,
               "province": string|null,
               "postal_code": string|null,
@@ -80,6 +82,12 @@ class AiController extends Controller
               "phone": string|null,
               "email": string|null
             }
+            For Thai addresses, "subdistrict" is the ตำบล/แขวง (e.g. "Phlapphla") and "district" is
+            the อำเภอ/เขต (e.g. "Wang Thonglang") — extract these as their OWN separate fields, do
+            NOT fold them into "address2" or "city". "address2" should only contain building/floor/
+            room/moo/soi-level details that are not already captured by address1, subdistrict, or
+            district. "city" is the province/state-level area (e.g. "Bangkok"); for non-Thai
+            addresses without a subdistrict/district concept, leave those two keys null.
             country_iso2 must be a 2-letter ISO 3166-1 alpha-2 code (e.g. "TH", "SG", "US") if a
             country can be determined, otherwise null. Do not invent information not implied by
             the input text.
