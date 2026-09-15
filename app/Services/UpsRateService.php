@@ -342,11 +342,19 @@ class UpsRateService
             }
         }
 
+        // Each account may restrict itself to a subset of the requested service codes (see
+        // BranchCarrierAccount.allowed_service_codes) — empty/missing means no restriction.
+        $accountServiceCodes = [];
+        foreach ($accounts as $i => $account) {
+            $allowed = $account['allowed_service_codes'] ?? null;
+            $accountServiceCodes[$i] = $allowed ? array_values(array_intersect($serviceCodes, $allowed)) : $serviceCodes;
+        }
+
         $specs = [];
         foreach ($accounts as $i => $account) {
             if (! isset($tokens[$i])) continue;
             $shipperNumber = strtoupper($account['username_acc'] ?? '');
-            foreach ($serviceCodes as $serviceCode) {
+            foreach ($accountServiceCodes[$i] as $serviceCode) {
                 foreach (['', 'Y'] as $indicator) {
                     $shipmentForCall = array_merge($shipment, ['shipperNumber' => $shipperNumber, 'serviceCode' => $serviceCode]);
                     $specs["{$i}:{$serviceCode}:{$indicator}"] = [
@@ -365,7 +373,7 @@ class UpsRateService
         $results = [];
         foreach ($accounts as $i => $account) {
             if (! isset($tokens[$i])) {
-                foreach ($serviceCodes as $serviceCode) {
+                foreach ($accountServiceCodes[$i] as $serviceCode) {
                     $results[] = [
                         'carrier' => 'UPS',
                         'accountId' => $account['id'],
@@ -378,7 +386,7 @@ class UpsRateService
                 continue;
             }
 
-            foreach ($serviceCodes as $serviceCode) {
+            foreach ($accountServiceCodes[$i] as $serviceCode) {
                 try {
                     $pubResp = $rateResponses["{$i}:{$serviceCode}:"];
                     $negResp = $rateResponses["{$i}:{$serviceCode}:Y"];

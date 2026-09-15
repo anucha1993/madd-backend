@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['addon_category_id', 'name', 'carriers', 'customer_types', 'price_type', 'price', 'trigger_type', 'status', 'note'])]
+#[Fillable(['addon_category_id', 'name', 'carriers', 'customer_types', 'product_types', 'price_type', 'price', 'trigger_type', 'status', 'note'])]
 class AddonItem extends Model
 {
     protected function casts(): array
@@ -14,6 +14,7 @@ class AddonItem extends Model
         return [
             'carriers' => 'array',
             'customer_types' => 'array',
+            'product_types' => 'array',
             'price' => 'decimal:2',
             'status' => 'boolean',
         ];

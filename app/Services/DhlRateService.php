@@ -61,9 +61,12 @@ class DhlRateService
                 'receiverDetails' => $this->buildAddressDetails($to),
             ],
             'accounts' => [['typeCode' => 'shipper', 'number' => $account['username_acc']]],
-            // 'II' (Insurance) must be explicitly requested alongside monetaryAmount below,
-            // otherwise DHL omits the insurance charge from detailedPriceBreakdown entirely.
-            'valueAddedServices' => $declaredValue > 0 ? [['serviceCode' => 'SF'], ['serviceCode' => 'II']] : [['serviceCode' => 'SF']],
+            // 'II' (Insurance) must carry its own value/currency (per DHL's rates schema
+            // supermodelIoLogisticsExpressValueAddedServicesRates — serviceCode alone is not
+            // enough) or DHL silently omits the insurance charge from detailedPriceBreakdown.
+            'valueAddedServices' => $declaredValue > 0
+                ? [['serviceCode' => 'SF'], ['serviceCode' => 'II', 'value' => $declaredValue, 'currency' => $shipment['declaredValueCurrency'] ?? 'THB']]
+                : [['serviceCode' => 'SF']],
             'payerCountryCode' => $from['country'],
             'plannedShippingDateAndTime' => now()->toIso8601String(),
             'unitOfMeasurement' => 'metric',
@@ -255,6 +258,14 @@ class DhlRateService
                 }
 
                 $quotes = $this->extractAllQuotes($response->json());
+                // DHL always returns every product it has enabled ('productTypeCode' => 'all') —
+                // filter down to this account's allowed product codes here, client-side, since
+                // DHL has no per-request "only quote these products" filter (see
+                // BranchCarrierAccount.allowed_service_codes; empty/missing = no restriction).
+                $allowedServiceCodes = $account['allowed_service_codes'] ?? null;
+                if ($allowedServiceCodes) {
+                    $quotes = array_values(array_filter($quotes, fn ($q) => in_array($q['serviceCode'], $allowedServiceCodes, true)));
+                }
                 foreach ($quotes as $q) {
                     $results[] = [
                         'carrier' => 'DHL',
@@ -287,5 +298,49 @@ class DhlRateService
         }
 
         return $results;
+    }
+
+    /**
+     * Lists every DHL Express product (code + real name) this account has enabled, so admins
+     * configuring BranchCarrierAccount.allowed_service_codes know what a product code actually
+     * means instead of guessing — DHL has no fixed product list like UPS does, and it varies
+     * per account/route, so this reuses a lightweight reference /rates call (Thailand -> Singapore,
+     * a small box) with 'productTypeCode' => 'all' and just returns the product codes/names,
+     * ignoring price (unlike quoteAccounts, which filters out $0 "not really available" products).
+     */
+    public function listAvailableProducts(array $account): array
+    {
+        $referenceShipment = [
+            'from' => ['country' => 'TH', 'city' => 'Bangkok', 'postcode' => '10110', 'address' => '1 Reference Rd'],
+            'to' => ['country' => 'SG', 'city' => 'Singapore', 'postcode' => '238874', 'address' => '1 Reference Rd'],
+            'packages' => [['weight' => 1, 'length' => 10, 'width' => 10, 'height' => 10, 'quantity' => 1, 'isDocument' => false]],
+            'declaredValueCurrency' => 'THB',
+        ];
+
+        $messageRef = $this->generateMessageReference();
+        $response = Http::withBasicAuth($account['basic_auth_username'], $account['basic_auth_password'])
+            ->withHeaders([
+                'x-version' => '3.2.0',
+                'Message-Reference' => $messageRef,
+                'Message-Reference-Date' => now()->toRfc7231String(),
+            ])
+            ->timeout(20)
+            ->post($this->dhlUrl($account['mode'] ?? null) . '/rates', $this->buildRateRequest($account, $referenceShipment));
+
+        if (! $response->successful()) {
+            throw new \RuntimeException('DHL product list request failed: ' . ($response->json('detail') ?? $response->json('title') ?? $response->status()));
+        }
+
+        $products = [];
+        foreach ($response->json('products') ?? [] as $product) {
+            $code = $product['productCode'] ?? null;
+            if ($code === null || isset($products[$code])) continue;
+            $products[$code] = [
+                'code' => $code,
+                'name' => $product['productName'] ?? $product['localProductCode'] ?? $code,
+            ];
+        }
+
+        return array_values($products);
     }
 }

@@ -28,6 +28,9 @@ class BranchCarrierAccountController extends Controller
             'accounts.*.label' => ['nullable', 'string', 'max:255'],
             'accounts.*.tracking_prefix' => ['nullable', 'string', 'max:50'],
             'accounts.*.is_default' => ['boolean'],
+            // Which service/product codes this branch may use with this account — null/empty = all allowed.
+            'accounts.*.allowed_service_codes' => ['nullable', 'array'],
+            'accounts.*.allowed_service_codes.*' => ['string', 'max:20'],
         ]);
 
         DB::transaction(function () use ($branch, $data) {
@@ -39,6 +42,7 @@ class BranchCarrierAccountController extends Controller
                     'label' => $row['label'] ?? null,
                     'tracking_prefix' => $row['tracking_prefix'] ?? null,
                     'is_default' => $row['is_default'] ?? false,
+                    'allowed_service_codes' => ! empty($row['allowed_service_codes']) ? $row['allowed_service_codes'] : null,
                 ]);
             }
         });

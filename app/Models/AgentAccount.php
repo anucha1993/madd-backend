@@ -39,6 +39,11 @@ class AgentAccount extends Model
         return $this->hasMany(BranchCarrierAccount::class);
     }
 
+    public function chargeFixedOverrides(): HasMany
+    {
+        return $this->hasMany(ChargeFixedOverride::class);
+    }
+
     /**
      * True when a secret was previously saved, without ever exposing its value.
      */

@@ -3,11 +3,16 @@
 namespace App\Http\Controllers;
 
 use App\Models\AgentAccount;
+use App\Services\DhlRateService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 
 class AgentAccountController extends Controller
 {
+    public function __construct(private DhlRateService $dhlRateService)
+    {
+    }
+
     public function index(Request $request)
     {
         $query = AgentAccount::with('agent')->orderBy('agent_id')->orderBy('username_acc');
@@ -85,6 +90,33 @@ class AgentAccountController extends Controller
             'DHL' => $this->testDhl($agentAccount),
             default => response()->json(['success' => false, 'message' => "ไม่รองรับการทดสอบ Agent: {$agentCode}"], 422),
         };
+    }
+
+    /**
+     * Lists this DHL account's real available product codes/names (via a lightweight reference
+     * rate call) so admins setting BranchCarrierAccount.allowed_service_codes see actual product
+     * names instead of guessing raw codes — DHL has no fixed product list like UPS.
+     */
+    public function dhlProducts(AgentAccount $agentAccount)
+    {
+        if ($agentAccount->agent->agent_code !== 'DHL') {
+            return response()->json(['message' => 'บัญชีนี้ไม่ใช่ DHL'], 422);
+        }
+        if (! $agentAccount->basic_auth_username || ! $agentAccount->basic_auth_password) {
+            return response()->json(['message' => 'บัญชีนี้ไม่มี Basic Auth Username / Password'], 422);
+        }
+
+        try {
+            $products = $this->dhlRateService->listAvailableProducts([
+                'basic_auth_username' => $agentAccount->basic_auth_username,
+                'basic_auth_password' => $agentAccount->basic_auth_password,
+                'mode' => $agentAccount->mode,
+            ]);
+
+            return response()->json($products);
+        } catch (\Throwable $e) {
+            return response()->json(['message' => 'ดึงรายการ Product ของ DHL ไม่สำเร็จ: ' . $e->getMessage()], 422);
+        }
     }
 
     private function testUps(AgentAccount $account)

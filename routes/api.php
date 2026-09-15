@@ -15,6 +15,7 @@ use App\Http\Controllers\CountryController;
 use App\Http\Controllers\DhlTrackingController;
 use App\Http\Controllers\InsuranceCountryCapController;
 use App\Http\Controllers\ManifestOptionController;
+use App\Http\Controllers\ChargeFixedOverrideController;
 use App\Http\Controllers\MarkupRuleController;
 use App\Http\Controllers\ProductWeightBandController;
 use App\Http\Controllers\ShippingController;
@@ -37,6 +38,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('agents', AgentController::class);
     Route::apiResource('agent-accounts', AgentAccountController::class);
     Route::post('agent-accounts/{agentAccount}/test', [AgentAccountController::class, 'test']);
+    Route::get('agent-accounts/{agentAccount}/dhl-products', [AgentAccountController::class, 'dhlProducts']);
 
     Route::apiResource('branches', BranchController::class);
     Route::get('branches/{branch}/carrier-accounts', [BranchCarrierAccountController::class, 'index']);
@@ -83,6 +85,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('charge-codes', ChargeCodeController::class)->only(['index', 'store', 'update', 'destroy']);
 
     Route::apiResource('markup-rules', MarkupRuleController::class)->only(['index', 'store', 'update', 'destroy']);
+
+    Route::apiResource('charge-fixed-overrides', ChargeFixedOverrideController::class)->only(['index', 'store', 'update', 'destroy']);
 
     Route::apiResource('addon-categories', AddonCategoryController::class)->only(['index', 'store', 'update', 'destroy']);
     Route::apiResource('addon-items', AddonItemController::class)->only(['index', 'store', 'update', 'destroy']);

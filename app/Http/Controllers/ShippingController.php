@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\AgentAccount;
 use App\Models\BranchCarrierAccount;
+use App\Services\ChargeMarkupService;
 use App\Services\DhlRateService;
 use App\Services\UpsRateService;
 use Illuminate\Http\Request;
@@ -13,6 +14,7 @@ class ShippingController extends Controller
     public function __construct(
         private UpsRateService $upsRateService,
         private DhlRateService $dhlRateService,
+        private ChargeMarkupService $chargeMarkupService,
     ) {
     }
 
@@ -47,6 +49,9 @@ class ShippingController extends Controller
 
             'agent_account_ids' => ['nullable', 'array'],
             'agent_account_ids.*' => ['integer'],
+            // Lets staff check only UPS, only DHL, or both (default = both) before running the rate check.
+            'carriers' => ['nullable', 'array'],
+            'carriers.*' => ['string', 'in:UPS,DHL'],
             'service_codes' => ['nullable', 'array'],
             'service_codes.*' => ['string'],
         ]);
@@ -80,14 +85,26 @@ class ShippingController extends Controller
 
         // Branches without "access all" restrict quoting to their assigned accounts
         // (branches with no assignments configured yet fall back to every active account).
+        // Each assignment may also restrict which service/product codes are allowed for that
+        // account (BranchCarrierAccount.allowed_service_codes) — collected here so it can be
+        // applied per-account below. If the same account is assigned to multiple of the user's
+        // branches, any branch with no restriction (null) wins (i.e. stays unrestricted).
         $user = $request->user();
+        $allowedServiceCodesByAccountId = [];
         if ($user && ! $user->can_access_all_branches) {
             $branchIds = $user->branches()->pluck('branches.id');
-            $allowedAccountIds = BranchCarrierAccount::whereIn('branch_id', $branchIds)
-                ->pluck('agent_account_id');
+            $branchCarrierAccounts = BranchCarrierAccount::whereIn('branch_id', $branchIds)->get();
+            $allowedAccountIds = $branchCarrierAccounts->pluck('agent_account_id')->unique();
 
             if ($allowedAccountIds->isNotEmpty()) {
                 $accountsQuery->whereIn('id', $allowedAccountIds);
+            }
+
+            foreach ($branchCarrierAccounts->groupBy('agent_account_id') as $accountId => $rows) {
+                $unrestricted = $rows->contains(fn ($r) => empty($r->allowed_service_codes));
+                $allowedServiceCodesByAccountId[$accountId] = $unrestricted
+                    ? null
+                    : $rows->flatMap(fn ($r) => $r->allowed_service_codes)->unique()->values()->all();
             }
         }
 
@@ -96,8 +113,13 @@ class ShippingController extends Controller
         }
         $accounts = $accountsQuery->get();
 
-        $upsAccounts = $accounts->filter(fn ($a) => $a->agent?->agent_code === 'UPS' && $a->client_id && $a->client_secret);
-        $dhlAccounts = $accounts->filter(fn ($a) => $a->agent?->agent_code === 'DHL' && $a->basic_auth_username && $a->basic_auth_password);
+        $carriers = ! empty($data['carriers']) ? $data['carriers'] : ['UPS', 'DHL'];
+        $upsAccounts = in_array('UPS', $carriers, true)
+            ? $accounts->filter(fn ($a) => $a->agent?->agent_code === 'UPS' && $a->client_id && $a->client_secret)
+            : collect();
+        $dhlAccounts = in_array('DHL', $carriers, true)
+            ? $accounts->filter(fn ($a) => $a->agent?->agent_code === 'DHL' && $a->basic_auth_username && $a->basic_auth_password)
+            : collect();
 
         if ($upsAccounts->isEmpty() && $dhlAccounts->isEmpty()) {
             return response()->json(['error' => 'ไม่พบบัญชี UPS หรือ DHL ที่เปิดใช้งานอยู่'], 400);
@@ -114,6 +136,7 @@ class ShippingController extends Controller
                 'client_id' => $account->client_id,
                 'client_secret' => $account->client_secret,
                 'mode' => $account->mode,
+                'allowed_service_codes' => $allowedServiceCodesByAccountId[$account->id] ?? null,
             ])->values()->all(),
             $shipment,
             $serviceCodes,
@@ -126,13 +149,16 @@ class ShippingController extends Controller
                 'basic_auth_username' => $account->basic_auth_username,
                 'basic_auth_password' => $account->basic_auth_password,
                 'mode' => $account->mode,
+                'allowed_service_codes' => $allowedServiceCodesByAccountId[$account->id] ?? null,
             ])->values()->all(),
             $shipment,
         );
 
+        $results = $this->chargeMarkupService->applyToResults([...$upsResults, ...$dhlResults]);
+
         return response()->json([
             'accountCount' => $upsAccounts->count() + $dhlAccounts->count(),
-            'results' => [...$upsResults, ...$dhlResults],
+            'results' => $results,
         ]);
     }
 }

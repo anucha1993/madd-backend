@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['branch_id', 'agent_account_id', 'label', 'tracking_prefix', 'is_default'])]
+#[Fillable(['branch_id', 'agent_account_id', 'label', 'tracking_prefix', 'is_default', 'allowed_service_codes'])]
 class BranchCarrierAccount extends Model
 {
     use HasFactory;
@@ -16,6 +16,7 @@ class BranchCarrierAccount extends Model
     {
         return [
             'is_default' => 'boolean',
+            'allowed_service_codes' => 'array',
         ];
     }
 
