@@ -46,6 +46,8 @@ return [
         'tracking_url_test' => env('UPS_TRACKING_URL_TEST', 'https://wwwcie.ups.com/api/track/v1/details'),
         'tracking_reference_url' => env('UPS_TRACKING_REFERENCE_URL', 'https://onlinetools.ups.com/api/track/v1/reference/details'),
         'tracking_reference_url_test' => env('UPS_TRACKING_REFERENCE_URL_TEST', 'https://wwwcie.ups.com/api/track/v1/reference/details'),
+        'ship_url' => env('UPS_SHIP_URL', 'https://onlinetools.ups.com/api/shipments/v2409/ship'),
+        'ship_url_test' => env('UPS_SHIP_URL_TEST', 'https://wwwcie.ups.com/api/shipments/v2409/ship'),
         'transaction_src' => env('UPS_TRANSACTION_SRC', 'testing'),
     ],
 
@@ -63,6 +65,14 @@ return [
         'api_key' => env('OPENAI_API_KEY'),
         'model' => env('OPENAI_MODEL', 'gpt-4o-mini'),
         'base_url' => env('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
+    ],
+
+    // Cloudflare R2 (S3-compatible) credentials for storing shipment label files — see R2Service.
+    'r2' => [
+        'access_key_id' => env('R2_ACCESS_KEY_ID'),
+        'secret_access_key' => env('R2_SECRET_ACCESS_KEY'),
+        'bucket' => env('R2_BUCKET'),
+        'endpoint' => env('R2_ENDPOINT'),
     ],
 
 ];

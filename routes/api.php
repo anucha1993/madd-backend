@@ -13,12 +13,15 @@ use App\Http\Controllers\CustomerAddressController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\CountryController;
 use App\Http\Controllers\DhlTrackingController;
+use App\Http\Controllers\R2Controller;
 use App\Http\Controllers\InsuranceCountryCapController;
 use App\Http\Controllers\ManifestOptionController;
 use App\Http\Controllers\ChargeFixedOverrideController;
 use App\Http\Controllers\MarkupRuleController;
 use App\Http\Controllers\ProductWeightBandController;
 use App\Http\Controllers\ShippingController;
+use App\Http\Controllers\ShipmentController;
+use App\Http\Controllers\ShipmentDraftController;
 use App\Http\Controllers\SupplyController;
 use App\Http\Controllers\ThaiSubdistrictController;
 use App\Http\Controllers\UpsTrackingController;
@@ -57,6 +60,17 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('thai-subdistricts', ThaiSubdistrictController::class);
 
     Route::post('shipping/check-rate', [ShippingController::class, 'checkRate']);
+
+    Route::post('shipments', [ShipmentController::class, 'store']);
+    Route::get('shipments', [ShipmentController::class, 'index']);
+    Route::get('shipments/{shipment}/label', [ShipmentController::class, 'label']);
+    Route::put('shipments/{shipment}/refs', [ShipmentController::class, 'updateRefs']);
+    Route::get('shipments/{shipment}', [ShipmentController::class, 'show']);
+
+    Route::apiResource('shipment-drafts', ShipmentDraftController::class);
+
+    Route::get('r2/settings', [R2Controller::class, 'settings']);
+    Route::put('r2/settings', [R2Controller::class, 'updateSettings']);
 
     Route::post('ups-tracking/track', [UpsTrackingController::class, 'track']);
     Route::post('dhl-tracking/track', [DhlTrackingController::class, 'track']);

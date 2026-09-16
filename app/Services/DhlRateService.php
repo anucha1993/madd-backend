@@ -34,25 +34,49 @@ class DhlRateService
         // Customs declaration is needed if ANY package in the shipment is a non-document box —
         // a single shipment can mix documents and boxes, so this isn't a shipment-wide flag.
         $hasNonDocumentPackage = collect($shipment['packages'])->contains(fn ($pkg) => empty($pkg['isDocument']));
-        // Declared Value is set per package in the UI, but DHL's rate request only supports a
-        // single shipment-level monetaryAmount — sum the packages' own declared values.
-        $declaredValue = collect($shipment['packages'])->sum(fn ($pkg) => (float) ($pkg['declaredValue'] ?? 0));
+        // DHL prices insurance completely differently for boxes vs documents: boxes use 'II'
+        // (Insurance), a real percentage-of-value charge that needs its own value/currency.
+        // Documents instead use 'IB' (Extended Liability) — a flat marketed service (confirmed
+        // via a live DHL response's getAdditionalInformation/allValueAddedServices list; DHL's
+        // own MyDHL portal shows this as a fixed lump-sum compensation, e.g. 17,000 THB, not
+        // proportional to any declared value) so it carries NO value/currency at all.
+        $declaredValue = collect($shipment['packages'])
+            ->filter(fn ($pkg) => empty($pkg['isDocument']))
+            ->sum(fn ($pkg) => (float) ($pkg['declaredValue'] ?? 0));
+        $hasInsuredDocument = collect($shipment['packages'])
+            ->contains(fn ($pkg) => ! empty($pkg['isDocument']) && (float) ($pkg['declaredValue'] ?? 0) > 0);
 
         $expandedPackages = [];
         foreach ($shipment['packages'] as $pkg) {
             $quantity = (int) ($pkg['quantity'] ?? 1);
-            $perUnitWeight = round(((float) ($pkg['weight'] ?? 0)) / max($quantity, 1), 2);
-            for ($i = 0; $i < $quantity; $i++) {
+            // $pkg['weight'] is the weight of ONE box (see Packages UI) — expand into `quantity`
+            // separate DHL packages each at that same per-box weight, never divide it.
+            // Document packages never collect length/width/height in the UI (see class doc
+            // comment above — DHL has no "Letter/Document" concept and needs SOME real
+            // dimensions or it returns no valid rates at all) — fall back to a standard
+            // document envelope size (35x25x2 cm) instead of sending 0x0x0.
+            for ($i = 0; $i < max($quantity, 1); $i++) {
                 $expandedPackages[] = [
                     'typeCode' => '3BX',
-                    'weight' => $perUnitWeight,
+                    'weight' => (float) ($pkg['weight'] ?? 0),
                     'dimensions' => [
-                        'length' => (float) $pkg['length'],
-                        'width' => (float) $pkg['width'],
-                        'height' => (float) $pkg['height'],
+                        'length' => (float) ($pkg['length'] ?? 35),
+                        'width' => (float) ($pkg['width'] ?? 25),
+                        'height' => (float) ($pkg['height'] ?? 2),
                     ],
                 ];
             }
+        }
+
+        $valueAddedServices = [['serviceCode' => 'SF']];
+        if ($declaredValue > 0) {
+            // 'II' (Insurance) must carry its own value/currency (per DHL's rates schema
+            // supermodelIoLogisticsExpressValueAddedServicesRates — serviceCode alone is not
+            // enough) or DHL silently omits the insurance charge from detailedPriceBreakdown.
+            $valueAddedServices[] = ['serviceCode' => 'II', 'value' => $declaredValue, 'currency' => $shipment['declaredValueCurrency'] ?? 'THB'];
+        }
+        if ($hasInsuredDocument) {
+            $valueAddedServices[] = ['serviceCode' => 'IB'];
         }
 
         return [
@@ -61,12 +85,7 @@ class DhlRateService
                 'receiverDetails' => $this->buildAddressDetails($to),
             ],
             'accounts' => [['typeCode' => 'shipper', 'number' => $account['username_acc']]],
-            // 'II' (Insurance) must carry its own value/currency (per DHL's rates schema
-            // supermodelIoLogisticsExpressValueAddedServicesRates — serviceCode alone is not
-            // enough) or DHL silently omits the insurance charge from detailedPriceBreakdown.
-            'valueAddedServices' => $declaredValue > 0
-                ? [['serviceCode' => 'SF'], ['serviceCode' => 'II', 'value' => $declaredValue, 'currency' => $shipment['declaredValueCurrency'] ?? 'THB']]
-                : [['serviceCode' => 'SF']],
+            'valueAddedServices' => $valueAddedServices,
             'payerCountryCode' => $from['country'],
             'plannedShippingDateAndTime' => now()->toIso8601String(),
             'unitOfMeasurement' => 'metric',
@@ -79,7 +98,8 @@ class DhlRateService
             'productTypeCode' => 'all',
             'packages' => $expandedPackages,
             // Requesting this makes DHL quote back the actual insurance charge (as an "II"
-            // line in detailedPriceBreakdown) instead of us estimating it.
+            // line in detailedPriceBreakdown) instead of us estimating it. Only applies to the
+            // non-document (box) declared value — documents use the flat 'IB' service above.
             ...($declaredValue > 0 ? [
                 'monetaryAmount' => [[
                     'typeCode' => 'declaredValue',
@@ -129,6 +149,7 @@ class DhlRateService
         'OF' => 'Remote Area Delivery',
         'FD' => 'GoGreen Plus',
         'II' => 'Declared Value (Insurance)',
+        'IB' => 'Extended Liability (Document)',
     ];
 
     private function describeDhlCharge(?array $item, string $code): string
@@ -177,10 +198,12 @@ class DhlRateService
                 'total' => $total,
                 'billedWeight' => $product['weight']['provided'] ?? null,
                 'billedWeightUnit' => $product['weight']['unitOfMeasurement'] ?? 'metric',
+                'volumetricWeight' => $product['weight']['volumetric'] ?? null,
                 'isCustomerAgreement' => ($product['isCustomerAgreement'] ?? false) === true,
                 'transitDays' => $product['deliveryCapabilities']['totalTransitDays'] ?? null,
                 'estimatedDelivery' => $product['deliveryCapabilities']['estimatedDeliveryDateAndTime'] ?? null,
                 'chargeBreakdown' => $chargeBreakdown,
+                'raw' => $product,
             ];
         }
 
@@ -204,12 +227,14 @@ class DhlRateService
                 'currency' => $q['currency'],
                 'billedWeight' => $q['billedWeight'],
                 'billedWeightUnit' => $q['billedWeightUnit'],
+                'volumetricWeight' => $q['volumetricWeight'],
                 'published' => null,
                 'negotiated' => $q['total'],
                 'isCustomerAgreement' => $q['isCustomerAgreement'],
                 'transitDays' => $q['transitDays'],
                 'estimatedDelivery' => $q['estimatedDelivery'],
                 'chargeBreakdown' => $q['chargeBreakdown'],
+                'raw' => $q['raw'],
                 'error' => null,
             ], $quotes);
         } catch (\Throwable $e) {
@@ -276,12 +301,14 @@ class DhlRateService
                         'currency' => $q['currency'],
                         'billedWeight' => $q['billedWeight'],
                         'billedWeightUnit' => $q['billedWeightUnit'],
+                        'volumetricWeight' => $q['volumetricWeight'],
                         'published' => null,
                         'negotiated' => $q['total'],
                         'isCustomerAgreement' => $q['isCustomerAgreement'],
                         'transitDays' => $q['transitDays'],
                         'estimatedDelivery' => $q['estimatedDelivery'],
                         'chargeBreakdown' => $q['chargeBreakdown'],
+                        'raw' => $q['raw'],
                         'error' => null,
                     ];
                 }

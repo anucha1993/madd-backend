@@ -98,11 +98,15 @@ class UpsRateService
                     // Each package carries its own isDocument flag — a single shipment can mix documents and boxes.
                     // Declared Value is a PACKAGE-level field (PackageServiceOptions) — each package declares
                     // its own value, since a shipment's boxes can genuinely contain very different values.
-                    'Package' => array_map(function (array $pkg) use ($shipment) {
+                    // A package ROW's `quantity` means N physical identical boxes — UPS has no per-package
+                    // "quantity" field, so each row must be expanded into `quantity` separate Package entries
+                    // (each at the row's per-box weight) or UPS rates as if only ONE box exists.
+                    'Package' => collect($shipment['packages'])->flatMap(function (array $pkg) use ($shipment) {
                         $pkgIsDocument = (bool) ($pkg['isDocument'] ?? false);
                         $pkgDeclaredValue = (float) ($pkg['declaredValue'] ?? 0);
+                        $quantity = max((int) ($pkg['quantity'] ?? 1), 1);
 
-                        return array_merge([
+                        $packageEntry = array_merge([
                             'PackagingType' => ['Code' => $pkgIsDocument ? '01' : '02'],
                         ], $pkgIsDocument ? [] : [
                             'Dimensions' => [
@@ -116,7 +120,11 @@ class UpsRateService
                                 'UnitOfMeasurement' => ['Code' => $pkg['weightUnit'] ?? 'KGS'],
                                 'Weight' => (string) ($pkg['weight'] ?? ''),
                             ],
-                        ], $pkgDeclaredValue > 0 ? [
+                        ], $pkgDeclaredValue > 0 && ! $pkgIsDocument ? [
+                            // UPS does not cover Document shipments with its own Declared Value
+                            // insurance at all — never send it for a document package, even if
+                            // the caller passed a declaredValue (confirmed business rule, not
+                            // just a UI restriction — see selectPackageInsurance's frontend guard).
                             'PackageServiceOptions' => [
                                 'DeclaredValue' => [
                                     'CurrencyCode' => $shipment['declaredValueCurrency'] ?? 'THB',
@@ -124,7 +132,9 @@ class UpsRateService
                                 ],
                             ],
                         ] : []);
-                    }, $shipment['packages']),
+
+                        return array_fill(0, $quantity, $packageEntry);
+                    })->all(),
                 ],
             ],
         ];
@@ -415,6 +425,7 @@ class UpsRateService
                         'published' => $publishedQuote['published'] ?? $negotiatedQuote['published'] ?? null,
                         'negotiated' => $negotiatedQuote['negotiated'] ?? $publishedQuote['negotiated'] ?? null,
                         'chargeBreakdown' => $negotiatedQuote['negotiatedChargeBreakdown'] ?? $publishedQuote['chargeBreakdown'],
+                        'raw' => ['published' => $pubResp->json(), 'negotiated' => $negResp->json()],
                         'error' => null,
                     ];
                 } catch (\Throwable $e) {

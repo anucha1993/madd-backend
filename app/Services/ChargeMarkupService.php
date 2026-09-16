@@ -10,8 +10,9 @@ class ChargeMarkupService
     /**
      * These codes carry the carrier's own real cost (used only as a cost reference — see
      * ShippingController/shipment UI) and must never be fixed-overridden or marked up here.
+     * 'IB' is DHL's document-only Extended Liability service (see DhlRateService).
      */
-    private const COST_ONLY_CODES = ['400', 'II'];
+    private const COST_ONLY_CODES = ['400', 'II', 'IB'];
 
     /**
      * Apply each account's configured fixed charge overrides (ChargeFixedOverride — intercepts
