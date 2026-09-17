@@ -23,24 +23,28 @@ class DhlShipmentService
 
     private function buildPostalAddress(array $addr): array
     {
-        return [
+        // DHL's schema rejects explicit `null` for optional fields (addressLine2/3) — the key
+        // must be OMITTED entirely when not provided, not present-with-null (confirmed live:
+        // "expected type: String, found: Null"). Filter nulls out rather than sending them.
+        return array_filter([
             'postalCode' => $addr['postcode'] ?? '',
             'cityName' => $addr['city'] ?? '',
             'countryCode' => $addr['country'] ?? '',
             'addressLine1' => $addr['address'] ?? '',
             'addressLine2' => $addr['address2'] ?? null,
             'addressLine3' => $addr['address3'] ?? null,
-        ];
+        ], fn ($v) => $v !== null);
     }
 
     private function buildContactInformation(array $addr): array
     {
-        return [
+        // Same null-vs-omitted issue as buildPostalAddress — DHL rejects an explicit null email.
+        return array_filter([
             'phone' => $addr['phone'] ?: '0000000000',
             'companyName' => $addr['company'] ?: ($addr['contactName'] ?: 'N/A'),
             'fullName' => $addr['contactName'] ?: ($addr['company'] ?: 'N/A'),
             'email' => $addr['email'] ?? null,
-        ];
+        ], fn ($v) => $v !== null);
     }
 
     /**
@@ -102,9 +106,12 @@ class DhlShipmentService
                     'contactInformation' => $this->buildContactInformation($to),
                 ],
             ],
-            'content' => [
+            'content' => array_filter([
                 'packages' => $expandedPackages,
                 'isCustomsDeclarable' => $hasNonDocumentPackage && $from['country'] !== $to['country'],
+                // Same null-vs-omitted issue as buildPostalAddress — DHL rejects an explicit
+                // null declaredValue ("expected type: String/Number, found: Null"), the key must
+                // be left out entirely when there's nothing to declare.
                 'declaredValue' => $declaredValue > 0 ? $declaredValue : null,
                 'declaredValueCurrency' => $currency,
                 // DHL has no literal "isDocument" flag anywhere in this schema (confirmed
@@ -114,7 +121,7 @@ class DhlShipmentService
                 'description' => $shipment['description'] ?: (! $hasNonDocumentPackage ? 'Documents' : 'General Merchandise'),
                 'incoterm' => 'DAP',
                 'unitOfMeasurement' => 'metric',
-            ],
+            ], fn ($v) => $v !== null),
             'valueAddedServices' => array_merge(
                 $declaredValue > 0 ? [['serviceCode' => 'II', 'value' => $declaredValue, 'currency' => $currency]] : [],
                 $hasInsuredDocument ? [['serviceCode' => 'IB']] : [],
@@ -123,7 +130,7 @@ class DhlShipmentService
     }
 
     /**
-     * @return array{trackingNumber:string,labelBase64:?string,labelFormat:?string,raw:array}
+     * @return array{trackingNumber:string,labelBase64:?string,labelFormat:?string,waybillBase64:?string,waybillFormat:?string,commercialInvoiceBase64:?string,commercialInvoiceFormat:?string,pieces:array<int,array{trackingNumber:?string}>,raw:array}
      */
     public function createShipment(array $account, array $shipment): array
     {
@@ -143,12 +150,39 @@ class DhlShipmentService
         }
 
         $raw = $response->json();
+
+        return $this->parseShipmentResponse($raw);
+    }
+
+    /**
+     * Pulls tracking/label/invoice/pieces out of a raw DHL Shipment API response — shared by
+     * createShipment() (fresh booking) and the shipments:backfill-documents command (re-parsing
+     * an already-saved raw_response for shipments booked before invoice capture existed,
+     * without re-booking anything with DHL).
+     */
+    public function parseShipmentResponse(array $raw): array
+    {
         $labelDoc = collect($raw['documents'] ?? [])->firstWhere('typeCode', 'label');
+        // DHL auto-generates the Commercial Invoice as its own document (typeCode "invoice")
+        // whenever the shipment is customs-declarable — no separate request needed, unlike UPS
+        // which requires explicit InternationalForms. DHL has no equivalent of UPS's separate
+        // Waybill/receipt document — the label itself is the only shipper-facing document.
+        $invoiceDoc = collect($raw['documents'] ?? [])->firstWhere('typeCode', 'invoice');
 
         return [
             'trackingNumber' => $raw['shipmentTrackingNumber'] ?? null,
             'labelBase64' => $labelDoc['content'] ?? null,
             'labelFormat' => $labelDoc['imageFormat'] ?? 'PDF',
+            'waybillBase64' => null,
+            'waybillFormat' => null,
+            'commercialInvoiceBase64' => $invoiceDoc['content'] ?? null,
+            'commercialInvoiceFormat' => $invoiceDoc['imageFormat'] ?? 'PDF',
+            // DHL returns one entry per physical piece here for a multi-piece shipment, each
+            // with its own tracking number — but all pieces share the ONE combined label PDF
+            // above (every piece is a separate page in it), there's no per-piece label file.
+            'pieces' => array_map(fn ($pkg) => [
+                'trackingNumber' => $pkg['trackingNumber'] ?? null,
+            ], $raw['packages'] ?? []),
             'raw' => $raw,
         ];
     }

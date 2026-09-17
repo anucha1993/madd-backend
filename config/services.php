@@ -48,6 +48,20 @@ return [
         'tracking_reference_url_test' => env('UPS_TRACKING_REFERENCE_URL_TEST', 'https://wwwcie.ups.com/api/track/v1/reference/details'),
         'ship_url' => env('UPS_SHIP_URL', 'https://onlinetools.ups.com/api/shipments/v2409/ship'),
         'ship_url_test' => env('UPS_SHIP_URL_TEST', 'https://wwwcie.ups.com/api/shipments/v2409/ship'),
+        // Label Recovery — re-fetches label/waybill/forms for an already-booked shipment by
+        // tracking number, used to backfill documents that were never saved locally.
+        'recovery_url' => env('UPS_RECOVERY_URL', 'https://onlinetools.ups.com/api/labels/v1/recovery'),
+        'recovery_url_test' => env('UPS_RECOVERY_URL_TEST', 'https://wwwcie.ups.com/api/labels/v1/recovery'),
+        // Void Shipment — cancels an already-booked shipment with UPS (real air waybill
+        // cancellation, not just a local status flag).
+        'void_url' => env('UPS_VOID_URL', 'https://onlinetools.ups.com/api/shipments/v2409/void/cancel'),
+        'void_url_test' => env('UPS_VOID_URL_TEST', 'https://wwwcie.ups.com/api/shipments/v2409/void/cancel'),
+        // Pickup — schedules/cancels an on-call courier pickup (live-verified: does NOT take
+        // specific tracking numbers, just address + total piece count/weight + time window).
+        'pickup_create_url' => env('UPS_PICKUP_CREATE_URL', 'https://onlinetools.ups.com/api/pickupcreation/v2409/pickup'),
+        'pickup_create_url_test' => env('UPS_PICKUP_CREATE_URL_TEST', 'https://wwwcie.ups.com/api/pickupcreation/v2409/pickup'),
+        'pickup_cancel_url' => env('UPS_PICKUP_CANCEL_URL', 'https://onlinetools.ups.com/api/shipments/v2409/pickup/02'),
+        'pickup_cancel_url_test' => env('UPS_PICKUP_CANCEL_URL_TEST', 'https://wwwcie.ups.com/api/shipments/v2409/pickup/02'),
         'transaction_src' => env('UPS_TRANSACTION_SRC', 'testing'),
     ],
 

@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Exceptions\UpsTokenExpiredException;
+use App\Services\Concerns\HasUpsOAuthToken;
 use Illuminate\Support\Facades\Http;
 
 /**
@@ -11,19 +13,7 @@ use Illuminate\Support\Facades\Http;
  */
 class UpsShipmentService
 {
-    public function getAccessToken(string $clientId, string $clientSecret, ?string $mode = null): string
-    {
-        $response = Http::asForm()
-            ->withBasicAuth($clientId, $clientSecret)
-            ->timeout(15)
-            ->post($this->upsUrl('oauth_url', $mode), ['grant_type' => 'client_credentials']);
-
-        if (! $response->successful() || ! $response->json('access_token')) {
-            throw new \RuntimeException('UPS OAuth failed: '.($response->json('error_description') ?? $response->status()));
-        }
-
-        return $response->json('access_token');
-    }
+    use HasUpsOAuthToken;
 
     private function upsUrl(string $key, ?string $mode): string
     {
@@ -89,9 +79,13 @@ class UpsShipmentService
             // Package entries (each at the row's per-box weight), same as UpsRateService.
             'Package' => collect($shipment['packages'])->flatMap(function (array $pkg) use ($shipment) {
                 $pkgIsDocument = (bool) ($pkg['isDocument'] ?? false);
-                $pkgDeclaredValue = (float) ($pkg['declaredValue'] ?? 0);
                 $useCarrierInsurance = ! empty($pkg['useCarrierInsurance']);
                 $quantity = max((int) ($pkg['quantity'] ?? 1), 1);
+                // `declaredValue` is always the TOTAL for this row (all `quantity` boxes
+                // combined, see packageTotalDeclaredValue() in shipment/create/page.tsx) —
+                // divide across each expanded box so UPS's shipment-wide total (summed
+                // per-package) matches what staff entered, instead of multiplying by quantity.
+                $pkgDeclaredValue = (float) ($pkg['declaredValue'] ?? 0) / $quantity;
 
                 $packageEntry = array_merge([
                     'Packaging' => ['Code' => $pkgIsDocument ? '01' : '02'],
@@ -147,7 +141,7 @@ class UpsShipmentService
     }
 
     /**
-     * @return array{trackingNumber:string,labelBase64:?string,labelFormat:?string,raw:array}
+     * @return array{trackingNumber:string,labelBase64:?string,labelFormat:?string,waybillBase64:?string,waybillFormat:?string,commercialInvoiceBase64:?string,commercialInvoiceFormat:?string,pieces:array<int,array{trackingNumber:?string,labelBase64:?string,labelFormat:?string}>,raw:array}
      */
     public function createShipment(string $token, array $account, array $shipment, ?string $mode = null): array
     {
@@ -156,19 +150,145 @@ class UpsShipmentService
             ->post($this->upsUrl('ship_url', $mode), $this->buildShipmentRequest($account, $shipment));
 
         if (! $response->successful()) {
+            if ($response->status() === 401) {
+                throw new UpsTokenExpiredException('UPS shipment creation failed: token expired');
+            }
             throw new \RuntimeException('UPS shipment creation failed: '.($response->json('response.errors.0.message') ?? $response->status()));
         }
 
         $raw = $response->json();
+
+        return $this->parseShipmentResponse($raw);
+    }
+
+    /**
+     * Pulls tracking/label/waybill/invoice/pieces out of a raw UPS Shipment API response —
+     * shared by createShipment() (fresh booking) and the shipments:backfill-documents command
+     * (re-parsing an already-saved raw_response for shipments booked before waybill/invoice
+     * capture existed, without re-booking anything with UPS).
+     */
+    public function parseShipmentResponse(array $raw): array
+    {
         $results = $raw['ShipmentResponse']['ShipmentResults'] ?? [];
         $packageResults = $results['PackageResults'] ?? [];
-        $firstPackage = array_is_list($packageResults) ? ($packageResults[0] ?? null) : $packageResults;
+        // UPS returns ONE PackageResults entry per physical box for a multi-piece shipment
+        // (single ShipmentRequest, `Package` array) — a single-package shipment collapses this
+        // to one object instead of a list, so normalize both shapes into a flat list here.
+        // `array_is_list()` throws on non-array input, so guard with `is_array()` first — some
+        // older raw_response payloads (re-parsed by the backfill command) may lack this key
+        // entirely, leaving it `null` rather than `[]`.
+        $packageResultsList = is_array($packageResults) && array_is_list($packageResults) ? $packageResults : ($packageResults ? [$packageResults] : []);
+        $firstPackage = $packageResultsList[0] ?? null;
+
+        // ControlLogReceipt is the "Shipper's Copy" waybill/receipt — one per shipment (not per
+        // piece), kept as proof of booking rather than stuck on any box. Same shape quirk as
+        // PackageResults (single object vs list) when only one is returned.
+        $controlLogReceipt = $results['ControlLogReceipt'] ?? null;
+        $controlLogReceiptList = is_array($controlLogReceipt) && array_is_list($controlLogReceipt) ? $controlLogReceipt : ($controlLogReceipt ? [$controlLogReceipt] : []);
+        $waybill = $controlLogReceiptList[0] ?? null;
+
+        // Form (Commercial Invoice) is only returned when the request includes
+        // ShipmentServiceOptions.InternationalForms — we don't request it yet, so this is
+        // normally absent, but parsed defensively in case it's ever added upstream.
+        $form = $results['Form'] ?? null;
 
         return [
             'trackingNumber' => $results['ShipmentIdentificationNumber'] ?? ($firstPackage['TrackingNumber'] ?? null),
             'labelBase64' => $firstPackage['ShippingLabel']['GraphicImage'] ?? null,
             'labelFormat' => $firstPackage['ShippingLabel']['ImageFormat']['Code'] ?? 'GIF',
+            'waybillBase64' => $waybill['GraphicImage'] ?? null,
+            'waybillFormat' => $waybill['ImageFormat']['Code'] ?? 'GIF',
+            'commercialInvoiceBase64' => $form['GraphicImage'] ?? null,
+            'commercialInvoiceFormat' => $form['ImageFormat']['Code'] ?? 'GIF',
+            'pieces' => array_map(fn ($pkg) => [
+                'trackingNumber' => $pkg['TrackingNumber'] ?? null,
+                'labelBase64' => $pkg['ShippingLabel']['GraphicImage'] ?? null,
+                'labelFormat' => $pkg['ShippingLabel']['ImageFormat']['Code'] ?? 'GIF',
+            ], $packageResultsList),
             'raw' => $raw,
         ];
+    }
+
+    /**
+     * UPS's Label Recovery API (POST /labels/v1/recovery) — re-fetches the label (and, per its
+     * documented schema, a Form/commercial-invoice) for an ALREADY-BOOKED shipment by tracking
+     * number. CONFIRMED against UPS's own published schema: `LabelRecoveryResponse` only exposes
+     * `Response, ShipmentIdentificationNumber, LabelResults, CODTurnInPage, Form,
+     * HighValueReport, TrackingCandidate` at the top level — there is NO `ControlLogReceipt`
+     * field in this response at all (unlike the Ship response's `ShipmentResults
+     * .ControlLogReceipt`). So `waybillBase64` below will realistically never be populated via
+     * this endpoint, no matter the tracking number/account — kept only for defensive parsing in
+     * case some account/shipment variant does expose it nested under `LabelResults[]`. This
+     * endpoint's own doc description is also scoped to "the return shipment", i.e. its primary
+     * intended use is UPS Returns, not recovering a lost waybill for a normal forward shipment.
+     *
+     * @return array{labelBase64:?string,labelFormat:?string,waybillBase64:?string,waybillFormat:?string,commercialInvoiceBase64:?string,commercialInvoiceFormat:?string,raw:array}
+     */
+    public function recoverDocuments(string $token, string $trackingNumber, ?string $mode = null): array
+    {
+        $response = Http::withToken($token)
+            ->timeout(20)
+            ->post($this->upsUrl('recovery_url', $mode), [
+                'LabelRecoveryRequest' => [
+                    'Request' => ['TransactionReference' => ['CustomerContext' => 'MADD Document Recovery']],
+                    'TrackingNumber' => $trackingNumber,
+                    'LabelSpecification' => ['LabelImageFormat' => ['Code' => 'GIF']],
+                ],
+            ]);
+
+        if (! $response->successful()) {
+            if ($response->status() === 401) {
+                throw new UpsTokenExpiredException('UPS label recovery failed: token expired');
+            }
+            throw new \RuntimeException('UPS label recovery failed: '.($response->json('response.errors.0.message') ?? $response->status()));
+        }
+
+        $raw = $response->json();
+        $labelResults = $raw['LabelRecoveryResponse']['LabelResults'] ?? [];
+        // Same single-object-vs-list shape quirk as ShipmentResults.PackageResults.
+        $labelResultsList = is_array($labelResults) && array_is_list($labelResults) ? $labelResults : ($labelResults ? [$labelResults] : []);
+        $first = $labelResultsList[0] ?? [];
+
+        $controlLogReceipt = $first['ControlLogReceipt'] ?? null;
+        // UPS's Form nesting differs slightly between the Ship and Recovery responses in some
+        // accounts (GraphicImage directly vs nested under Image) — check both defensively.
+        $form = $first['Form'] ?? null;
+        $formImage = $form['GraphicImage'] ?? $form['Image']['GraphicImage'] ?? null;
+        $formFormat = $form['ImageFormat']['Code'] ?? $form['Image']['ImageFormat']['Code'] ?? 'GIF';
+
+        return [
+            'labelBase64' => $first['ShippingLabel']['GraphicImage'] ?? null,
+            'labelFormat' => $first['ShippingLabel']['ImageFormat']['Code'] ?? 'GIF',
+            'waybillBase64' => $controlLogReceipt['GraphicImage'] ?? null,
+            'waybillFormat' => $controlLogReceipt['ImageFormat']['Code'] ?? 'GIF',
+            'commercialInvoiceBase64' => $formImage,
+            'commercialInvoiceFormat' => $formFormat,
+            'raw' => $raw,
+        ];
+    }
+
+    /**
+     * UPS's Void Shipment API (DELETE /shipments/{version}/void/cancel/{trackingNumber}) — a
+     * REAL cancellation of the air waybill with UPS, not just a local status flag. Only works
+     * within UPS's own "allowed void period" (roughly: before the shipment is picked up/scanned,
+     * and generally within ~28 days of creation) — UPS returns error code 190102 ("No shipment
+     * found within the allowed void period") once that window has passed, which the caller
+     * should surface to the user rather than silently failing.
+     */
+    public function voidShipment(string $token, string $trackingNumber, ?string $mode = null): array
+    {
+        $response = Http::withToken($token)
+            ->timeout(20)
+            ->delete($this->upsUrl('void_url', $mode).'/'.$trackingNumber);
+
+        $raw = $response->json();
+        if (! $response->successful()) {
+            if ($response->status() === 401) {
+                throw new UpsTokenExpiredException('UPS void failed: token expired');
+            }
+            throw new \RuntimeException('UPS void failed: '.($raw['response']['errors'][0]['message'] ?? $response->status()));
+        }
+
+        return $raw;
     }
 }

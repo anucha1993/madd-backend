@@ -2,11 +2,15 @@
 
 namespace App\Services;
 
+use App\Services\Concerns\HasUpsOAuthToken;
 use Illuminate\Http\Client\Pool;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 
 class UpsRateService
 {
+    use HasUpsOAuthToken;
+
     private const SERVICE_CODES = [
         '65' => 'Worldwide Saver',
         '07' => 'Worldwide Express',
@@ -29,20 +33,6 @@ class UpsRateService
     public function serviceLabels(): array
     {
         return self::SERVICE_CODES;
-    }
-
-    public function getAccessToken(string $clientId, string $clientSecret, ?string $mode = null): string
-    {
-        $response = Http::asForm()
-            ->withBasicAuth($clientId, $clientSecret)
-            ->timeout(15)
-            ->post($this->upsUrl('oauth_url', $mode), ['grant_type' => 'client_credentials']);
-
-        if (! $response->successful() || ! $response->json('access_token')) {
-            throw new \RuntimeException('UPS OAuth failed: ' . ($response->json('error_description') ?? $response->status()));
-        }
-
-        return $response->json('access_token');
     }
 
     /**
@@ -103,8 +93,13 @@ class UpsRateService
                     // (each at the row's per-box weight) or UPS rates as if only ONE box exists.
                     'Package' => collect($shipment['packages'])->flatMap(function (array $pkg) use ($shipment) {
                         $pkgIsDocument = (bool) ($pkg['isDocument'] ?? false);
-                        $pkgDeclaredValue = (float) ($pkg['declaredValue'] ?? 0);
+                        // `declaredValue` from the frontend is always the TOTAL for this row
+                        // (all `quantity` boxes combined, see packageTotalDeclaredValue() in
+                        // shipment/create/page.tsx) — divide across each expanded box so UPS's
+                        // shipment-wide total (summed per-package) matches what staff entered,
+                        // instead of multiplying it by quantity.
                         $quantity = max((int) ($pkg['quantity'] ?? 1), 1);
+                        $pkgDeclaredValue = (float) ($pkg['declaredValue'] ?? 0) / $quantity;
 
                         $packageEntry = array_merge([
                             'PackagingType' => ['Code' => $pkgIsDocument ? '01' : '02'],
@@ -332,23 +327,41 @@ class UpsRateService
             return [];
         }
 
-        $tokenResponses = Http::pool(fn (Pool $pool) => collect($accounts)->map(
-            fn ($account, $i) => $pool->as((string) $i)->asForm()
-                ->withBasicAuth($account['client_id'], $account['client_secret'])
-                ->timeout(15)
-                ->post($this->upsUrl('oauth_url', $account['mode'] ?? null), ['grant_type' => 'client_credentials'])
-        )->all());
+        // Cache-first, same 55-min TTL/key scheme as HasUpsOAuthToken::getAccessToken() (checked
+        // rates are the highest-traffic UPS call by far, so this is where caching saves the most
+        // OAuth round-trips) — only pool-fetch a fresh token for accounts missing/expired here.
+        $cacheKeyFor = fn (array $account) => 'ups_oauth_token:'.md5($account['client_id'].'|'.($account['mode'] ?? ''));
 
         $tokens = [];
         $tokenErrors = [];
+        $accountsToFetch = [];
         foreach ($accounts as $i => $account) {
-            $resp = $tokenResponses[(string) $i];
-            if ($resp instanceof \Throwable) {
-                $tokenErrors[$i] = $resp->getMessage();
-            } elseif ($resp->successful() && $resp->json('access_token')) {
-                $tokens[$i] = $resp->json('access_token');
+            $cached = Cache::get($cacheKeyFor($account));
+            if ($cached) {
+                $tokens[$i] = $cached;
             } else {
-                $tokenErrors[$i] = 'UPS OAuth failed: ' . ($resp->json('error_description') ?? $resp->status());
+                $accountsToFetch[$i] = $account;
+            }
+        }
+
+        if (! empty($accountsToFetch)) {
+            $tokenResponses = Http::pool(fn (Pool $pool) => collect($accountsToFetch)->map(
+                fn ($account, $i) => $pool->as((string) $i)->asForm()
+                    ->withBasicAuth($account['client_id'], $account['client_secret'])
+                    ->timeout(15)
+                    ->post($this->upsUrl('oauth_url', $account['mode'] ?? null), ['grant_type' => 'client_credentials'])
+            )->all());
+
+            foreach ($accountsToFetch as $i => $account) {
+                $resp = $tokenResponses[(string) $i];
+                if ($resp instanceof \Throwable) {
+                    $tokenErrors[$i] = $resp->getMessage();
+                } elseif ($resp->successful() && $resp->json('access_token')) {
+                    $tokens[$i] = $resp->json('access_token');
+                    Cache::put($cacheKeyFor($account), $tokens[$i], 3300);
+                } else {
+                    $tokenErrors[$i] = 'UPS OAuth failed: ' . ($resp->json('error_description') ?? $resp->status());
+                }
             }
         }
 
@@ -379,6 +392,57 @@ class UpsRateService
         $rateResponses = empty($specs) ? [] : Http::pool(fn (Pool $pool) => collect($specs)->map(
             fn ($spec, $key) => $pool->as($key)->withToken($spec['token'])->timeout(20)->post($this->upsUrl('rate_url', $spec['mode']), $spec['body'])
         )->all());
+
+        // A cached token can occasionally die before its TTL (UPS-side early revocation) — any
+        // rate call that comes back 401 gets its account's cache evicted, a single fresh token
+        // fetched, and just THAT account's specs retried once (not the whole batch).
+        $accountsWithExpiredToken = [];
+        foreach ($specs as $key => $spec) {
+            $resp = $rateResponses[$key] ?? null;
+            if ($resp instanceof \Illuminate\Http\Client\Response && $resp->status() === 401) {
+                [$i] = explode(':', $key, 2);
+                $accountsWithExpiredToken[$i] = $accounts[$i];
+            }
+        }
+
+        if (! empty($accountsWithExpiredToken)) {
+            foreach ($accountsWithExpiredToken as $account) {
+                Cache::forget($cacheKeyFor($account));
+            }
+
+            $refreshResponses = Http::pool(fn (Pool $pool) => collect($accountsWithExpiredToken)->map(
+                fn ($account, $i) => $pool->as((string) $i)->asForm()
+                    ->withBasicAuth($account['client_id'], $account['client_secret'])
+                    ->timeout(15)
+                    ->post($this->upsUrl('oauth_url', $account['mode'] ?? null), ['grant_type' => 'client_credentials'])
+            )->all());
+
+            foreach ($accountsWithExpiredToken as $i => $account) {
+                $resp = $refreshResponses[(string) $i];
+                if (! ($resp instanceof \Throwable) && $resp->successful() && $resp->json('access_token')) {
+                    $tokens[$i] = $resp->json('access_token');
+                    Cache::put($cacheKeyFor($account), $tokens[$i], 3300);
+                }
+            }
+
+            $retrySpecs = [];
+            foreach ($specs as $key => $spec) {
+                [$i] = explode(':', $key, 2);
+                if (isset($accountsWithExpiredToken[$i]) && isset($tokens[$i])) {
+                    $spec['token'] = $tokens[$i];
+                    $retrySpecs[$key] = $spec;
+                }
+            }
+
+            if (! empty($retrySpecs)) {
+                $retryResponses = Http::pool(fn (Pool $pool) => collect($retrySpecs)->map(
+                    fn ($spec, $key) => $pool->as($key)->withToken($spec['token'])->timeout(20)->post($this->upsUrl('rate_url', $spec['mode']), $spec['body'])
+                )->all());
+                foreach ($retryResponses as $key => $resp) {
+                    $rateResponses[$key] = $resp;
+                }
+            }
+        }
 
         $results = [];
         foreach ($accounts as $i => $account) {
