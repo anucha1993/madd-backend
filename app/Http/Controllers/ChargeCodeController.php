@@ -41,7 +41,9 @@ class ChargeCodeController extends Controller
             return response()->json(['message' => 'มี Charge Code นี้สำหรับผู้ให้บริการนี้อยู่แล้ว'], 422);
         }
 
-        return response()->json(ChargeCode::create($data), 201);
+        // Only this endpoint lets staff hand-add a charge code, so anything created here is
+        // by definition not one of the carrier's own API codes (those come from the seeder).
+        return response()->json(ChargeCode::create([...$data, 'is_custom' => true]), 201);
     }
 
     public function update(Request $request, ChargeCode $chargeCode)
