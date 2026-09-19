@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
-#[Fillable(['provider', 'code', 'label', 'description', 'category', 'is_custom'])]
+#[Fillable(['provider', 'code', 'label', 'description', 'category', 'is_custom', 'is_pinned'])]
 class ChargeCode extends Model
 {
     use HasFactory;
@@ -15,6 +15,7 @@ class ChargeCode extends Model
     {
         return [
             'is_custom' => 'boolean',
+            'is_pinned' => 'boolean',
         ];
     }
 }

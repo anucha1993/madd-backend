@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['agent_id', 'agent_account_id', 'charge_code_id', 'value', 'unit', 'status'])]
+#[Fillable(['agent_id', 'agent_account_id', 'charge_code_id', 'rule_type', 'formula', 'value', 'unit', 'status'])]
 class MarkupRule extends Model
 {
     use HasFactory;

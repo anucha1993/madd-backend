@@ -6,9 +6,11 @@ use App\Http\Controllers\AddonItemController;
 use App\Http\Controllers\AgentAccountController;
 use App\Http\Controllers\AgentController;
 use App\Http\Controllers\AiController;
+use App\Http\Controllers\BillingCustomerController;
 use App\Http\Controllers\BranchCarrierAccountController;
 use App\Http\Controllers\BranchController;
 use App\Http\Controllers\ChargeCodeController;
+use App\Http\Controllers\ChargeFormulaController;
 use App\Http\Controllers\CustomerAddressController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\CountryController;
@@ -20,6 +22,7 @@ use App\Http\Controllers\ChargeFixedOverrideController;
 use App\Http\Controllers\MarkupRuleController;
 use App\Http\Controllers\PickupController;
 use App\Http\Controllers\ProductWeightBandController;
+use App\Http\Controllers\ReceiptController;
 use App\Http\Controllers\ShippingController;
 use App\Http\Controllers\ShipmentController;
 use App\Http\Controllers\ShipmentDraftController;
@@ -48,6 +51,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('branches', BranchController::class);
     Route::get('branches/{branch}/carrier-accounts', [BranchCarrierAccountController::class, 'index']);
     Route::put('branches/{branch}/carrier-accounts', [BranchCarrierAccountController::class, 'sync']);
+    Route::get('branches/{branch}/document-number-settings', [BranchController::class, 'documentNumberSettings']);
+    Route::put('branches/{branch}/document-number-settings', [BranchController::class, 'updateDocumentNumberSettings']);
     Route::apiResource('users', UserController::class);
 
     Route::apiResource('customers', CustomerController::class);
@@ -67,12 +72,21 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('shipments', [ShipmentController::class, 'index']);
     Route::get('shipments/stats', [ShipmentController::class, 'stats']);
     Route::get('shipments/{shipment}/label', [ShipmentController::class, 'label']);
+    Route::get('shipments/{shipment}/labels/all', [ShipmentController::class, 'allLabels']);
     Route::get('shipments/{shipment}/waybill', [ShipmentController::class, 'waybill']);
     Route::get('shipments/{shipment}/commercial-invoice', [ShipmentController::class, 'commercialInvoice']);
     Route::post('shipments/{shipment}/void', [ShipmentController::class, 'void']);
+    Route::delete('shipments/{shipment}', [ShipmentController::class, 'destroy']);
     Route::get('shipments/{shipment}', [ShipmentController::class, 'show']);
 
     Route::apiResource('shipment-drafts', ShipmentDraftController::class);
+
+    Route::apiResource('billing-customers', BillingCustomerController::class);
+
+    Route::post('receipts/preview-lines', [ReceiptController::class, 'previewLines']);
+    Route::post('receipts/{receipt}/void', [ReceiptController::class, 'void']);
+    Route::get('receipts/{receipt}/pdf', [ReceiptController::class, 'pdf']);
+    Route::apiResource('receipts', ReceiptController::class)->only(['index', 'store', 'show', 'update', 'destroy']);
 
     Route::post('pickups', [PickupController::class, 'store']);
     Route::get('pickups', [PickupController::class, 'index']);
@@ -111,6 +125,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('insurance-country-caps', InsuranceCountryCapController::class);
 
     Route::apiResource('charge-codes', ChargeCodeController::class)->only(['index', 'store', 'update', 'destroy']);
+
+    Route::post('charge-formula/preview', [ChargeFormulaController::class, 'preview']);
 
     Route::apiResource('markup-rules', MarkupRuleController::class)->only(['index', 'store', 'update', 'destroy']);
 

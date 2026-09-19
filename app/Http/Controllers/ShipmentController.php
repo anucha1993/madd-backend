@@ -5,11 +5,14 @@ namespace App\Http\Controllers;
 use App\Exceptions\UpsTokenExpiredException;
 use App\Models\AddonItem;
 use App\Models\AgentAccount;
+use App\Models\Branch;
+use App\Models\BranchCarrierAccount;
 use App\Models\Shipment;
 use App\Services\DhlShipmentService;
 use App\Services\R2Service;
 use App\Services\UpsShipmentService;
 use Illuminate\Http\Request;
+use Mpdf\Mpdf;
 
 class ShipmentController extends Controller
 {
@@ -43,6 +46,29 @@ class ShipmentController extends Controller
     ];
 
     /**
+     * Which Branch "booked" this shipment — drives the header info on any Receipt/Tax Invoice
+     * issued for it later. Prefers a branch that's actually configured to use the chosen agent
+     * account (see BranchCarrierAccount) when the staff member belongs to more than one branch,
+     * else falls back to their first branch. Null if the user has no branch at all.
+     */
+    private function resolveBranchId(Request $request, int $agentAccountId): ?int
+    {
+        $userBranchIds = $request->user()?->branches()->pluck('branches.id') ?? collect();
+        if ($userBranchIds->isEmpty()) {
+            // No branch assigned to this user at all — if the whole system only has ONE branch
+            // configured, default to it rather than leaving branch_id null (which silently makes
+            // the shipment permanently ineligible for Receipt/Tax Invoice issuance later).
+            return Branch::count() === 1 ? Branch::value('id') : null;
+        }
+
+        $matching = BranchCarrierAccount::where('agent_account_id', $agentAccountId)
+            ->whereIn('branch_id', $userBranchIds)
+            ->value('branch_id');
+
+        return $matching ?? $userBranchIds->first();
+    }
+
+    /**
      * Lists booked/failed shipments for the "My Shipments" page — newest first, with optional
      * search (tracking number) / carrier / status filters.
      */
@@ -50,8 +76,12 @@ class ShipmentController extends Controller
     {
         // Only eager-load ACTIVE (status='requested') Pickups — lets the frontend disable
         // re-selecting a Shipment that's already scheduled on an outstanding Pickup (see
-        // PickupController::store()'s matching server-side guard).
-        $query = Shipment::with(['agentAccount.agent', 'pickups' => fn ($q) => $q->where('status', 'requested')])->latest();
+        // PickupController::store()'s matching server-side guard). `receipts_count` similarly
+        // lets the frontend disable a Shipment already attached to any Receipt/Tax Invoice
+        // (see receipt_shipment's global lock — voided receipts still count).
+        $query = Shipment::with(['agentAccount.agent', 'branch', 'pickups' => fn ($q) => $q->where('status', 'requested')])
+            ->withCount('receipts')
+            ->latest();
 
         if ($search = $request->query('search')) {
             $query->where('tracking_number', 'like', "%{$search}%");
@@ -67,6 +97,11 @@ class ShipmentController extends Controller
         }
         if ($dateTo = $request->query('date_to')) {
             $query->whereDate('created_at', '<=', $dateTo);
+        }
+        // For the Issue Receipt/Tax Invoice picker — only shipments never attached to any
+        // Receipt yet (see receipt_shipment's global unique-per-shipment lock).
+        if ($request->boolean('unbilled')) {
+            $query->whereDoesntHave('receipts');
         }
 
         return response()->json($query->paginate(20));
@@ -200,6 +235,10 @@ class ShipmentController extends Controller
                 'isDocument' => (bool) ($pkg['is_document'] ?? false),
                 'declaredValue' => $pkg['declared_value'] ?? null,
                 'useCarrierInsurance' => $insuranceItem?->price_type === 'API_COST',
+                // Only actually used by DhlShipmentService to build the mandatory
+                // content.exportDeclaration.lineItems block for customs-declarable shipments.
+                'description' => $pkg['description'] ?? null,
+                'productType' => $pkg['product_type'] === 'OTHER' ? ($pkg['product_type_other'] ?? null) : ($pkg['product_type'] ?? null),
             ];
         }, $data['packages']);
 
@@ -230,11 +269,13 @@ class ShipmentController extends Controller
             'packages' => $packages,
             'declaredValueCurrency' => $data['declared_value_currency'] ?? 'THB',
             'serviceCode' => $data['service_code'],
+            'refInvoiceNo' => $data['ref_invoice_no'] ?? null,
             'description' => $data['packages'][0]['description'] ?? null,
         ];
 
         $recordAttributes = [
             'agent_account_id' => $account->id,
+            'branch_id' => $this->resolveBranchId($request, $account->id),
             'created_by' => $request->user()?->id,
             'carrier' => $data['carrier'],
             'service_code' => $data['service_code'],
@@ -358,6 +399,26 @@ class ShipmentController extends Controller
     }
 
     /**
+     * Permanently deletes a Shipment — only ever allowed for a Test-mode booking (real production
+     * bookings must use void() instead, they can never be deleted). Must have no Receipt/Tax
+     * Invoice attached (delete that first — see ReceiptController::destroy()).
+     */
+    public function destroy(Shipment $shipment)
+    {
+        $shipment->loadMissing('agentAccount');
+        if (! $shipment->is_test) {
+            return response()->json(['error' => 'ลบได้เฉพาะ Shipment ที่จองด้วย Agent Account โหมด Test เท่านั้น — Shipment จริงให้ใช้ Void แทน'], 403);
+        }
+        if ($shipment->receipts()->exists()) {
+            return response()->json(['error' => 'Shipment นี้ถูกออกใบเสร็จ/ใบกำกับภาษีไปแล้ว กรุณาลบเอกสารนั้นก่อน'], 422);
+        }
+
+        $shipment->delete();
+
+        return response()->noContent();
+    }
+
+    /**
      * Cancels a booked shipment. UPS: a REAL cancellation with UPS via the Void Shipment API
      * (live-verified request/response shape — only fails once past UPS's "allowed void period",
      * which is surfaced back to the caller as an error). DHL: DHL Express's API has NO
@@ -439,7 +500,128 @@ class ShipmentController extends Controller
             }
         }
 
+        // DHL only ever returns ONE combined PDF covering every piece as separate pages (see
+        // DhlShipmentService) — every piece's label_storage_key points at that same file. So a
+        // specific piece's "Label" click must extract JUST that piece's page, otherwise it's
+        // indistinguishable from clicking any other piece (always opens the full multi-page PDF).
+        if ($shipment->carrier === 'DHL' && $pieceIndex !== null && $pieces->count() > 1 && $storageKey) {
+            return $this->streamSingleDhlLabelPage($storageKey, $pieceIndex + 1, $trackingNumber);
+        }
+
         return $this->streamDocument($storageKey, 'shipment-'.($trackingNumber ?? $shipment->tracking_number), 'label');
+    }
+
+    /**
+     * Merges EVERY piece's own label page into ONE multi-page PDF and streams it as a single
+     * document — lets "Print All Labels" open/print in one native PDF viewer tab instead of
+     * stacking a separate mini-viewer iframe per piece (which looked broken/glitchy: repeated
+     * toolbars, inconsistent print() across iframes). Handles both carriers uniformly: DHL
+     * pieces share one combined source file (imports a different page per piece); UPS pieces
+     * each have their own dedicated file (page 1 of each). Non-PDF label files (e.g. UPS GIF)
+     * are drawn in as a full-page image instead of importing a PDF page.
+     */
+    public function allLabels(Shipment $shipment)
+    {
+        $pieces = collect($shipment->pieces ?? [])->filter(fn ($p) => ! empty($p['label_storage_key']))->values();
+        if ($pieces->isEmpty()) {
+            return $this->label(request(), $shipment);
+        }
+
+        $mpdf = new Mpdf(['format' => 'A4']);
+        $tempPaths = [];
+        // How many pieces before this one already used the SAME storage key — gives the
+        // correct 1-based page number within a shared multi-piece source file (DHL).
+        $seenPerKey = [];
+
+        foreach ($pieces as $piece) {
+            $storageKey = $piece['label_storage_key'];
+            $seenPerKey[$storageKey] = ($seenPerKey[$storageKey] ?? 0) + 1;
+            $pageNumber = $seenPerKey[$storageKey];
+
+            if (! isset($tempPaths[$storageKey])) {
+                $bytes = $this->r2Service->download($storageKey);
+                $extension = strtolower(pathinfo($storageKey, PATHINFO_EXTENSION)) ?: 'pdf';
+                $tempPath = tempnam(sys_get_temp_dir(), 'label-').'.'.$extension;
+                file_put_contents($tempPath, $bytes);
+                $tempPaths[$storageKey] = $tempPath;
+            }
+            $path = $tempPaths[$storageKey];
+
+            try {
+                if (strtolower(pathinfo($path, PATHINFO_EXTENSION)) === 'pdf') {
+                    $pageCount = $mpdf->setSourceFile($path);
+                    $templateId = $mpdf->importPage(min($pageNumber, $pageCount));
+                    $size = $mpdf->getTemplateSize($templateId);
+                    // Size THIS page to the imported template's own dimensions (mm) instead of a
+                    // fixed A4 canvas — otherwise a compact/thermal-size label gets padded onto
+                    // a much bigger blank page.
+                    $mpdf->AddPageByArray([
+                        'orientation' => $size['width'] > $size['height'] ? 'L' : 'P',
+                        'sheet-size' => [$size['width'], $size['height']],
+                    ]);
+                    $mpdf->useTemplate($templateId);
+                } else {
+                    $mpdf->AddPage();
+                    $mpdf->Image($path, 10, 10, 190, 0, '', '', false, false);
+                }
+            } catch (\Throwable $e) {
+                // Skip a piece that fails to import rather than aborting the whole merged PDF.
+                continue;
+            }
+        }
+
+        $merged = $mpdf->Output('', 'S');
+        foreach ($tempPaths as $path) {
+            unlink($path);
+        }
+
+        return response($merged, 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'inline; filename="shipment-'.$shipment->tracking_number.'-all-labels.pdf"',
+        ]);
+    }
+
+    /**
+     * Extracts page $pageNumber (1-based) out of DHL's combined multi-piece label PDF and
+     * streams just that single page — uses mpdf's bundled FPDI import (setSourceFile/
+     * importPage/useTemplate), no extra dependency needed. Falls back to the full combined PDF
+     * if extraction fails for any reason (e.g. an unexpected page count mismatch).
+     */
+    private function streamSingleDhlLabelPage(string $storageKey, int $pageNumber, ?string $trackingNumber)
+    {
+        $bytes = $this->r2Service->download($storageKey);
+        $tempPath = tempnam(sys_get_temp_dir(), 'dhl-label-').'.pdf';
+        file_put_contents($tempPath, $bytes);
+
+        try {
+            $mpdf = new Mpdf(['format' => 'A4']);
+            $pageCount = $mpdf->setSourceFile($tempPath);
+            if ($pageNumber > $pageCount) {
+                throw new \RuntimeException("page {$pageNumber} out of range ({$pageCount} total)");
+            }
+            $templateId = $mpdf->importPage($pageNumber);
+            $size = $mpdf->getTemplateSize($templateId);
+            // Size THIS page to the imported template's own dimensions (mm) instead of a fixed
+            // A4 canvas — otherwise a compact/thermal-size label gets padded onto a much bigger
+            // blank page.
+            $mpdf->AddPageByArray([
+                'orientation' => $size['width'] > $size['height'] ? 'L' : 'P',
+                'sheet-size' => [$size['width'], $size['height']],
+            ]);
+            $mpdf->useTemplate($templateId);
+            $single = $mpdf->Output('', 'S');
+        } catch (\Throwable $e) {
+            unlink($tempPath);
+
+            return $this->streamDocument($storageKey, 'shipment-'.($trackingNumber ?? 'label'), 'label');
+        }
+
+        unlink($tempPath);
+
+        return response($single, 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'inline; filename="shipment-'.($trackingNumber ?? 'label').'.pdf"',
+        ]);
     }
 
     /**

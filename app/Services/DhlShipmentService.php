@@ -62,13 +62,26 @@ class DhlShipmentService
         $packages = $shipment['packages'];
 
         $hasNonDocumentPackage = collect($packages)->contains(fn ($pkg) => empty($pkg['isDocument']));
+        $isCustomsDeclarable = $hasNonDocumentPackage && $from['country'] !== $to['country'];
         $insuredPackages = collect($packages)->filter(fn ($pkg) => ! empty($pkg['useCarrierInsurance']));
-        $declaredValue = $insuredPackages
+        // Carrier's OWN insurance premium value (only present when the customer actually bought
+        // DHL's insurance product) — feeds the 'II' valueAddedServices line ONLY, separate from
+        // the customs declared value below.
+        $insuranceValue = $insuredPackages
             ->filter(fn ($pkg) => empty($pkg['isDocument']))
             ->sum(fn ($pkg) => (float) ($pkg['declaredValue'] ?? 0));
         $hasInsuredDocument = $insuredPackages
             ->contains(fn ($pkg) => ! empty($pkg['isDocument']) && (float) ($pkg['declaredValue'] ?? 0) > 0);
         $currency = $shipment['declaredValueCurrency'] ?? 'THB';
+        // Customs declared value — MANDATORY whenever isCustomsDeclarable is true, regardless of
+        // whether carrier insurance was purchased (DHL rejects the shipment entirely otherwise:
+        // "required key [declaredValue] not found", confirmed live). Falls back to a nominal 1
+        // per dutiable package when no declared_value was entered, so it always matches the sum
+        // of the exportDeclaration line items built below (DHL cross-checks the two).
+        $dutiablePackages = collect($packages)->filter(fn ($pkg) => empty($pkg['isDocument']));
+        $customsValue = $isCustomsDeclarable
+            ? $dutiablePackages->sum(fn ($pkg) => ((float) ($pkg['declaredValue'] ?? 0)) > 0 ? (float) $pkg['declaredValue'] : 1)
+            : 0;
 
         $expandedPackages = [];
         foreach ($packages as $pkg) {
@@ -94,7 +107,9 @@ class DhlShipmentService
             'outputImageProperties' => [
                 'printerDPI' => 300,
                 'encodingFormat' => 'pdf',
-                'imageOptions' => [['typeCode' => 'label', 'templateName' => 'ECOM26_84_A4_001', 'isRequested' => true]],
+                // A6 template = just the cropped thermal-size label (roughly 100x150mm), not the
+                // full A4 sheet the "_A4_" template pads it onto with lots of blank margin.
+                'imageOptions' => [['typeCode' => 'label', 'templateName' => 'ECOM26_84_A6_001', 'isRequested' => true]],
             ],
             'customerDetails' => [
                 'shipperDetails' => [
@@ -108,11 +123,11 @@ class DhlShipmentService
             ],
             'content' => array_filter([
                 'packages' => $expandedPackages,
-                'isCustomsDeclarable' => $hasNonDocumentPackage && $from['country'] !== $to['country'],
+                'isCustomsDeclarable' => $isCustomsDeclarable,
                 // Same null-vs-omitted issue as buildPostalAddress — DHL rejects an explicit
                 // null declaredValue ("expected type: String/Number, found: Null"), the key must
-                // be left out entirely when there's nothing to declare.
-                'declaredValue' => $declaredValue > 0 ? $declaredValue : null,
+                // be left out entirely when there's nothing to declare (domestic/documents-only).
+                'declaredValue' => $customsValue > 0 ? $customsValue : null,
                 'declaredValueCurrency' => $currency,
                 // DHL has no literal "isDocument" flag anywhere in this schema (confirmed
                 // against DHL's own Rating/Shipment example payloads) — "Documents" here is
@@ -121,11 +136,54 @@ class DhlShipmentService
                 'description' => $shipment['description'] ?: (! $hasNonDocumentPackage ? 'Documents' : 'General Merchandise'),
                 'incoterm' => 'DAP',
                 'unitOfMeasurement' => 'metric',
+                // MANDATORY whenever isCustomsDeclarable is true ("...exportDeclaration is
+                // mandatory when provided product is dutiable" — confirmed live against the
+                // sandbox). Never included for a purely-documents/domestic shipment.
+                'exportDeclaration' => $isCustomsDeclarable
+                    ? $this->buildExportDeclaration($shipment, $currency)
+                    : null,
             ], fn ($v) => $v !== null),
             'valueAddedServices' => array_merge(
-                $declaredValue > 0 ? [['serviceCode' => 'II', 'value' => $declaredValue, 'currency' => $currency]] : [],
+                $insuranceValue > 0 ? [['serviceCode' => 'II', 'value' => $insuranceValue, 'currency' => $currency]] : [],
                 $hasInsuredDocument ? [['serviceCode' => 'IB']] : [],
             ),
+        ];
+    }
+
+    /**
+     * One line item per non-document package (documents are never dutiable, so never appear
+     * here) — a nominal 1.00 price/currency is used when no declared value was entered, since
+     * DHL requires a positive price per line regardless.
+     */
+    private function buildExportDeclaration(array $shipment, string $currency): array
+    {
+        $from = $shipment['from'];
+        $dutiablePackages = collect($shipment['packages'])->filter(fn ($pkg) => empty($pkg['isDocument']))->values();
+
+        $lineItems = $dutiablePackages->map(function ($pkg, $index) use ($from, $currency) {
+            $qty = (int) ($pkg['quantity'] ?? 1);
+            $unitValue = (float) ($pkg['declaredValue'] ?? 0);
+
+            return [
+                'number' => $index + 1,
+                'description' => $pkg['description'] ?: ($pkg['productType'] ?: 'General Merchandise'),
+                'price' => $unitValue > 0 ? $unitValue : 1,
+                'priceCurrency' => $currency,
+                'quantity' => ['value' => $qty, 'unitOfMeasurement' => 'PCS'],
+                'manufacturerCountry' => $from['country'],
+                'weight' => ['netValue' => (float) $pkg['weight'], 'grossValue' => (float) $pkg['weight']],
+            ];
+        })->values()->all();
+
+        return [
+            'lineItems' => $lineItems,
+            'invoice' => array_filter([
+                'number' => $shipment['refInvoiceNo'] ?: ('INV-'.now()->format('YmdHis')),
+                'date' => now()->format('Y-m-d'),
+            ]),
+            // 'permanent' covers the overwhelming majority of real commercial sales use — no UI
+            // field exists yet to choose otherwise (samples/returns/repair/temporary export).
+            'exportReasonType' => 'permanent',
         ];
     }
 

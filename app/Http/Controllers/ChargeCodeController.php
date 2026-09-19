@@ -23,7 +23,7 @@ class ChargeCodeController extends Controller
             });
         }
 
-        return $query->orderBy('provider')->orderBy('category')->orderBy('label')->get();
+        return $query->orderBy('provider')->orderByDesc('is_pinned')->orderBy('category')->orderBy('label')->get();
     }
 
     public function store(Request $request)
@@ -52,6 +52,7 @@ class ChargeCodeController extends Controller
             'label' => ['sometimes', 'required', 'string', 'max:100'],
             'description' => ['nullable', 'string', 'max:255'],
             'category' => ['nullable', 'string', 'max:50'],
+            'is_pinned' => ['sometimes', 'boolean'],
         ]);
 
         $chargeCode->update($data);

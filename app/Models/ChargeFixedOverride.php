@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['agent_account_id', 'charge_code_id', 'fixed_amount', 'status'])]
+#[Fillable(['agent_account_id', 'charge_code_id', 'override_type', 'formula', 'fixed_amount', 'unit', 'status'])]
 class ChargeFixedOverride extends Model
 {
     use HasFactory;

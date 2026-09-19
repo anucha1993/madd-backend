@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\ChargeFixedOverride;
+use App\Services\ChargeFormulaEvaluator;
 use Illuminate\Http\Request;
 
 class ChargeFixedOverrideController extends Controller
@@ -23,9 +24,20 @@ class ChargeFixedOverrideController extends Controller
         $data = $request->validate([
             'agent_account_id' => ['required', 'integer', 'exists:agent_accounts,id'],
             'charge_code_id' => ['required', 'integer', 'exists:charge_codes,id'],
-            'fixed_amount' => ['required', 'numeric', 'min:0'],
+            'override_type' => ['sometimes', 'in:FIXED,FORMULA'],
+            'formula' => ['nullable', 'string', 'max:500'],
+            'fixed_amount' => ['required_if:override_type,FIXED', 'nullable', 'numeric', 'min:0'],
+            'unit' => ['sometimes', 'in:THB,PERCENTAGE'],
             'status' => ['boolean'],
         ]);
+        $data['override_type'] = $data['override_type'] ?? 'FIXED';
+        $data['unit'] = $data['unit'] ?? 'THB';
+
+        if ($data['override_type'] === 'FORMULA') {
+            if ($error = ChargeFormulaEvaluator::validate($data['formula'] ?? null)) {
+                return response()->json(['message' => $error], 422);
+            }
+        }
 
         $exists = ChargeFixedOverride::where('agent_account_id', $data['agent_account_id'])
             ->where('charge_code_id', $data['charge_code_id'])
@@ -43,9 +55,21 @@ class ChargeFixedOverrideController extends Controller
     public function update(Request $request, ChargeFixedOverride $chargeFixedOverride)
     {
         $data = $request->validate([
-            'fixed_amount' => ['sometimes', 'required', 'numeric', 'min:0'],
+            'override_type' => ['sometimes', 'in:FIXED,FORMULA'],
+            'formula' => ['nullable', 'string', 'max:500'],
+            'fixed_amount' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'unit' => ['sometimes', 'in:THB,PERCENTAGE'],
             'status' => ['boolean'],
         ]);
+
+        $overrideType = $data['override_type'] ?? $chargeFixedOverride->override_type;
+        if ($overrideType === 'FORMULA') {
+            if ($error = ChargeFormulaEvaluator::validate($data['formula'] ?? $chargeFixedOverride->formula)) {
+                return response()->json(['message' => $error], 422);
+            }
+        } elseif (($data['fixed_amount'] ?? $chargeFixedOverride->fixed_amount) === null) {
+            return response()->json(['message' => 'กรุณาระบุ Fixed Amount'], 422);
+        }
 
         $chargeFixedOverride->update($data);
 

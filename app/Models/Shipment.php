@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 #[Fillable([
-    'agent_account_id', 'created_by', 'carrier', 'service_code', 'service_label',
+    'agent_account_id', 'branch_id', 'created_by', 'carrier', 'service_code', 'service_label',
     'tracking_number', 'pieces', 'status', 'origin', 'destination', 'packages', 'addon_lines',
     'freight_amount', 'addon_total', 'order_total', 'currency',
     'customer_type', 'entity_type', 'payment_method', 'bill_transportation_to', 'bill_duty_tax_to',
@@ -19,6 +19,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 ])]
 class Shipment extends Model
 {
+    protected $appends = ['is_test'];
+
     protected function casts(): array
     {
         return [
@@ -43,6 +45,11 @@ class Shipment extends Model
         return $this->belongsTo(AgentAccount::class);
     }
 
+    public function branch(): BelongsTo
+    {
+        return $this->belongsTo(Branch::class);
+    }
+
     public function createdBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
@@ -51,5 +58,20 @@ class Shipment extends Model
     public function pickups(): BelongsToMany
     {
         return $this->belongsToMany(Pickup::class, 'pickup_shipment');
+    }
+
+    public function receipts(): BelongsToMany
+    {
+        return $this->belongsToMany(Receipt::class, 'receipt_shipment');
+    }
+
+    /**
+     * A shipment booked against a Test-mode Agent Account (sandbox UPS/DHL credentials) is safe
+     * to fully delete (not just void) — see ShipmentController::destroy(). Real production
+     * bookings can only ever be Voided, never deleted.
+     */
+    public function getIsTestAttribute(): bool
+    {
+        return $this->agentAccount?->mode === 'test';
     }
 }

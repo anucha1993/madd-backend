@@ -56,11 +56,21 @@ class ChargeMarkupService
 
             $breakdown = $result['chargeBreakdown'] ?? [];
 
+            // FORMULA overrides reference OTHER charge codes' amounts (see ChargeFormulaEvaluator)
+            // — always the carrier's own ORIGINAL amounts, captured before any override/markup below
+            // mutates $breakdown, so a formula's result never depends on processing order.
+            $rawAmountsByCode = [];
+            foreach ($breakdown as $line) {
+                if (isset($line['code'])) {
+                    $rawAmountsByCode[(string) $line['code']] = (float) ($line['amount'] ?? 0);
+                }
+            }
+
             $delta = 0.0;
             // Tracked separately from $delta: only the portion coming from a MarkupRule (not
             // from a ChargeFixedOverride) — this is what the frontend shows as "(+X Marked Up)".
             $markupTotal = 0.0;
-            $breakdown = array_map(function ($line) use ($accountOverrides, $accountRules, &$delta, &$markupTotal) {
+            $breakdown = array_map(function ($line) use ($accountOverrides, $accountRules, $rawAmountsByCode, &$delta, &$markupTotal) {
                 $code = $line['code'] ?? null;
                 if ($code === null || in_array($code, self::COST_ONLY_CODES, true)) {
                     return $line;
@@ -73,9 +83,29 @@ class ChargeMarkupService
                 }
 
                 $original = (float) $line['amount'];
-                $base = $override ? (float) $override->fixed_amount : $original;
+                $base = $original;
+                if ($override) {
+                    if ($override->override_type === 'FORMULA' && $override->formula) {
+                        try {
+                            $base = ChargeFormulaEvaluator::evaluate($override->formula, $rawAmountsByCode);
+                        } catch (\Throwable $e) {
+                            // Bad/unresolvable formula (e.g. references a code this quote doesn't
+                            // have) — fall back to the carrier's own amount instead of breaking
+                            // the whole rate quote over one misconfigured override.
+                            $base = $original;
+                        }
+                    } else {
+                        // PERCENTAGE replaces the amount with that % of the carrier's own
+                        // original quote for this same line; THB is a flat replacement value.
+                        $base = $override->unit === 'PERCENTAGE'
+                            ? $original * ((float) $override->fixed_amount / 100)
+                            : (float) $override->fixed_amount;
+                    }
+                }
                 $new = $rule
-                    ? ($rule->unit === 'PERCENTAGE' ? $base * (1 + (float) $rule->value / 100) : $base + (float) $rule->value)
+                    ? ($rule->rule_type === 'FORMULA' && $rule->formula
+                        ? $this->safeEvaluateFormula($rule->formula, $rawAmountsByCode, $base)
+                        : ($rule->unit === 'PERCENTAGE' ? $base * (1 + (float) $rule->value / 100) : $base + (float) $rule->value))
                     : $base;
                 $new = round($new, 2);
 
@@ -83,9 +113,12 @@ class ChargeMarkupService
                 if ($rule) {
                     $markupTotal += round($new - $base, 2);
                     // Lets the frontend show e.g. "7% × 1,200.00" instead of just the final amount.
-                    $line['markupUnit'] = $rule->unit;
-                    $line['markupValue'] = (float) $rule->value;
+                    $line['markupUnit'] = $rule->rule_type === 'FORMULA' ? 'FORMULA' : $rule->unit;
+                    $line['markupValue'] = $rule->rule_type === 'FORMULA' ? null : (float) $rule->value;
                     $line['markupBase'] = round($base, 2);
+                    if ($rule->rule_type === 'FORMULA') {
+                        $line['markupFormula'] = $rule->formula;
+                    }
                 }
                 $line['amount'] = $new;
 
@@ -111,9 +144,19 @@ class ChargeMarkupService
                         continue;
                     }
 
-                    $extra = $rule->unit === 'PERCENTAGE'
-                        ? round($sellSubtotal * ((float) $rule->value / 100), 2)
-                        : round((float) $rule->value, 2);
+                    if ($rule->rule_type === 'FORMULA' && $rule->formula) {
+                        try {
+                            $extra = round(ChargeFormulaEvaluator::evaluate($rule->formula, $rawAmountsByCode), 2);
+                        } catch (\Throwable $e) {
+                            // No sensible base to fall back to for a brand-new line — skip it
+                            // rather than inject a wrong/zero amount.
+                            continue;
+                        }
+                    } else {
+                        $extra = $rule->unit === 'PERCENTAGE'
+                            ? round($sellSubtotal * ((float) $rule->value / 100), 2)
+                            : round((float) $rule->value, 2);
+                    }
 
                     if ($extra === 0.0) {
                         continue;
@@ -125,11 +168,12 @@ class ChargeMarkupService
                         'amount' => $extra,
                         'currency' => $currency,
                         'isCustomCharge' => true,
-                        'markupUnit' => $rule->unit,
-                        'markupValue' => (float) $rule->value,
+                        'markupUnit' => $rule->rule_type === 'FORMULA' ? 'FORMULA' : $rule->unit,
+                        'markupValue' => $rule->rule_type === 'FORMULA' ? null : (float) $rule->value,
                         // PERCENTAGE is computed off this quote's own sell subtotal; BAHT is a flat
-                        // add with no base amount to show.
-                        'markupBase' => $rule->unit === 'PERCENTAGE' ? round($sellSubtotal, 2) : null,
+                        // add with no base amount to show; FORMULA has no single "base" either.
+                        'markupBase' => $rule->rule_type !== 'FORMULA' && $rule->unit === 'PERCENTAGE' ? round($sellSubtotal, 2) : null,
+                        'markupFormula' => $rule->rule_type === 'FORMULA' ? $rule->formula : null,
                     ];
 
                     $delta += $extra;
@@ -154,5 +198,16 @@ class ChargeMarkupService
 
             return $result;
         }, $results);
+    }
+
+    /** Evaluates a MarkupRule formula against an EXISTING line, falling back to that line's
+     * base amount (override result or the carrier's own amount) if the formula fails. */
+    private function safeEvaluateFormula(string $formula, array $rawAmountsByCode, float $fallback): float
+    {
+        try {
+            return ChargeFormulaEvaluator::evaluate($formula, $rawAmountsByCode);
+        } catch (\Throwable $e) {
+            return $fallback;
+        }
     }
 }

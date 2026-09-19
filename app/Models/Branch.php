@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['name', 'company_name', 'code', 'tax_id', 'address', 'phone', 'status'])]
+#[Fillable(['name', 'company_name', 'code', 'tax_id', 'address', 'phone', 'fax', 'is_head_office', 'status'])]
 class Branch extends Model
 {
     use HasFactory;
@@ -16,6 +16,7 @@ class Branch extends Model
     protected function casts(): array
     {
         return [
+            'is_head_office' => 'boolean',
             'status' => 'boolean',
         ];
     }
@@ -28,5 +29,10 @@ class Branch extends Model
     public function carrierAccounts(): HasMany
     {
         return $this->hasMany(BranchCarrierAccount::class);
+    }
+
+    public function documentNumberSequences(): HasMany
+    {
+        return $this->hasMany(DocumentNumberSequence::class);
     }
 }

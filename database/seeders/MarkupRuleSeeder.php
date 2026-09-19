@@ -23,13 +23,13 @@ class MarkupRuleSeeder extends Seeder
     {
         $rows = [
             // provider, username_acc, code, value, unit, status
-            ['UPS', '884v4f', 'BASE_SERVICE', 5.5, 'PERCENTAGE', false],
-            ['UPS', '2w1278', 'BASE_SERVICE', 5.5, 'PERCENTAGE', false],
-            ['UPS', '0279v5', 'BASE_SERVICE', 5.5, 'PERCENTAGE', true],
-            ['UPS', '0279v4', 'BASE_SERVICE', 5.5, 'PERCENTAGE', true],
-            ['UPS', '0512v7', 'BASE_SERVICE', 5.5, 'PERCENTAGE', true],
-            ['UPS', 'a47094', 'BASE_SERVICE', 5.5, 'PERCENTAGE', true],
-            ['UPS', 'ax3173', 'BASE_SERVICE', 5.5, 'PERCENTAGE', true],
+            ['UPS', '884v4f', 'BASE', 5.5, 'PERCENTAGE', false],
+            ['UPS', '2w1278', 'BASE', 5.5, 'PERCENTAGE', false],
+            ['UPS', '0279v5', 'BASE', 5.5, 'PERCENTAGE', true],
+            ['UPS', '0279v4', 'BASE', 5.5, 'PERCENTAGE', true],
+            ['UPS', '0512v7', 'BASE', 5.5, 'PERCENTAGE', true],
+            ['UPS', 'a47094', 'BASE', 5.5, 'PERCENTAGE', true],
+            ['UPS', 'ax3173', 'BASE', 5.5, 'PERCENTAGE', true],
             ['DHL', '560634572', 'BASE', 5.5, 'PERCENTAGE', true],
         ];
 

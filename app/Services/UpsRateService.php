@@ -236,6 +236,7 @@ class UpsRateService
         '270' => 'Additional Handling',
         '440' => 'Delivery Area Surcharge',
         '400' => 'Declared Value (Insurance)', // SubType "EVS" = Excess Value Surcharge
+        '434' => 'Surge Fee Commercial', // confirmed live in ItemizedCharges (SubType "Surge_Fee_Commercial")
     ];
 
     private function describeCharge(?array $item): string
