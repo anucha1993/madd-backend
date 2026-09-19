@@ -13,7 +13,12 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        //
+        // Pure API backend — there is no 'login' named route anywhere in this app. Without this,
+        // any unauthenticated request that doesn't send an "Accept: application/json" header
+        // (e.g. opening a label PDF in a new browser tab) hits Laravel's default guest-redirect
+        // logic, which tries route('login') and crashes with RouteNotFoundException instead of
+        // returning a clean 401. Never redirect guests — always fall through to a JSON 401.
+        $middleware->redirectGuestsTo(fn () => null);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
