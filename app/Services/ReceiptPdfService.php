@@ -9,9 +9,9 @@ use Mpdf\Mpdf;
 class ReceiptPdfService
 {
     /**
-     * Renders a Receipt (CASH_RECEIPT = 1 page, TAX_INVOICE = 2 pages: Tax Invoice then Receipt)
-     * to a PDF binary string, matching the reference "Tax invoice_รวม (FREIGHT SERVICE).pdf"
-     * template layout (see /memories/repo/receipt-tax-invoice-module.md for the exact spec).
+     * Renders a Receipt (CASH_RECEIPT = 1 half-A4 page, TAX_INVOICE = 1 A4 page) to a PDF binary
+     * string — staff choose EITHER document type per shipment, never both bundled together (see
+     * /memories/repo/receipt-tax-invoice-module.md for history/spec).
      */
     public function render(Receipt $receipt): string
     {
@@ -20,10 +20,9 @@ class ReceiptPdfService
         $issuingBranch = $receipt->branch;
         $headOffice = Branch::where('is_head_office', true)->first() ?? $issuingBranch;
 
-        // A standalone Cash Receipt IS the Receipt page (never preceded by a Tax Invoice page),
-        // so the whole document starts at half A4 — a Tax Invoice's own Receipt page (page 2)
-        // is instead shrunk mid-document via a `<pagebreak sheet-size="...">` (see pdf.blade.php).
-        // Half A4 uses tighter margins too, so the compact layout still fits on the one short page.
+        // A standalone Cash Receipt IS the Receipt page layout, printed at half A4 with tighter
+        // margins so the compact layout fits on the one short page. Tax Invoice is its own
+        // standalone A4 page (no bundled Receipt page — see pdf.blade.php, 2026-09-21).
         $isCashReceipt = $receipt->type === 'CASH_RECEIPT';
         $format = $isCashReceipt ? [210, 148.5] : 'A4';
 

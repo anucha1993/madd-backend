@@ -18,6 +18,7 @@ use App\Http\Controllers\DhlTrackingController;
 use App\Http\Controllers\R2Controller;
 use App\Http\Controllers\InsuranceCountryCapController;
 use App\Http\Controllers\ManifestOptionController;
+use App\Http\Controllers\ManifestReportController;
 use App\Http\Controllers\ChargeFixedOverrideController;
 use App\Http\Controllers\MarkupRuleController;
 use App\Http\Controllers\PickupController;
@@ -136,4 +137,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('addon-items', AddonItemController::class)->only(['index', 'store', 'update', 'destroy']);
 
     Route::apiResource('manifest-options', ManifestOptionController::class)->only(['index', 'store', 'update', 'destroy']);
+    Route::get('manifest-report', [ManifestReportController::class, 'index']);
+    Route::get('manifest-report/export', [ManifestReportController::class, 'export']);
 });
