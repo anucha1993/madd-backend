@@ -62,6 +62,16 @@ return [
         'pickup_create_url_test' => env('UPS_PICKUP_CREATE_URL_TEST', 'https://wwwcie.ups.com/api/pickupcreation/v2409/pickup'),
         'pickup_cancel_url' => env('UPS_PICKUP_CANCEL_URL', 'https://onlinetools.ups.com/api/shipments/v2409/pickup/02'),
         'pickup_cancel_url_test' => env('UPS_PICKUP_CANCEL_URL_TEST', 'https://wwwcie.ups.com/api/shipments/v2409/pickup/02'),
+        // Paperless Document — uploads a staff-provided file (e.g. Commercial Invoice) so it can
+        // be referenced by DocumentID from a Shipment request's InternationalForms. v2 (not v3) —
+        // confirmed working live 2026-09-16 against this exact version; v3 consistently returned
+        // "9590003 Valid file is required for Upload Process" regardless of payload shape.
+        'paperless_document_url' => env('UPS_PAPERLESS_DOCUMENT_URL', 'https://onlinetools.ups.com/api/paperlessdocuments/v2/upload'),
+        'paperless_document_url_test' => env('UPS_PAPERLESS_DOCUMENT_URL_TEST', 'https://wwwcie.ups.com/api/paperlessdocuments/v2/upload'),
+        // Push to Image Repository — links an uploaded Paperless Document to a real shipment by
+        // tracking number, which is what actually makes a shipment's label show "EDI-IDIS".
+        'paperless_image_url' => env('UPS_PAPERLESS_IMAGE_URL', 'https://onlinetools.ups.com/api/paperlessdocuments/v2/image'),
+        'paperless_image_url_test' => env('UPS_PAPERLESS_IMAGE_URL_TEST', 'https://wwwcie.ups.com/api/paperlessdocuments/v2/image'),
         'transaction_src' => env('UPS_TRANSACTION_SRC', 'testing'),
     ],
 

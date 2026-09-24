@@ -9,15 +9,16 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable([
-    'type', 'branch_id', 'vol_no', 'no', 'issued_date',
+    'type', 'receipt_group_id', 'branch_id', 'vol_no', 'no', 'issued_date',
     'billing_customer_id', 'buyer_name', 'buyer_tax_id', 'buyer_address', 'buyer_is_head_office', 'buyer_branch_no',
     'subtotal_non_vat', 'subtotal_vat', 'vat_rate', 'vat_amount', 'grand_total', 'grand_total_words',
+    'shipment_total_snapshot',
     'payment_method', 'payment_reference',
     'status', 'voided_at', 'void_note', 'created_by',
 ])]
 class Receipt extends Model
 {
-    protected $appends = ['is_test'];
+    protected $appends = ['is_test', 'variance_amount'];
 
     protected function casts(): array
     {
@@ -29,8 +30,24 @@ class Receipt extends Model
             'vat_rate' => 'decimal:2',
             'vat_amount' => 'decimal:2',
             'grand_total' => 'decimal:2',
+            'shipment_total_snapshot' => 'decimal:2',
             'voided_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Grand total minus the shipment sell-price snapshot at issue time — positive when the buyer
+     * was billed MORE than the shipment cost (allowed since 2026-09-24), negative if less, null
+     * for legacy documents issued before this was tracked. This is the "ส่วนต่าง" surfaced in the
+     * Issue form, Receipts list, and (eventually) Reports.
+     */
+    public function getVarianceAmountAttribute(): ?string
+    {
+        if ($this->shipment_total_snapshot === null) {
+            return null;
+        }
+
+        return (string) round((float) $this->grand_total - (float) $this->shipment_total_snapshot, 2);
     }
 
     public function branch(): BelongsTo
@@ -55,7 +72,23 @@ class Receipt extends Model
 
     public function shipments(): BelongsToMany
     {
-        return $this->belongsToMany(Shipment::class, 'receipt_shipment');
+        return $this->belongsToMany(Shipment::class, 'receipt_shipment')->withPivot('type');
+    }
+
+    /**
+     * The other half of this receipt_group_id pair (a Cash Receipt <-> Tax Invoice issued
+     * together, see 2026-09-23 paired-issuance change) — null for pre-existing standalone
+     * documents issued before this change, or an orphaned/already-deleted pair.
+     */
+    public function pairedReceipt(): ?self
+    {
+        if (! $this->receipt_group_id) {
+            return null;
+        }
+
+        return static::where('receipt_group_id', $this->receipt_group_id)
+            ->where('id', '!=', $this->id)
+            ->first();
     }
 
     /**

@@ -24,9 +24,11 @@ use App\Http\Controllers\MarkupRuleController;
 use App\Http\Controllers\PickupController;
 use App\Http\Controllers\ProductWeightBandController;
 use App\Http\Controllers\ReceiptController;
+use App\Http\Controllers\ReportScheduleController;
 use App\Http\Controllers\ShippingController;
 use App\Http\Controllers\ShipmentController;
 use App\Http\Controllers\ShipmentDraftController;
+use App\Http\Controllers\SmtpSettingController;
 use App\Http\Controllers\SupplyController;
 use App\Http\Controllers\ThaiSubdistrictController;
 use App\Http\Controllers\TrackingSyncController;
@@ -70,6 +72,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('shipping/check-rate', [ShippingController::class, 'checkRate']);
 
     Route::post('shipments', [ShipmentController::class, 'store']);
+    Route::post('shipments/upload-commercial-invoice', [ShipmentController::class, 'uploadCommercialInvoiceFile']);
     Route::get('shipments', [ShipmentController::class, 'index']);
     Route::get('shipments/stats', [ShipmentController::class, 'stats']);
     Route::get('shipments/{shipment}/label', [ShipmentController::class, 'label']);
@@ -139,4 +142,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('manifest-options', ManifestOptionController::class)->only(['index', 'store', 'update', 'destroy']);
     Route::get('manifest-report', [ManifestReportController::class, 'index']);
     Route::get('manifest-report/export', [ManifestReportController::class, 'export']);
+
+    Route::apiResource('report-schedules', ReportScheduleController::class)->only(['index', 'store', 'update', 'destroy']);
+    Route::post('report-schedules/{reportSchedule}/send-now', [ReportScheduleController::class, 'sendNow']);
+
+    Route::get('smtp-settings', [SmtpSettingController::class, 'show']);
+    Route::put('smtp-settings', [SmtpSettingController::class, 'update']);
+    Route::post('smtp-settings/test', [SmtpSettingController::class, 'test']);
 });

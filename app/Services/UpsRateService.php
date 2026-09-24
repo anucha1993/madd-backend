@@ -51,11 +51,12 @@ class UpsRateService
     {
         $from = $shipment['from'];
         $to = $shipment['to'];
+        $shipmentOptionalServices = self::buildShipmentOptionalServices($shipment['upsOptionalServiceCodes'] ?? []);
 
         return [
             'RateRequest' => [
                 'Request' => ['TransactionReference' => ['CustomerContext' => 'MADD Shipment']],
-                'Shipment' => [
+                'Shipment' => array_merge([
                     'ShipmentRatingOptions' => ['NegotiatedRatesIndicator' => $negotiatedIndicator],
                     'Shipper' => [
                         'ShipperNumber' => $shipment['shipperNumber'] ?? null,
@@ -101,6 +102,20 @@ class UpsRateService
                         $quantity = max((int) ($pkg['quantity'] ?? 1), 1);
                         $pkgDeclaredValue = (float) ($pkg['declaredValue'] ?? 0) / $quantity;
 
+                        $packageServiceOptions = array_merge(
+                            $pkgDeclaredValue > 0 && ! $pkgIsDocument ? [
+                                // UPS does not cover Document shipments with its own Declared Value
+                                // insurance at all — never send it for a document package, even if
+                                // the caller passed a declaredValue (confirmed business rule, not
+                                // just a UI restriction — see selectPackageInsurance's frontend guard).
+                                'DeclaredValue' => [
+                                    'CurrencyCode' => $shipment['declaredValueCurrency'] ?? 'THB',
+                                    'MonetaryValue' => number_format($pkgDeclaredValue, 2, '.', ''),
+                                ],
+                            ] : [],
+                            self::buildPackageOptionalServices($shipment['upsOptionalServiceCodes'] ?? []),
+                        );
+
                         $packageEntry = array_merge([
                             'PackagingType' => ['Code' => $pkgIsDocument ? '01' : '02'],
                         ], $pkgIsDocument ? [] : [
@@ -115,24 +130,46 @@ class UpsRateService
                                 'UnitOfMeasurement' => ['Code' => $pkg['weightUnit'] ?? 'KGS'],
                                 'Weight' => (string) ($pkg['weight'] ?? ''),
                             ],
-                        ], $pkgDeclaredValue > 0 && ! $pkgIsDocument ? [
-                            // UPS does not cover Document shipments with its own Declared Value
-                            // insurance at all — never send it for a document package, even if
-                            // the caller passed a declaredValue (confirmed business rule, not
-                            // just a UI restriction — see selectPackageInsurance's frontend guard).
-                            'PackageServiceOptions' => [
-                                'DeclaredValue' => [
-                                    'CurrencyCode' => $shipment['declaredValueCurrency'] ?? 'THB',
-                                    'MonetaryValue' => number_format($pkgDeclaredValue, 2, '.', ''),
-                                ],
-                            ],
-                        ] : []);
+                        ], $packageServiceOptions !== [] ? ['PackageServiceOptions' => $packageServiceOptions] : []);
 
                         return array_fill(0, $quantity, $packageEntry);
                     })->all(),
-                ],
+                ], $shipmentOptionalServices !== [] ? ['ShipmentServiceOptions' => $shipmentOptionalServices] : []),
             ],
         ];
+    }
+
+    /** Shipment-level UPS Optional Services — currently just Saturday Delivery. */
+    private static function buildShipmentOptionalServices(array $codes): array
+    {
+        return in_array('SATURDAY', $codes, true) ? ['SaturdayDeliveryIndicator' => ''] : [];
+    }
+
+    /**
+     * Package-level UPS Optional Services. Signature options (DCIS1/2/3) are mutually exclusive
+     * by nature (radio in the UI) — DeliveryConfirmation.DCISType: "1"=Delivery Confirmation,
+     * "2"=Signature Required, "3"=Adult Signature Required.
+     */
+    private static function buildPackageOptionalServices(array $codes): array
+    {
+        $options = [];
+        $dcisType = match (true) {
+            in_array('DCIS3', $codes, true) => '3',
+            in_array('DCIS2', $codes, true) => '2',
+            in_array('DCIS1', $codes, true) => '1',
+            default => null,
+        };
+        if ($dcisType !== null) {
+            $options['DeliveryConfirmation'] = ['DCISType' => $dcisType];
+        }
+        if (in_array('ADDRESSEE_ONLY', $codes, true)) {
+            $options['DeliverToAddresseeOnlyIndicator'] = '';
+        }
+        if (in_array('DIRECT_ONLY', $codes, true)) {
+            $options['DirectDeliveryOnlyIndicator'] = '';
+        }
+
+        return $options;
     }
 
     private function getRate(string $token, array $shipment, string $negotiatedIndicator): array

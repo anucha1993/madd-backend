@@ -65,6 +65,12 @@ class ChargeMarkupService
                     $rawAmountsByCode[(string) $line['code']] = (float) ($line['amount'] ?? 0);
                 }
             }
+            // Special formula variables (see ChargeFormulaEvaluator/frontend
+            // chargeFormulaVariables.ts) — resolved from the quote itself, not from any
+            // chargeBreakdown line, so a formula can reference e.g. {TOTAL} * 2% just like a
+            // real charge code.
+            $rawAmountsByCode['BILLED_WEIGHT'] = (float) ($result['billedWeight'] ?? 0);
+            $rawAmountsByCode['TOTAL'] = (float) ($result['negotiated'] ?? $result['published'] ?? $result['total'] ?? 0);
 
             $delta = 0.0;
             // Tracked separately from $delta: only the portion coming from a MarkupRule (not

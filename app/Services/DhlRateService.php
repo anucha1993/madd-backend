@@ -68,7 +68,8 @@ class DhlRateService
             }
         }
 
-        $valueAddedServices = [['serviceCode' => 'SF']];
+        $valueAddedServices = collect($shipment['optionalServiceCodes'] ?? ['SF'])
+            ->map(fn ($code) => ['serviceCode' => $code])->all();
         if ($declaredValue > 0) {
             // 'II' (Insurance) must carry its own value/currency (per DHL's rates schema
             // supermodelIoLogisticsExpressValueAddedServicesRates — serviceCode alone is not

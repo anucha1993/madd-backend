@@ -30,6 +30,7 @@ class DatabaseSeeder extends Seeder
         $this->call(InsuranceCountryCapSeeder::class);
         $this->call(ProductWeightBandSeeder::class);
         $this->call(ChargeCodeSeeder::class);
+        $this->call(SpecialFormulaChargeCodeSeeder::class);
         $this->call(MarkupRuleSeeder::class);
         $this->call(AddonCategorySeeder::class);
         $this->call(AddonItemSeeder::class);

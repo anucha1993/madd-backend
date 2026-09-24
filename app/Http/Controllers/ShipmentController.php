@@ -84,13 +84,27 @@ class ShipmentController extends Controller
             ->latest();
 
         if ($search = $request->query('search')) {
-            $query->where('tracking_number', 'like', "%{$search}%");
+            // Matches tracking number as well as sender/receiver name/company/phone (stored in
+            // the origin/destination JSON columns) — lets the Issue Receipt picker (and this
+            // page's own search) find a shipment by who it's from/to, not just its tracking no.
+            $query->where(function ($q) use ($search) {
+                $like = "%{$search}%";
+                $q->where('tracking_number', 'like', $like)
+                    ->orWhere('origin->contact_name', 'like', $like)
+                    ->orWhere('origin->company', 'like', $like)
+                    ->orWhere('destination->contact_name', 'like', $like)
+                    ->orWhere('destination->company', 'like', $like)
+                    ->orWhere('destination->phone', 'like', $like);
+            });
         }
         if ($carrier = $request->query('carrier')) {
             $query->where('carrier', $carrier);
         }
         if ($status = $request->query('status')) {
             $query->where('status', $status);
+        }
+        if ($customerType = $request->query('customer_type')) {
+            $query->where('customer_type', $customerType);
         }
         if ($dateFrom = $request->query('date_from')) {
             $query->whereDate('created_at', '>=', $dateFrom);
@@ -159,6 +173,7 @@ class ShipmentController extends Controller
             'destination.tax_id' => ['nullable', 'string', 'max:50'],
             'destination.country' => ['required', 'string', 'size:2', 'not_in:TH'],
             'destination.city' => ['required', 'string', 'max:255'],
+            'destination.state' => ['nullable', 'string', 'max:10'],
             'destination.postcode' => ['nullable', 'string', 'max:20'],
             'destination.address' => ['nullable', 'string', 'max:1000'],
             'destination.address2' => ['nullable', 'string', 'max:1000'],
@@ -184,6 +199,35 @@ class ShipmentController extends Controller
             // service (never for third-party UPSC, see DhlShipmentService/UpsShipmentService).
             'packages.*.insurance_addon_item_id' => ['nullable', 'integer'],
             'declared_value_currency' => ['nullable', 'string', 'size:3'],
+
+            // Commercial Invoice step — free-form product lines (NOT tied 1:1 to physical
+            // packages, a real invoice usually lists products not boxes), used to build DHL's
+            // mandatory exportDeclaration.lineItems for EVERY customs-declarable shipment.
+            // `invoice_mode` is kept only for backward compatibility (defaults to FORM); the
+            // uploaded file is now a SEPARATE optional supplementary attachment (documentImages
+            // typeCode CIN on DHL) and does NOT replace the line items — see the DHL MyDHL+
+            // portal for reference: even the "Upload" mode there only accepts structured
+            // CSV/TXT/XML product data, PDFs/images are explicitly not allowed.
+            'invoice_mode' => ['nullable', 'in:FORM,UPLOAD'],
+            'invoice_lines' => ['required', 'array', 'min:1'],
+            'invoice_lines.*.description' => ['required', 'string', 'max:500'],
+            'invoice_lines.*.quantity' => ['required', 'numeric', 'min:0.01'],
+            'invoice_lines.*.unit_value' => ['required', 'numeric', 'min:0'],
+            'invoice_lines.*.weight' => ['nullable', 'numeric', 'min:0'],
+            'invoice_lines.*.country_of_origin' => ['nullable', 'string', 'max:2'],
+            'invoice_lines.*.hs_code' => ['nullable', 'string', 'max:20'],
+            // Storage key from POST /shipments/upload-commercial-invoice — sent to the carrier
+            // as a supplementary document (DHL documentImages CIN) IN ADDITION to invoice_lines,
+            // not as a replacement.
+            'commercial_invoice_upload_key' => ['nullable', 'string', 'max:255'],
+            // DHL Optional Services (live-verified against DHL's own /reference-data serviceCode
+            // dataset) — applied to both the rate check and the real booking so quoted/charged
+            // amounts stay consistent.
+            'dhl_optional_services' => ['nullable', 'array'],
+            'dhl_optional_services.*' => ['string', 'in:FD,LX,NN,SD,SF,SX,SG,WL,WM'],
+            // UPS Optional Services — same codes/behaviour as ShippingController::checkRate.
+            'ups_optional_services' => ['nullable', 'array'],
+            'ups_optional_services.*' => ['string', 'in:SATURDAY,DCIS1,DCIS2,DCIS3,ADDRESSEE_ONLY,DIRECT_ONLY'],
 
             'addon_lines' => ['nullable', 'array'],
             'addon_lines.*.name' => ['required', 'string'],
@@ -259,6 +303,7 @@ class ShipmentController extends Controller
                 'company' => $data['destination']['company'] ?? null,
                 'country' => strtoupper($data['destination']['country']),
                 'city' => $data['destination']['city'],
+                'stateCode' => $data['destination']['state'] ?? null,
                 'postcode' => $data['destination']['postcode'] ?? '',
                 'address' => $data['destination']['address'] ?? '',
                 'address2' => $data['destination']['address2'] ?? null,
@@ -271,7 +316,25 @@ class ShipmentController extends Controller
             'serviceCode' => $data['service_code'],
             'refInvoiceNo' => $data['ref_invoice_no'] ?? null,
             'description' => $data['packages'][0]['description'] ?? null,
+            // ALWAYS the primary source for DhlShipmentService::buildExportDeclaration —
+            // DHL mandates lineItems on every customs-declarable shipment (confirmed against
+            // MyDHL+ portal). A supplementary file upload (see below) does NOT replace this.
+            'invoiceLines' => $data['invoice_lines'] ?? [],
+            'optionalServiceCodes' => $data['dhl_optional_services'] ?? ['SF'],
+            'upsOptionalServiceCodes' => $data['ups_optional_services'] ?? [],
         ];
+
+        // Supplementary Commercial Invoice attachment — attached to the carrier request as
+        // documentImages typeCode CIN (DHL) IN ADDITION to invoiceLines, not as a replacement.
+        // Attached whenever the storage key is present, regardless of invoice_mode.
+        if (! empty($data['commercial_invoice_upload_key'])) {
+            $uploadKey = $data['commercial_invoice_upload_key'];
+            $ext = strtoupper(pathinfo($uploadKey, PATHINFO_EXTENSION));
+            $shipment['uploadedInvoice'] = [
+                'content' => base64_encode($this->r2Service->download($uploadKey)),
+                'format' => in_array($ext, ['JPG', 'JPEG']) ? 'JPEG' : ($ext === 'PNG' ? 'PNG' : 'PDF'),
+            ];
+        }
 
         $recordAttributes = [
             'agent_account_id' => $account->id,
@@ -284,6 +347,8 @@ class ShipmentController extends Controller
             'destination' => $data['destination'],
             'packages' => $data['packages'],
             'addon_lines' => $data['addon_lines'] ?? [],
+            'invoice_mode' => $data['invoice_mode'] ?? 'FORM',
+            'invoice_lines' => $data['invoice_lines'] ?? [],
             'freight_amount' => $data['freight_amount'],
             'addon_total' => $data['addon_total'],
             'order_total' => $data['order_total'],
@@ -350,11 +415,42 @@ class ShipmentController extends Controller
             'pieces' => $pieceRecords,
             'label_storage_key' => $labelStorageKey,
             'waybill_storage_key' => $this->uploadShipmentDocument('waybill', $result['trackingNumber'], $result['waybillBase64'] ?? null, $result['waybillFormat'] ?? null),
-            'commercial_invoice_storage_key' => $this->uploadShipmentDocument('invoice', $result['trackingNumber'], $result['commercialInvoiceBase64'] ?? null, $result['commercialInvoiceFormat'] ?? null),
+            // Page 1 = the carrier's own invoice (from the Shipment API response), page 2+ = the
+            // staff-uploaded invoice file, if any — merged into one PDF for both UPS and DHL.
+            'commercial_invoice_storage_key' => $this->buildCombinedCommercialInvoiceStorageKey(
+                $result['trackingNumber'],
+                $result['commercialInvoiceBase64'] ?? null,
+                $result['commercialInvoiceFormat'] ?? null,
+                $shipment['uploadedInvoice'] ?? null,
+            ),
             'raw_response' => $result['raw'],
         ]);
 
         return response()->json($record);
+    }
+
+    /**
+     * Uploads a staff-provided Commercial Invoice file (Commercial Invoice step's Upload option)
+     * BEFORE booking — the returned key is passed back as `commercial_invoice_upload_key` in the
+     * main store() request so it can be attached to the Shipment record once created. Max size
+     * capped at 5MB (not the more common 10MB) to match DHL's own stated "Upload Your Customs
+     * Documents" limit (5MB total per shipment) — a larger file would pass this check but then
+     * fail at DHL's own API with a much less clear error.
+     */
+    public function uploadCommercialInvoiceFile(Request $request)
+    {
+        $request->validate([
+            'file' => ['required', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:5120'],
+        ]);
+
+        $file = $request->file('file');
+        $upload = $this->r2Service->upload(
+            'manual-'.$file->getClientOriginalName(),
+            $file->get(),
+            $file->getMimeType() ?: 'application/octet-stream',
+        );
+
+        return response()->json(['storage_key' => $upload['key']]);
     }
 
     /**
@@ -387,6 +483,100 @@ class ShipmentController extends Controller
 
             return null;
         }
+    }
+
+    /**
+     * Builds the final Commercial Invoice document for a booked shipment: page 1 is the
+     * carrier's own invoice (from the Shipment API response, e.g. UPS Form.Image.GraphicImage),
+     * followed by every page of the staff-uploaded invoice file, if one was attached — same
+     * merge behavior for both UPS and DHL. Falls back to the old passthrough (native format,
+     * no PDF conversion) when there's no staff upload to merge, to avoid changing existing
+     * single-file behavior unnecessarily.
+     */
+    private function buildCombinedCommercialInvoiceStorageKey(?string $trackingNumber, ?string $carrierBase64, ?string $carrierFormat, ?array $uploadedInvoice): ?string
+    {
+        if (! $uploadedInvoice) {
+            return $this->uploadShipmentDocument('invoice', $trackingNumber, $carrierBase64, $carrierFormat);
+        }
+
+        $mpdf = new Mpdf(['format' => 'A4']);
+        $tempPaths = [];
+        $addedAnyPage = false;
+
+        try {
+            if ($carrierBase64) {
+                $addedAnyPage = $this->appendDocumentPagesToMpdf($mpdf, $carrierBase64, $carrierFormat, $tempPaths) || $addedAnyPage;
+            }
+            $addedAnyPage = $this->appendDocumentPagesToMpdf($mpdf, $uploadedInvoice['content'], $uploadedInvoice['format'], $tempPaths) || $addedAnyPage;
+
+            if (! $addedAnyPage) {
+                return null;
+            }
+
+            $merged = $mpdf->Output('', 'S');
+
+            return $this->uploadShipmentDocument('invoice', $trackingNumber, base64_encode($merged), 'PDF');
+        } catch (\Throwable $e) {
+            report($e);
+
+            return null;
+        } finally {
+            foreach ($tempPaths as $path) {
+                @unlink($path);
+            }
+        }
+    }
+
+    /**
+     * Appends every page of a base64-encoded document to $mpdf — every page of a PDF, or one
+     * full page for an image (GIF/PNG/JPEG, converted to truecolor RGB first since UPS's own
+     * GIFs are palette-mode and mpdf's Image() silently drops those). Returns true if at least
+     * one page was added. Temp file paths are collected into &$tempPaths for the caller to clean up.
+     */
+    private function appendDocumentPagesToMpdf(Mpdf $mpdf, string $base64Content, ?string $format, array &$tempPaths): bool
+    {
+        $extension = strtolower($format ?? 'pdf');
+        $tempPath = tempnam(sys_get_temp_dir(), 'invoice-merge-').'.'.$extension;
+        file_put_contents($tempPath, base64_decode($base64Content));
+        $tempPaths[] = $tempPath;
+
+        if ($extension === 'pdf') {
+            $pageCount = $mpdf->setSourceFile($tempPath);
+            for ($page = 1; $page <= $pageCount; $page++) {
+                $templateId = $mpdf->importPage($page);
+                $size = $mpdf->getTemplateSize($templateId);
+                $mpdf->AddPageByArray([
+                    'orientation' => $size['width'] > $size['height'] ? 'L' : 'P',
+                    'sheet-size' => [$size['width'], $size['height']],
+                    'margin-top' => 0,
+                    'margin-bottom' => 0,
+                    'margin-left' => 0,
+                    'margin-right' => 0,
+                ]);
+                $mpdf->useTemplate($templateId, 0, 0, $size['width'], $size['height']);
+            }
+
+            return $pageCount > 0;
+        }
+
+        $src = @imagecreatefromstring(file_get_contents($tempPath));
+        if (! $src) {
+            return false;
+        }
+        $rgb = imagecreatetruecolor(imagesx($src), imagesy($src));
+        imagefilledrectangle($rgb, 0, 0, imagesx($src), imagesy($src), imagecolorallocate($rgb, 255, 255, 255));
+        imagecopy($rgb, $src, 0, 0, 0, 0, imagesx($src), imagesy($src));
+        imagedestroy($src);
+        $pngPath = $tempPath.'.png';
+        imagepng($rgb, $pngPath);
+        imagedestroy($rgb);
+        $tempPaths[] = $pngPath;
+
+        $mpdf->AddPage();
+        $dataUri = 'data:image/png;base64,'.base64_encode(file_get_contents($pngPath));
+        $mpdf->WriteHTML('<div style="text-align:center;"><img src="'.$dataUri.'" style="max-width:190mm;max-height:270mm;"></div>');
+
+        return true;
     }
 
     /**
@@ -561,8 +751,30 @@ class ShipmentController extends Controller
                     ]);
                     $mpdf->useTemplate($templateId);
                 } else {
+                    // UPS labels are palette-mode GIFs that mpdf's Image() silently drops —
+                    // convert to a truecolor RGB PNG first (same trick as buildUpsDiyWaybill).
+                    // Also rotate 90° CW so the label reads portrait on A4 instead of sideways.
+                    $src = @imagecreatefromstring(file_get_contents($path));
+                    if (! $src) {
+                        continue;
+                    }
+                    if (imagesx($src) > imagesy($src)) {
+                        $rotated = imagerotate($src, 270, 0);
+                        imagedestroy($src);
+                        $src = $rotated;
+                    }
+                    $rgb = imagecreatetruecolor(imagesx($src), imagesy($src));
+                    imagefilledrectangle($rgb, 0, 0, imagesx($src), imagesy($src), imagecolorallocate($rgb, 255, 255, 255));
+                    imagecopy($rgb, $src, 0, 0, 0, 0, imagesx($src), imagesy($src));
+                    imagedestroy($src);
+                    $rgbPath = $path.'.rgb.png';
+                    imagepng($rgb, $rgbPath);
+                    imagedestroy($rgb);
+                    $tempPaths[$storageKey.'.rgb'] = $rgbPath;
+
                     $mpdf->AddPage();
-                    $mpdf->Image($path, 10, 10, 190, 0, '', '', false, false);
+                    $dataUri = 'data:image/png;base64,'.base64_encode(file_get_contents($rgbPath));
+                    $mpdf->WriteHTML('<div style="text-align:center;"><img src="'.$dataUri.'" style="max-width:190mm;max-height:270mm;"></div>');
                 }
             } catch (\Throwable $e) {
                 // Skip a piece that fails to import rather than aborting the whole merged PDF.
@@ -626,27 +838,268 @@ class ShipmentController extends Controller
 
     /**
      * UPS's "Shipper's Copy" waybill/receipt (ControlLogReceipt) — proof the shipment was
-     * booked, kept separate from the label(s) actually stuck on the boxes. Never present for
-     * DHL (see DhlShipmentService::createShipment).
+     * booked, kept separate from the label(s) actually stuck on the boxes. Neither carrier's
+     * API reliably returns one for a TH-origin account (DHL never had it; UPS's
+     * ControlLogReceipt comes back empty for non-US shippers), so a stand-in A4 PDF is built
+     * in-house per carrier — see buildDhlDiyWaybill() and buildUpsDiyWaybill().
      */
     public function waybill(Shipment $shipment)
     {
-        $storageKey = $shipment->waybill_storage_key;
-        if (! $storageKey) {
-            $recoveredKey = $this->recoverUpsDocument($shipment, $shipment->tracking_number, 'waybill');
-            if ($recoveredKey) {
-                $storageKey = $recoveredKey;
-                $shipment->update(['waybill_storage_key' => $recoveredKey]);
-            }
+        $pdf = $shipment->carrier === 'UPS'
+            ? $this->buildUpsDiyWaybill($shipment)
+            : $this->buildDhlDiyWaybill($shipment);
+
+        if (! $pdf) {
+            return $this->streamDocument(null, 'waybill-'.$shipment->tracking_number, 'waybill');
         }
 
-        return $this->streamDocument($storageKey, 'waybill-'.$shipment->tracking_number, 'waybill');
+        return response($pdf, 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'inline; filename="waybill-'.$shipment->tracking_number.'.pdf"',
+        ]);
     }
 
     /**
-     * Commercial Invoice for customs — only present when the carrier actually returned one
-     * (DHL auto-generates it for customs-declarable shipments; UPS only if InternationalForms
-     * was requested, which we don't do yet).
+     * DHL has no carrier-issued Waybill/Shipper's-Copy document (unlike UPS), so this builds a
+     * stand-in in-house: imports the FIRST page of the shipment's own label (piece #1's page —
+     * already carries piece #1's own tracking barcode) onto a slightly taller sheet, then writes
+     * the OTHER pieces' tracking numbers underneath, in ONE horizontal line (piece #1's number
+     * is already on the label itself, no need to repeat it). Single-piece shipments get just the
+     * label page back with no extra list. Returns raw PDF bytes, or null if no label to build from.
+     */
+    private function buildDhlDiyWaybill(Shipment $shipment): ?string
+    {
+        $storageKey = $shipment->label_storage_key;
+        if (! $storageKey) {
+            return null;
+        }
+
+        $otherTrackingNumbers = collect($shipment->pieces ?? [])
+            ->pluck('tracking_number')
+            ->filter()
+            ->skip(1)
+            ->values();
+
+        $bytes = $this->r2Service->download($storageKey);
+        $extension = strtolower(pathinfo($storageKey, PATHINFO_EXTENSION)) ?: 'pdf';
+        $tempPath = tempnam(sys_get_temp_dir(), 'dhl-waybill-').'.'.$extension;
+        file_put_contents($tempPath, $bytes);
+
+        try {
+            $mpdf = new Mpdf(['format' => 'A4']);
+            $extraHeight = $otherTrackingNumbers->isEmpty() ? 0 : 20;
+
+            if ($extension === 'pdf') {
+                $mpdf->setSourceFile($tempPath);
+                $templateId = $mpdf->importPage(1);
+                $size = $mpdf->getTemplateSize($templateId);
+                $mpdf->AddPageByArray([
+                    'orientation' => $size['width'] > $size['height'] ? 'L' : 'P',
+                    'sheet-size' => [$size['width'], $size['height'] + $extraHeight],
+                    'margin-top' => 0,
+                    'margin-bottom' => 0,
+                    'margin-left' => 0,
+                    'margin-right' => 0,
+                ]);
+                $mpdf->useTemplate($templateId, 0, 0, $size['width'], $size['height']);
+                $labelBottomY = $size['height'];
+            } else {
+                // Non-PDF label (e.g. image) — draw it in at a fixed size, same as allLabels().
+                $sheetWidth = 190;
+                $labelHeight = 270;
+                $mpdf->AddPageByArray([
+                    'sheet-size' => [$sheetWidth + 20, $labelHeight + 20 + $extraHeight],
+                    'margin-top' => 0,
+                    'margin-bottom' => 0,
+                    'margin-left' => 0,
+                    'margin-right' => 0,
+                ]);
+                $mpdf->Image($tempPath, 10, 10, $sheetWidth, 0, '', '', false, false);
+                $labelBottomY = $labelHeight + 10;
+            }
+
+            if ($otherTrackingNumbers->isNotEmpty()) {
+                // Renumbered 1..N for the DISPLAYED list only (piece #1 is intentionally excluded
+                // — its number is already printed on the label above).
+                $line = ' '.$otherTrackingNumbers
+                    ->map(fn ($trackingNumber, $i) => ($i + 1).'. '.$trackingNumber)
+                    ->implode('   ');
+                // Text() writes at an exact fixed position and never triggers mpdf's automatic
+                // page-break (unlike Write()) — needed since this sits right at the sheet's
+                // bottom edge, past where Write() would otherwise overflow onto a new page.
+                $mpdf->SetFont('', 'B', 9);
+                $mpdf->Text(5, $labelBottomY + 9, 'Tracking Numbers');
+                $mpdf->SetFont('', '', 9);
+                $mpdf->Text(5, $labelBottomY + 15, $line);
+            }
+
+            return $mpdf->Output('', 'S');
+        } catch (\Throwable $e) {
+            report($e);
+
+            return null;
+        } finally {
+            unlink($tempPath);
+        }
+    }
+
+    /**
+     * UPS doesn't return a usable ControlLogReceipt for TH-origin accounts (empirically empty
+     * from both Ship and Label Recovery API), so this builds a stand-in on A4: takes the UPS
+     * label GIF (stored landscape/rotated for thermal printing), converts it to a truecolor PNG
+     * and rotates 90° CW so it reads portrait, pastes it centered near the top, and lists the
+     * OTHER pieces' tracking numbers underneath in ONE horizontal line (piece #1's number is
+     * already printed on the label itself, no need to repeat it). HTML+data URI is used instead
+     * of $mpdf->Image() — mpdf's Image() silently drops rotated GD resources on this GIF variant.
+     * Returns raw PDF bytes, or null if the shipment has no label to build from.
+     */
+    private function buildUpsDiyWaybill(Shipment $shipment): ?string
+    {
+        $storageKey = $shipment->label_storage_key;
+        if (! $storageKey) {
+            return null;
+        }
+
+        // Piece order mirrors the flattened Package array UPS was booked with (each package
+        // row's `quantity` expanded into that many individual boxes) — zip pieces with the same
+        // expansion so each tracking number can show ITS OWN box's real size/weight.
+        $otherPieces = collect($shipment->pieces ?? [])->filter(fn ($p) => ! empty($p['tracking_number']))->skip(1)->values();
+        $otherPackages = collect($shipment->packages ?? [])
+            ->flatMap(fn ($pkg) => array_fill(0, max((int) ($pkg['quantity'] ?? 1), 1), $pkg))
+            ->skip(1)
+            ->values();
+
+        $bytes = $this->r2Service->download($storageKey);
+        $src = @imagecreatefromstring($bytes);
+        if (! $src) {
+            return null;
+        }
+        // imagerotate() uses positive-angle = CCW; the stored landscape label reads
+        // "sideways-up" so a 90° CCW ends up upside-down — need 90° CW (270).
+        if (imagesx($src) > imagesy($src)) {
+            $rotated = imagerotate($src, 270, 0);
+            imagedestroy($src);
+            $src = $rotated;
+        }
+        $w = imagesx($src);
+        $h = imagesy($src);
+        $rgb = imagecreatetruecolor($w, $h);
+        $white = imagecolorallocate($rgb, 255, 255, 255);
+        imagefilledrectangle($rgb, 0, 0, $w, $h, $white);
+        imagecopy($rgb, $src, 0, 0, 0, 0, $w, $h);
+        imagedestroy($src);
+        $tempPng = tempnam(sys_get_temp_dir(), 'ups-waybill-').'.png';
+        imagepng($rgb, $tempPng);
+        imagedestroy($rgb);
+
+        try {
+            $mpdf = new Mpdf(['format' => 'A4', 'margin_top' => 10, 'margin_bottom' => 10, 'margin_left' => 10, 'margin_right' => 10, 'tempDir' => sys_get_temp_dir()]);
+            $dataUri = 'data:image/png;base64,'.base64_encode(file_get_contents($tempPng));
+
+            $trackingHtml = '';
+            if ($otherPieces->isNotEmpty()) {
+                // Renumbered 1..N for the DISPLAYED list only (piece #1 is intentionally excluded
+                // — its number is already printed on the label above).
+                $line = $otherPieces
+                    ->map(function ($piece, $i) use ($otherPackages) {
+                        $pkg = $otherPackages->get($i);
+                        $detail = '';
+                        if ($pkg) {
+                            $dims = collect([$pkg['length'] ?? null, $pkg['width'] ?? null, $pkg['height'] ?? null])
+                                ->filter()
+                                ->implode('x');
+                            $detailParts = array_filter([
+                                $dims !== '' ? $dims.'cm' : null,
+                                isset($pkg['weight']) ? $pkg['weight'].'kg' : null,
+                            ]);
+                            if ($detailParts) {
+                                $detail = ' ('.implode(', ', $detailParts).')';
+                            }
+                        }
+
+                        return ($i + 1).'. '.htmlspecialchars((string) $piece['tracking_number']).htmlspecialchars($detail);
+                    })
+                    ->implode('<br>');
+                $trackingHtml = '<div style="font-weight:bold;">Tracking Numbers</div>'
+                    .'<div>'.$line.'</div>';
+            }
+
+            // Label kept LEFT (its own narrower column so it never grows into the right column)
+            // — the right column stacks PAYMENT OF CHARGES, then Tracking Numbers, then TOTAL
+            // CHARGES (the price billed to the customer) LAST at the very bottom, well clear of
+            // the label's own barcode/text area instead of both being crammed below a full-width
+            // label like before.
+            $rightColumnHtml = implode('<div style="height:6mm;"></div>', array_filter([
+                $this->buildPaymentOfChargesHtml($shipment),
+                $trackingHtml,
+                $this->buildTotalChargesHtml($shipment),
+            ]));
+
+            $bodyHtml = '<table width="100%" cellpadding="0" cellspacing="0"><tr>'
+                .'<td style="width:52%;vertical-align:top;"><img src="'.$dataUri.'" style="max-width:88mm;max-height:250mm;"></td>'
+                .'<td style="width:48%;vertical-align:top;padding-left:6mm;font-family:sans-serif;font-size:10pt;">'.$rightColumnHtml.'</td>'
+                .'</tr></table>';
+            $mpdf->WriteHTML($bodyHtml);
+
+            return $mpdf->Output('', 'S');
+        } catch (\Throwable $e) {
+            report($e);
+
+            return null;
+        } finally {
+            unlink($tempPng);
+        }
+    }
+
+    /**
+     * "PAYMENT OF CHARGES" block on a real UPS Shipper's Copy — only the options that actually
+     * apply to this shipment are printed, no unchecked alternatives listed (each label still
+     * pulled from the real Shipment record: bill_transportation_to / bill_duty_tax_to, and the
+     * REAL UPS shipper account number that booked it via agentAccount->username_acc). PRE is
+     * always the real state here since this app only ever books via an account (see
+     * UpsShipmentService::buildShipmentRequest — PaymentInformation always sends BillShipper,
+     * never a Collect charge type).
+     */
+    private function buildPaymentOfChargesHtml(Shipment $shipment): string
+    {
+        $billTransportTo = strtoupper($shipment->bill_transportation_to ?: 'SHIPPER');
+        $billDutyTaxTo = strtoupper($shipment->bill_duty_tax_to ?: 'RECEIVER');
+        $shipperAccountNumber = $shipment->agentAccount?->username_acc;
+
+        $transportLabel = match ($billTransportTo) {
+            'RECEIVER' => 'Bill Transportation to Receiver',
+            'THIRD_PARTY' => 'Bill Transportation to Third Party',
+            default => 'Bill Transportation to Shipper'.($shipperAccountNumber ? ' '.$shipperAccountNumber : ''),
+        };
+        $dutyTaxLabel = match ($billDutyTaxTo) {
+            'SHIPPER' => 'Bill Duty and Tax to Shipper'.($shipperAccountNumber ? ' '.$shipperAccountNumber : ''),
+            'THIRD_PARTY' => 'Bill Duty and Tax to Third Party',
+            default => 'Bill Duty and Tax to Receiver',
+        };
+
+        return '<div style="font-weight:bold;">PAYMENT OF CHARGES</div>'
+            .'<div>[X] PRE</div>'
+            .'<div>[X] '.htmlspecialchars($transportLabel).'</div>'
+            .'<div>[X] '.htmlspecialchars($dutyTaxLabel).'</div>';
+    }
+
+    /**
+     * TOTAL CHARGES — the actual price billed to the customer for this shipment (freight +
+     * addons), same order_total staff entered on the Payment Info step, not a UPS-quoted rate.
+     */
+    private function buildTotalChargesHtml(Shipment $shipment): string
+    {
+        $currency = $shipment->currency ?: 'THB';
+
+        return '<div style="font-weight:bold;">TOTAL CHARGES</div>'
+            .'<div>'.htmlspecialchars($currency).' '.number_format((float) $shipment->order_total, 2).'</div>';
+    }
+
+    /**
+     * Commercial Invoice for customs — DHL auto-generates it for customs-declarable shipments;
+     * UPS returns one whenever InternationalForms was requested (see
+     * UpsShipmentService::buildInternationalForms, now sent for every international
+     * non-document shipment).
      */
     public function commercialInvoice(Shipment $shipment)
     {

@@ -31,6 +31,7 @@ class ShippingController extends Controller
 
             'destination_country' => ['required', 'string', 'size:2', 'not_in:TH'],
             'destination_city' => ['required', 'string', 'max:255'],
+            'destination_state' => ['nullable', 'string', 'max:10'],
             'destination_postcode' => ['nullable', 'string', 'max:20'],
             'destination_address' => ['nullable', 'string', 'max:1000'],
 
@@ -54,6 +55,15 @@ class ShippingController extends Controller
             'carriers.*' => ['string', 'in:UPS,DHL'],
             'service_codes' => ['nullable', 'array'],
             'service_codes.*' => ['string'],
+            // DHL Optional Services (live-verified against DHL's own /reference-data serviceCode
+            // dataset) — signature options (SD/SF/SX/SG) are mutually exclusive in the UI but not
+            // enforced here since sending more than one just means DHL uses its own precedence.
+            'dhl_optional_services' => ['nullable', 'array'],
+            'dhl_optional_services.*' => ['string', 'in:FD,LX,NN,SD,SF,SX,SG,WL,WM'],
+            // UPS Optional Services — DCIS1/2/3 (signature options) are mutually exclusive in the
+            // UI, ADDRESSEE_ONLY/DIRECT_ONLY are package-level, SATURDAY is shipment-level.
+            'ups_optional_services' => ['nullable', 'array'],
+            'ups_optional_services.*' => ['string', 'in:SATURDAY,DCIS1,DCIS2,DCIS3,ADDRESSEE_ONLY,DIRECT_ONLY'],
         ]);
 
         $shipment = [
@@ -66,6 +76,7 @@ class ShippingController extends Controller
             'to' => [
                 'country' => strtoupper($data['destination_country']),
                 'city' => $data['destination_city'],
+                'stateCode' => $data['destination_state'] ?? null,
                 'postcode' => $data['destination_postcode'] ?? '',
                 'address' => $data['destination_address'] ?? '',
             ],
@@ -79,6 +90,8 @@ class ShippingController extends Controller
                 'declaredValue' => $pkg['declared_value'] ?? null,
             ], $data['packages']),
             'declaredValueCurrency' => $data['declared_value_currency'] ?? 'THB',
+            'optionalServiceCodes' => $data['dhl_optional_services'] ?? ['SF'],
+            'upsOptionalServiceCodes' => $data['ups_optional_services'] ?? [],
         ];
 
         $accountsQuery = AgentAccount::with('agent')->where('status', true);

@@ -10,6 +10,7 @@ use App\Services\NumberToWordsService;
 use App\Services\ReceiptPdfService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class ReceiptController extends Controller
@@ -139,7 +140,11 @@ class ReceiptController extends Controller
             'branch_id' => $branchId,
             'target_total' => $targetTotal,
             'lines' => $lines,
-            'cash_receipt_buyer_suggestion' => [
+            // Suggested starting buyer details (from the first selected shipment's Ship-To) —
+            // used to prefill the shared Buyer section before staff pick a real Tax Invoice
+            // billing_customer or retype it, since Cash Receipt + Tax Invoice are now always
+            // issued together with ONE shared buyer (2026-09-23).
+            'buyer_suggestion' => [
                 'name' => $firstShipment->destination['contact_name'] ?? $firstShipment->destination['company'] ?? '',
                 'tax_id' => $firstShipment->destination['tax_id'] ?? null,
                 'address' => $this->formatAddress($firstShipment->destination ?? []),
@@ -147,10 +152,16 @@ class ReceiptController extends Controller
         ]);
     }
 
+    /**
+     * Issues a Cash Receipt + Tax Invoice TOGETHER, always as one inseparable pair (2026-09-23:
+     * staff no longer choose either/or) — same buyer, same shipments, same line items, but each
+     * gets its OWN independent Vol.No/No. from its own document_number_sequences counter, and
+     * each is downloaded/printed as its own separate PDF (see ReceiptPdfService, pdf() below).
+     * Both rows share one `receipt_group_id` so update()/void()/destroy() can cascade the pair.
+     */
     public function store(Request $request)
     {
         $data = $request->validate([
-            'type' => ['required', 'string', 'in:CASH_RECEIPT,TAX_INVOICE'],
             'shipment_ids' => ['required', 'array', 'min:1'],
             'shipment_ids.*' => ['integer', 'exists:shipments,id'],
             'billing_customer_id' => ['nullable', 'integer', 'exists:billing_customers,id'],
@@ -175,76 +186,122 @@ class ReceiptController extends Controller
 
         $targetTotal = round((float) $shipments->sum('order_total'), 2);
         $linesTotal = round(collect($data['lines'])->sum('amount'), 2);
-        if (abs($targetTotal - $linesTotal) > 0.01) {
-            throw ValidationException::withMessages([
-                'lines' => "ยอดรวมรายการ ({$linesTotal}) ไม่ตรงกับราคาขายรวมของ Shipment ที่เลือก ({$targetTotal})",
-            ]);
-        }
+        // Line-items total no longer needs to match the shipments' sell price exactly — some
+        // customers are billed MORE than the shipment cost. The difference is recorded via
+        // shipment_total_snapshot (see Receipt::getVarianceAmountAttribute()) instead of blocked.
 
-        $isTaxInvoice = $data['type'] === 'TAX_INVOICE';
-        $vatRate = $isTaxInvoice ? (float) ($data['vat_rate'] ?? 7.00) : 0;
-        // Shipment sell prices are already VAT-INCLUSIVE — line amounts are never marked up by
-        // VAT on top, only EXTRACTED from the vat-marked lines for the Tax Invoice's legal
-        // breakdown, so grand_total always equals exactly what was entered (== $linesTotal).
-        $nonVatLinesTotal = $isTaxInvoice ? round(collect($data['lines'])->where('is_non_vat', true)->sum('amount'), 2) : 0;
-        $vatInclusiveLinesTotal = $isTaxInvoice ? round(collect($data['lines'])->where('is_non_vat', false)->sum('amount'), 2) : $linesTotal;
-        $subtotalVat = $isTaxInvoice ? round($vatInclusiveLinesTotal / (1 + $vatRate / 100), 2) : $vatInclusiveLinesTotal;
-        $vatAmount = $isTaxInvoice ? round($vatInclusiveLinesTotal - $subtotalVat, 2) : 0;
-        $subtotalNonVat = $nonVatLinesTotal;
-        $grandTotal = round($subtotalNonVat + $subtotalVat + $vatAmount, 2);
+        $totals = $this->computeTotals($data['lines'], $linesTotal, (float) ($data['vat_rate'] ?? 7.00));
 
         try {
-            $receipt = DB::transaction(function () use ($data, $branchId, $subtotalNonVat, $subtotalVat, $vatRate, $vatAmount, $grandTotal, $request, $shipments) {
-                $volNo = $this->documentNumberService->next($branchId, $data['type'], 'vol_no');
-                $no = $this->documentNumberService->next($branchId, $data['type'], 'no');
+            [$cashReceipt, $taxInvoice] = DB::transaction(function () use ($data, $branchId, $totals, $targetTotal, $request, $shipments) {
+                $groupId = (string) Str::uuid();
 
-                $receipt = Receipt::create([
-                    'type' => $data['type'],
+                $commonFields = [
+                    'receipt_group_id' => $groupId,
                     'branch_id' => $branchId,
-                    'vol_no' => $volNo,
-                    'no' => $no,
                     'issued_date' => now()->toDateString(),
+                    'shipment_total_snapshot' => $targetTotal,
                     'billing_customer_id' => $data['billing_customer_id'] ?? null,
                     'buyer_name' => $data['buyer_name'],
                     'buyer_tax_id' => $data['buyer_tax_id'] ?? null,
                     'buyer_address' => $data['buyer_address'] ?? null,
                     'buyer_is_head_office' => $data['buyer_is_head_office'] ?? true,
                     'buyer_branch_no' => $data['buyer_branch_no'] ?? null,
-                    'subtotal_non_vat' => $subtotalNonVat,
-                    'subtotal_vat' => $subtotalVat,
-                    'vat_rate' => $vatRate,
-                    'vat_amount' => $vatAmount,
-                    'grand_total' => $grandTotal,
-                    'grand_total_words' => $this->numberToWordsService->bahtText($grandTotal),
                     'payment_method' => $data['payment_method'] ?? null,
                     'payment_reference' => $data['payment_reference'] ?? null,
                     'status' => 'ISSUED',
                     'created_by' => $request->user()?->id,
-                ]);
+                ];
 
-                foreach (array_values($data['lines']) as $index => $line) {
-                    ReceiptLine::create([
-                        'receipt_id' => $receipt->id,
-                        'sort_order' => $index,
-                        'description' => $line['description'],
-                        'invoice_no' => $line['invoice_no'] ?? null,
-                        'is_non_vat' => $line['is_non_vat'] ?? false,
-                        'amount' => $line['amount'],
-                    ]);
+                $cashReceipt = Receipt::create(array_merge($commonFields, [
+                    'type' => 'CASH_RECEIPT',
+                    'vol_no' => $this->documentNumberService->next($branchId, 'CASH_RECEIPT', 'vol_no'),
+                    'no' => $this->documentNumberService->next($branchId, 'CASH_RECEIPT', 'no'),
+                ], $totals['cash_receipt']));
+
+                $taxInvoice = Receipt::create(array_merge($commonFields, [
+                    'type' => 'TAX_INVOICE',
+                    'vol_no' => $this->documentNumberService->next($branchId, 'TAX_INVOICE', 'vol_no'),
+                    'no' => $this->documentNumberService->next($branchId, 'TAX_INVOICE', 'no'),
+                ], $totals['tax_invoice']));
+
+                foreach ([$cashReceipt, $taxInvoice] as $receipt) {
+                    $this->replaceLines($receipt, $data['lines']);
                 }
 
-                // Global lock — the unique index on shipment_id throws a QueryException if a
-                // race condition already attached one of these shipments elsewhere, aborting
-                // the whole transaction (nothing above is left half-created).
-                $receipt->shipments()->attach($shipments->pluck('id'));
+                // Per-type global lock — the unique index on (shipment_id, type) throws a
+                // QueryException if a race condition already attached one of these shipments to
+                // either document type elsewhere, aborting the whole transaction.
+                $shipmentIds = $shipments->pluck('id');
+                $cashReceipt->shipments()->attach($shipmentIds->mapWithKeys(fn ($id) => [$id => ['type' => 'CASH_RECEIPT']])->all());
+                $taxInvoice->shipments()->attach($shipmentIds->mapWithKeys(fn ($id) => [$id => ['type' => 'TAX_INVOICE']])->all());
 
-                return $receipt;
+                return [$cashReceipt, $taxInvoice];
             });
         } catch (\Illuminate\Database\QueryException $e) {
             return response()->json(['error' => 'มี Shipment ที่เลือกถูกออกเอกสารไปแล้วโดยผู้ใช้อื่นพอดี กรุณาลองใหม่'], 409);
         }
 
-        return response()->json($receipt->load('lines', 'branch', 'shipments'), 201);
+        return response()->json([
+            'cash_receipt' => $cashReceipt->load('lines', 'branch', 'shipments'),
+            'tax_invoice' => $taxInvoice->load('lines', 'branch', 'shipments'),
+        ], 201);
+    }
+
+    /**
+     * Shared line-items -> financial totals math for BOTH paired documents. Shipment sell prices
+     * are already VAT-INCLUSIVE — VAT is only ever EXTRACTED from the vat-marked lines for the
+     * Tax Invoice's legal breakdown, never added on top, so both documents' grand_total always
+     * equals exactly the same $linesTotal that was entered.
+     *
+     * @return array{cash_receipt: array<string, mixed>, tax_invoice: array<string, mixed>}
+     */
+    private function computeTotals(array $lines, float $linesTotal, float $vatRate): array
+    {
+        $nonVatLinesTotal = round(collect($lines)->where('is_non_vat', true)->sum('amount'), 2);
+        $vatInclusiveLinesTotal = round(collect($lines)->where('is_non_vat', false)->sum('amount'), 2);
+        $subtotalVat = round($vatInclusiveLinesTotal / (1 + $vatRate / 100), 2);
+        $vatAmount = round($vatInclusiveLinesTotal - $subtotalVat, 2);
+        $grandTotal = round($nonVatLinesTotal + $subtotalVat + $vatAmount, 2);
+
+        return [
+            // Cash Receipt page never itemizes VAT — always one combined line (see
+            // receipt-page.blade.php's isCombinedLine).
+            'cash_receipt' => [
+                'subtotal_non_vat' => 0,
+                'subtotal_vat' => $linesTotal,
+                'vat_rate' => 0,
+                'vat_amount' => 0,
+                'grand_total' => $linesTotal,
+                'grand_total_words' => $this->numberToWordsService->bahtText($linesTotal),
+            ],
+            'tax_invoice' => [
+                'subtotal_non_vat' => $nonVatLinesTotal,
+                'subtotal_vat' => $subtotalVat,
+                'vat_rate' => $vatRate,
+                'vat_amount' => $vatAmount,
+                'grand_total' => $grandTotal,
+                'grand_total_words' => $this->numberToWordsService->bahtText($grandTotal),
+            ],
+        ];
+    }
+
+    /**
+     * @param  array<int, array{description: string, invoice_no?: ?string, is_non_vat?: bool, amount: float}>  $lines
+     */
+    private function replaceLines(Receipt $receipt, array $lines): void
+    {
+        $receipt->lines()->delete();
+        foreach (array_values($lines) as $index => $line) {
+            ReceiptLine::create([
+                'receipt_id' => $receipt->id,
+                'sort_order' => $index,
+                'description' => $line['description'],
+                'invoice_no' => $line['invoice_no'] ?? null,
+                'is_non_vat' => $line['is_non_vat'] ?? false,
+                'amount' => $line['amount'],
+            ]);
+        }
     }
 
     /**
@@ -253,6 +310,15 @@ class ReceiptController extends Controller
      * shipment set. Lines must still sum to the SAME grand_total (== the locked shipments' sell
      * price total, which can never change), so this can re-balance VAT/non-VAT split or reword
      * lines but never change how much was actually billed.
+     */
+    /**
+     * Corrects buyer details / line items / payment info on an already-issued document (e.g. a
+     * typo in the buyer's name or address) without touching its Vol.No/No., type, or the locked
+     * shipment set. Cascades to its paired Cash Receipt/Tax Invoice (same receipt_group_id, see
+     * store()) since 2026-09-23 — they share one buyer + one set of line items, only each
+     * document's own subtotal_non_vat/vat/grand_total is recomputed per its own type's rules.
+     * Lines must still sum to the SAME grand_total (== the locked shipments' sell price total,
+     * which can never change).
      */
     public function update(Request $request, Receipt $receipt)
     {
@@ -277,74 +343,65 @@ class ReceiptController extends Controller
             'payment_reference' => ['nullable', 'string', 'max:255'],
         ]);
 
-        $targetTotal = round((float) $receipt->grand_total, 2);
+        // Line-items total no longer has to match the document's existing grand_total exactly —
+        // same "billed more/less than shipment cost" allowance as store() (see
+        // shipment_total_snapshot/variance_amount on the Receipt model). Edited lines simply
+        // recompute grand_total from scratch; shipment_total_snapshot stays untouched so the
+        // variance is still visible afterward.
         $linesTotal = round(collect($data['lines'])->sum('amount'), 2);
-        if (abs($targetTotal - $linesTotal) > 0.01) {
-            throw ValidationException::withMessages([
-                'lines' => "ยอดรวมรายการ ({$linesTotal}) ไม่ตรงกับยอดรวมเดิมของเอกสารนี้ ({$targetTotal})",
-            ]);
-        }
+        $totals = $this->computeTotals($data['lines'], $linesTotal, (float) ($data['vat_rate'] ?? 7.00));
+        $pair = $receipt->pairedReceipt();
 
-        $isTaxInvoice = $receipt->type === 'TAX_INVOICE';
-        $vatRate = $isTaxInvoice ? (float) ($data['vat_rate'] ?? $receipt->vat_rate) : 0;
-        $nonVatLinesTotal = $isTaxInvoice ? round(collect($data['lines'])->where('is_non_vat', true)->sum('amount'), 2) : 0;
-        $vatInclusiveLinesTotal = $isTaxInvoice ? round(collect($data['lines'])->where('is_non_vat', false)->sum('amount'), 2) : $linesTotal;
-        $subtotalVat = $isTaxInvoice ? round($vatInclusiveLinesTotal / (1 + $vatRate / 100), 2) : $vatInclusiveLinesTotal;
-        $vatAmount = $isTaxInvoice ? round($vatInclusiveLinesTotal - $subtotalVat, 2) : 0;
-        $subtotalNonVat = $nonVatLinesTotal;
-        $grandTotal = round($subtotalNonVat + $subtotalVat + $vatAmount, 2);
+        DB::transaction(function () use ($data, $receipt, $pair, $totals) {
+            foreach (array_filter([$receipt, $pair]) as $r) {
+                $ownTotals = $r->type === 'TAX_INVOICE' ? $totals['tax_invoice'] : $totals['cash_receipt'];
+                $r->update(array_merge([
+                    'billing_customer_id' => $data['billing_customer_id'] ?? null,
+                    'buyer_name' => $data['buyer_name'],
+                    'buyer_tax_id' => $data['buyer_tax_id'] ?? null,
+                    'buyer_address' => $data['buyer_address'] ?? null,
+                    'buyer_is_head_office' => $data['buyer_is_head_office'] ?? true,
+                    'buyer_branch_no' => $data['buyer_branch_no'] ?? null,
+                    'payment_method' => $data['payment_method'] ?? null,
+                    'payment_reference' => $data['payment_reference'] ?? null,
+                ], $ownTotals));
 
-        DB::transaction(function () use ($data, $receipt, $subtotalNonVat, $subtotalVat, $vatRate, $vatAmount, $grandTotal) {
-            $receipt->update([
-                'billing_customer_id' => $data['billing_customer_id'] ?? null,
-                'buyer_name' => $data['buyer_name'],
-                'buyer_tax_id' => $data['buyer_tax_id'] ?? null,
-                'buyer_address' => $data['buyer_address'] ?? null,
-                'buyer_is_head_office' => $data['buyer_is_head_office'] ?? true,
-                'buyer_branch_no' => $data['buyer_branch_no'] ?? null,
-                'subtotal_non_vat' => $subtotalNonVat,
-                'subtotal_vat' => $subtotalVat,
-                'vat_rate' => $vatRate,
-                'vat_amount' => $vatAmount,
-                'grand_total' => $grandTotal,
-                'grand_total_words' => $this->numberToWordsService->bahtText($grandTotal),
-                'payment_method' => $data['payment_method'] ?? null,
-                'payment_reference' => $data['payment_reference'] ?? null,
-            ]);
-
-            $receipt->lines()->delete();
-            foreach (array_values($data['lines']) as $index => $line) {
-                ReceiptLine::create([
-                    'receipt_id' => $receipt->id,
-                    'sort_order' => $index,
-                    'description' => $line['description'],
-                    'invoice_no' => $line['invoice_no'] ?? null,
-                    'is_non_vat' => $line['is_non_vat'] ?? false,
-                    'amount' => $line['amount'],
-                ]);
+                $this->replaceLines($r, $data['lines']);
             }
         });
 
-        return response()->json($receipt->fresh()->load('lines', 'branch', 'shipments'));
+        $receipt = $receipt->fresh()->load('lines', 'branch', 'shipments');
+        $pair = $pair ? $pair->fresh()->load('lines', 'branch', 'shipments') : null;
+
+        return response()->json([
+            'cash_receipt' => $receipt->type === 'CASH_RECEIPT' ? $receipt : $pair,
+            'tax_invoice' => $receipt->type === 'TAX_INVOICE' ? $receipt : $pair,
+        ]);
     }
 
     /**
-     * Permanently deletes a Receipt/Tax Invoice — only ever allowed when EVERY shipment it covers
-     * was booked in Test mode (see Receipt::getIsTestAttribute()). Unlike void(), this actually
-     * detaches the shipment<->receipt lock rows, so the shipments become billable again on a
-     * fresh document — real/production documents can only ever be Voided, never deleted.
+     * Permanently deletes a Receipt/Tax Invoice pair — only ever allowed when EVERY shipment
+     * covered by BOTH paired documents was booked in Test mode (see Receipt::getIsTestAttribute()).
+     * Unlike void(), this actually detaches the shipment<->receipt lock rows, so the shipments
+     * become billable again on a fresh document — real/production documents can only ever be
+     * Voided, never deleted.
      */
     public function destroy(Receipt $receipt)
     {
         $receipt->loadMissing('shipments.agentAccount');
-        if (! $receipt->is_test) {
+        $pair = $receipt->pairedReceipt();
+        $pair?->loadMissing('shipments.agentAccount');
+
+        if (! $receipt->is_test || ($pair && ! $pair->is_test)) {
             return response()->json(['error' => 'ลบได้เฉพาะเอกสารที่ออกจาก Shipment โหมด Test เท่านั้น กรุณาใช้ Void แทน'], 403);
         }
 
-        DB::transaction(function () use ($receipt) {
-            $receipt->lines()->delete();
-            $receipt->shipments()->detach();
-            $receipt->delete();
+        DB::transaction(function () use ($receipt, $pair) {
+            foreach (array_filter([$receipt, $pair]) as $r) {
+                $r->lines()->delete();
+                $r->shipments()->detach();
+                $r->delete();
+            }
         });
 
         return response()->noContent();
@@ -360,15 +417,30 @@ class ReceiptController extends Controller
             'void_note' => ['nullable', 'string', 'max:500'],
         ]);
 
-        // Voiding is a status flag only — the shipment<->receipt lock rows are NEVER removed,
-        // so these shipments can never be re-billed on a new document (see module memory note).
-        $receipt->update([
-            'status' => 'VOIDED',
-            'voided_at' => now(),
-            'void_note' => $data['void_note'] ?? null,
-        ]);
+        $pair = $receipt->pairedReceipt();
 
-        return $receipt;
+        // Voiding is a status flag only — the shipment<->receipt lock rows are NEVER removed, so
+        // these shipments can never be re-billed on a new document. Cascades to the paired
+        // document (same receipt_group_id) so a Cash Receipt + Tax Invoice issued together are
+        // always voided together (2026-09-23).
+        $now = now();
+        foreach (array_filter([$receipt, $pair]) as $r) {
+            if ($r->status !== 'VOIDED') {
+                $r->update([
+                    'status' => 'VOIDED',
+                    'voided_at' => $now,
+                    'void_note' => $data['void_note'] ?? null,
+                ]);
+            }
+        }
+
+        $receipt = $receipt->fresh();
+        $pair = $pair?->fresh();
+
+        return response()->json([
+            'cash_receipt' => $receipt->type === 'CASH_RECEIPT' ? $receipt : $pair,
+            'tax_invoice' => $receipt->type === 'TAX_INVOICE' ? $receipt : $pair,
+        ]);
     }
 
     public function pdf(Receipt $receipt)

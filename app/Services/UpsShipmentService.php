@@ -68,9 +68,13 @@ class UpsShipmentService
                 'Address' => $this->buildAddress($from),
             ],
             'PaymentInformation' => [
+                // UPS schema requires ShipmentCharge as an array of objects (<= 3 items),
+                // even though we only ever send one (Type 01 = Transportation, billed to shipper).
                 'ShipmentCharge' => [
-                    'Type' => '01',
-                    'BillShipper' => ['AccountNumber' => $account['username_acc']],
+                    [
+                        'Type' => '01',
+                        'BillShipper' => ['AccountNumber' => $account['username_acc']],
+                    ],
                 ],
             ],
             'Service' => ['Code' => (string) $shipment['serviceCode']],
@@ -87,6 +91,22 @@ class UpsShipmentService
                 // per-package) matches what staff entered, instead of multiplying by quantity.
                 $pkgDeclaredValue = (float) ($pkg['declaredValue'] ?? 0) / $quantity;
 
+                // Package-level Optional Services (DeliveryConfirmation/DeliverToAddresseeOnly/
+                // DirectDeliveryOnly) apply the SAME shipment-wide selection to every package —
+                // combined with the Declared Value block into ONE PackageServiceOptions object,
+                // since UPS only accepts a single such key per package.
+                $packageServiceOptions = array_merge(
+                    $useCarrierInsurance && $pkgDeclaredValue > 0 && ! $pkgIsDocument ? [
+                        // UPS does not cover Document shipments with its own Declared Value
+                        // insurance at all — never send it for a document package (see UpsRateService).
+                        'DeclaredValue' => [
+                            'CurrencyCode' => $shipment['declaredValueCurrency'] ?? 'THB',
+                            'MonetaryValue' => number_format($pkgDeclaredValue, 2, '.', ''),
+                        ],
+                    ] : [],
+                    $this->buildPackageOptionalServices($shipment['upsOptionalServiceCodes'] ?? []),
+                );
+
                 $packageEntry = array_merge([
                     'Packaging' => ['Code' => $pkgIsDocument ? '01' : '02'],
                 ], $pkgIsDocument ? [] : [
@@ -101,16 +121,7 @@ class UpsShipmentService
                         'UnitOfMeasurement' => ['Code' => $pkg['weightUnit'] ?? 'KGS'],
                         'Weight' => (string) ($pkg['weight'] ?? ''),
                     ],
-                ], $useCarrierInsurance && $pkgDeclaredValue > 0 && ! $pkgIsDocument ? [
-                    // UPS does not cover Document shipments with its own Declared Value insurance
-                    // at all — never send it for a document package (see UpsRateService).
-                    'PackageServiceOptions' => [
-                        'DeclaredValue' => [
-                            'CurrencyCode' => $shipment['declaredValueCurrency'] ?? 'THB',
-                            'MonetaryValue' => number_format($pkgDeclaredValue, 2, '.', ''),
-                        ],
-                    ],
-                ] : []);
+                ], $packageServiceOptions !== [] ? ['PackageServiceOptions' => $packageServiceOptions] : []);
 
                 return array_fill(0, $quantity, $packageEntry);
             })->all(),
@@ -123,6 +134,18 @@ class UpsShipmentService
                 'CurrencyCode' => $shipment['declaredValueCurrency'] ?? 'THB',
                 'MonetaryValue' => (string) ($totalValue > 0 ? $totalValue : 1),
             ];
+        }
+
+        // Shipment-level Optional Services (currently just Saturday Delivery) + the Commercial
+        // Invoice (InternationalForms) — mandatory-ish for international non-document shipments
+        // so UPS actually returns a printable Commercial Invoice document (Form), matching DHL's
+        // auto-generated one.
+        $shipmentServiceOptions = array_merge(
+            $this->buildShipmentOptionalServices($shipment['upsOptionalServiceCodes'] ?? []),
+            $isInternational && $hasNonDocument ? ['InternationalForms' => $this->buildInternationalForms($shipment, $shipment['declaredValueCurrency'] ?? 'THB')] : [],
+        );
+        if ($shipmentServiceOptions !== []) {
+            $shipmentNode['ShipmentServiceOptions'] = $shipmentServiceOptions;
         }
 
         return [
@@ -140,11 +163,224 @@ class UpsShipmentService
         ];
     }
 
+    /** Shipment-level UPS Optional Services — currently just Saturday Delivery. */
+    private function buildShipmentOptionalServices(array $codes): array
+    {
+        return in_array('SATURDAY', $codes, true) ? ['SaturdayDeliveryIndicator' => ''] : [];
+    }
+
+    /**
+     * Package-level UPS Optional Services. Signature options (DCIS1/2/3) are mutually exclusive
+     * by nature (radio in the UI) — DeliveryConfirmation.DCISType: "1"=Delivery Confirmation,
+     * "2"=Signature Required, "3"=Adult Signature Required.
+     */
+    private function buildPackageOptionalServices(array $codes): array
+    {
+        $options = [];
+        $dcisType = match (true) {
+            in_array('DCIS3', $codes, true) => '3',
+            in_array('DCIS2', $codes, true) => '2',
+            in_array('DCIS1', $codes, true) => '1',
+            default => null,
+        };
+        if ($dcisType !== null) {
+            $options['DeliveryConfirmation'] = ['DCISType' => $dcisType];
+        }
+        if (in_array('ADDRESSEE_ONLY', $codes, true)) {
+            $options['DeliverToAddresseeOnlyIndicator'] = '';
+        }
+        if (in_array('DIRECT_ONLY', $codes, true)) {
+            $options['DirectDeliveryOnlyIndicator'] = '';
+        }
+
+        return $options;
+    }
+
+    /**
+     * Prefers the free-form Commercial Invoice line items (same shipment-level list used by
+     * DhlShipmentService::buildExportDeclaration) when provided; falls back to one Product per
+     * non-document package otherwise. UPS renders the actual Commercial Invoice PDF itself from
+     * this data (returned as ShipmentResults.Form) — no separate document upload needed.
+     */
+    private function buildInternationalForms(array $shipment, string $currency): array
+    {
+        $from = $shipment['from'];
+        $to = $shipment['to'];
+        $invoiceLines = collect($shipment['invoiceLines'] ?? []);
+
+        if ($invoiceLines->isNotEmpty()) {
+            $products = $invoiceLines->map(fn ($line) => array_filter([
+                'Description' => $line['description'] ?: 'General Merchandise',
+                'Unit' => [
+                    'Number' => (string) ($line['quantity'] ?? 1),
+                    'UnitOfMeasurement' => ['Code' => 'PCS'],
+                    'Value' => number_format(((float) ($line['unit_value'] ?? 0)) ?: 1, 2, '.', ''),
+                ],
+                'OriginCountryCode' => $line['country_of_origin'] ?: $from['country'],
+                'CommodityCode' => ($line['hs_code'] ?? null) ?: null,
+            ], fn ($v) => $v !== null))->values()->all();
+        } else {
+            $products = collect($shipment['packages'])->filter(fn ($pkg) => empty($pkg['isDocument']))->map(fn ($pkg) => [
+                'Description' => $pkg['description'] ?: 'General Merchandise',
+                'Unit' => [
+                    'Number' => (string) ($pkg['quantity'] ?? 1),
+                    'UnitOfMeasurement' => ['Code' => 'PCS'],
+                    'Value' => number_format(((float) ($pkg['declaredValue'] ?? 0)) ?: 1, 2, '.', ''),
+                ],
+                'OriginCountryCode' => $from['country'],
+            ])->values()->all();
+        }
+
+        $form = [
+            'FormType' => '01', // Commercial Invoice
+            'InvoiceNumber' => $shipment['refInvoiceNo'] ?: ('INV-'.now()->format('YmdHis')),
+            'InvoiceDate' => now()->format('Ymd'),
+            'ReasonForExport' => 'SALE',
+            'CurrencyCode' => $currency,
+            'Product' => $products,
+            // UPS rejects the whole ShipmentServiceOptions.InternationalForms block with a
+            // generic "Missing contact information" error unless a Contacts.SoldTo party is
+            // present — confirmed empirically against UPS's test API (SoldTo requires a "Name"
+            // key specifically; "CompanyName" alone is NOT accepted and errors with "Invalid or
+            // missing sold to name"). Default the Sold To party to the ShipTo (receiver), since
+            // this app doesn't currently collect a separate buyer/sold-to contact.
+            'Contacts' => [
+                'SoldTo' => array_filter([
+                    'Name' => $to['contactName'] ?: ($to['company'] ?: 'Receiver'),
+                    'AttentionName' => $to['contactName'] ?? null,
+                    'Address' => $this->buildAddress($to),
+                    'Phone' => ['Number' => $to['phone'] ?: '0000000000'],
+                ], fn ($v) => $v !== null),
+            ],
+        ];
+
+        // UPLOAD mode (see createShipment) — reference the staff file uploaded to UPS's
+        // Paperless Document API, so UPS's returned Form is backed by the actual file, not just
+        // our auto-built Product lines.
+        if (! empty($shipment['uploadedInvoiceDocumentId'])) {
+            $form['UserCreatedForm'] = ['DocumentID' => [$shipment['uploadedInvoiceDocumentId']]];
+        }
+
+        return $form;
+    }
+
+    /**
+     * Uploads a staff-provided file to UPS's Paperless Document API (customs evidence for
+     * UPLOAD-mode Commercial Invoice) and returns the DocumentID to reference from
+     * InternationalForms.UserCreatedForm. Schema/headers/URL version match the ONE variant
+     * confirmed live-working 2026-09-16 (real 200 + DocumentID) — v2 endpoint (not v3),
+     * ShipperNumber/transId/transactionSrc as HEADERS (not body fields), and the file content
+     * field named UserCreatedFormFile (not UserCreatedFormImage). Do not change any of these
+     * without re-verifying live first — see madd-notes.md for the extensive prior investigation.
+     */
+    public function uploadPaperlessDocument(string $token, array $account, ?string $mode, string $base64Content, string $fileFormat): string
+    {
+        $response = Http::withToken($token)
+            ->withHeaders([
+                'ShipperNumber' => $account['username_acc'],
+                'transId' => (string) \Illuminate\Support\Str::uuid(),
+                'transactionSrc' => config('services.ups.transaction_src', 'testing'),
+            ])
+            ->timeout(30)
+            ->post($this->upsUrl('paperless_document_url', $mode), [
+                'UploadRequest' => [
+                    'Request' => [
+                        'TransactionReference' => ['CustomerContext' => 'MADD Commercial Invoice Upload'],
+                    ],
+                    'UserCreatedForm' => [
+                        'UserCreatedFormFileName' => 'commercial-invoice.'.strtolower($fileFormat),
+                        'UserCreatedFormFileFormat' => strtolower($fileFormat),
+                        'UserCreatedFormDocumentType' => '001',
+                        'UserCreatedFormFile' => $base64Content,
+                    ],
+                ],
+            ]);
+
+        if (! $response->successful()) {
+            if ($response->status() === 401) {
+                throw new UpsTokenExpiredException('UPS paperless document upload failed: token expired');
+            }
+            throw new \RuntimeException('UPS paperless document upload failed: '.($response->json('response.errors.0.message') ?? $response->body() ?? $response->status()));
+        }
+
+        $documentId = $response->json('UploadResponse.FormsHistoryDocumentID.DocumentID.0')
+            ?? $response->json('UploadResponse.FormsHistoryDocumentID.DocumentID')
+            ?? $response->json('UploadResponse.FormsHistoryDocumentID.0.DocumentID');
+
+        if (is_array($documentId)) {
+            $documentId = $documentId[0] ?? null;
+        }
+
+        if (! $documentId) {
+            throw new \RuntimeException('UPS paperless document upload succeeded but no DocumentID was returned: '.$response->body());
+        }
+
+        return $documentId;
+    }
+
+    /**
+     * Links an already-uploaded Paperless Document (via uploadPaperlessDocument()) to a real,
+     * just-booked shipment — this is what actually makes the shipment's label carry the
+     * "EDI-IDIS" marking for customs. Schema confirmed live-working 2026-09-23 — like Upload,
+     * ShipperNumber must be sent as BOTH a header AND a body field (UPS's own published schema
+     * only documents the body field; omitting the header fails with "9590002 Missing or Invalid
+     * Shipper Number" even though the body value is correct).
+     */
+    public function pushToImageRepository(string $token, array $account, ?string $mode, string $documentId, string $trackingNumber): void
+    {
+        $response = Http::withToken($token)
+            ->withHeaders([
+                'ShipperNumber' => $account['username_acc'],
+                'transId' => (string) \Illuminate\Support\Str::uuid(),
+                'transactionSrc' => config('services.ups.transaction_src', 'testing'),
+            ])
+            ->timeout(30)
+            ->post($this->upsUrl('paperless_image_url', $mode), [
+                'PushToImageRepositoryRequest' => [
+                    'Request' => [
+                        'TransactionReference' => ['CustomerContext' => 'MADD Commercial Invoice Push'],
+                    ],
+                    'ShipperNumber' => $account['username_acc'],
+                    'FormsHistoryDocumentID' => ['DocumentID' => [$documentId]],
+                    'ShipmentIdentifier' => $trackingNumber,
+                    'ShipmentDateAndTime' => now()->format('Y-m-d-H.i.s'),
+                    'ShipmentType' => '1',
+                    'TrackingNumber' => [$trackingNumber],
+                ],
+            ]);
+
+        if (! $response->successful()) {
+            if ($response->status() === 401) {
+                throw new UpsTokenExpiredException('UPS push to image repository failed: token expired');
+            }
+            throw new \RuntimeException('UPS push to image repository failed: '.($response->json('response.errors.0.message') ?? $response->body() ?? $response->status()));
+        }
+    }
+
     /**
      * @return array{trackingNumber:string,labelBase64:?string,labelFormat:?string,waybillBase64:?string,waybillFormat:?string,commercialInvoiceBase64:?string,commercialInvoiceFormat:?string,pieces:array<int,array{trackingNumber:?string,labelBase64:?string,labelFormat:?string}>,raw:array}
      */
     public function createShipment(string $token, array $account, array $shipment, ?string $mode = null): array
     {
+        if (! empty($shipment['uploadedInvoice'])) {
+            // Best-effort: UPS's Paperless Document upload is a separate, currently-unreliable
+            // API (see madd-notes.md) — a failure here must NOT block the actual booking. The
+            // uploaded file still gets merged into our own stored Commercial Invoice PDF
+            // (ShipmentController::buildCombinedCommercialInvoiceStorageKey) regardless of
+            // whether UPS accepted it via this endpoint.
+            try {
+                $shipment['uploadedInvoiceDocumentId'] = $this->uploadPaperlessDocument(
+                    $token,
+                    $account,
+                    $mode,
+                    $shipment['uploadedInvoice']['content'],
+                    $shipment['uploadedInvoice']['format'],
+                );
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        }
+
         $response = Http::withToken($token)
             ->timeout(30)
             ->post($this->upsUrl('ship_url', $mode), $this->buildShipmentRequest($account, $shipment));
@@ -158,7 +394,20 @@ class UpsShipmentService
 
         $raw = $response->json();
 
-        return $this->parseShipmentResponse($raw);
+        $parsed = $this->parseShipmentResponse($raw);
+
+        // Best-effort, same reasoning as the Upload call above: link the uploaded document to the
+        // shipment we just booked so it actually shows the "EDI-IDIS" marking for customs, but
+        // never let a failure here undo an otherwise-successful booking.
+        if (! empty($shipment['uploadedInvoiceDocumentId']) && ! empty($parsed['trackingNumber'])) {
+            try {
+                $this->pushToImageRepository($token, $account, $mode, $shipment['uploadedInvoiceDocumentId'], $parsed['trackingNumber']);
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        }
+
+        return $parsed;
     }
 
     /**
@@ -187,10 +436,13 @@ class UpsShipmentService
         $controlLogReceiptList = is_array($controlLogReceipt) && array_is_list($controlLogReceipt) ? $controlLogReceipt : ($controlLogReceipt ? [$controlLogReceipt] : []);
         $waybill = $controlLogReceiptList[0] ?? null;
 
-        // Form (Commercial Invoice) is only returned when the request includes
-        // ShipmentServiceOptions.InternationalForms — we don't request it yet, so this is
-        // normally absent, but parsed defensively in case it's ever added upstream.
-        $form = $results['Form'] ?? null;
+        // Form (Commercial Invoice) is only present when the request included
+        // ShipmentServiceOptions.InternationalForms (see buildInternationalForms()) — now always
+        // requested for international non-document shipments. Unlike ShippingLabel/
+        // ControlLogReceipt, UPS nests Form's actual image bytes one level deeper under an
+        // "Image" object (Form.Image.GraphicImage / Form.Image.ImageFormat), NOT directly on
+        // Form itself — confirmed live against the test API.
+        $form = $results['Form']['Image'] ?? null;
 
         return [
             'trackingNumber' => $results['ShipmentIdentificationNumber'] ?? ($firstPackage['TrackingNumber'] ?? null),

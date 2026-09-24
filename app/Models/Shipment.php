@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 #[Fillable([
     'agent_account_id', 'branch_id', 'created_by', 'carrier', 'service_code', 'service_label',
     'tracking_number', 'pieces', 'status', 'origin', 'destination', 'packages', 'addon_lines',
+    'invoice_mode', 'invoice_lines',
     'freight_amount', 'addon_total', 'order_total', 'currency',
     'customer_type', 'entity_type', 'payment_method', 'bill_transportation_to', 'bill_duty_tax_to',
     'ref_invoice_no', 'ref_insurance_no', 'ref_purchase_no', 'rate_quote',
@@ -29,6 +30,7 @@ class Shipment extends Model
             'packages' => 'array',
             'pieces' => 'array',
             'addon_lines' => 'array',
+            'invoice_lines' => 'array',
             'raw_response' => 'array',
             'rate_quote' => 'array',
             'freight_amount' => 'decimal:2',

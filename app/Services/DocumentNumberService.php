@@ -8,8 +8,9 @@ use Illuminate\Support\Facades\DB;
 /**
  * Renders/increments the configurable Vol.No ("เล่มที่") and No. ("เลขที่") document numbers for
  * Receipts/Tax Invoices — one independent auto-incrementing counter per (branch, document_type,
- * field). Pattern placeholders: {YYYY}/{YY}/{MM}/{DD} substitute the current date; a run of zeros
- * in braces (e.g. "{00001}") is the counter itself, zero-padded to that width.
+ * field). Pattern placeholders: {YYYY}/{YYY}/{YY}/{MM}/{DD} substitute the current date (4/3/2
+ * digit year, month, day); a run of zeros in braces (e.g. "{00001}") is the counter itself,
+ * zero-padded to that width.
  */
 class DocumentNumberService
 {
@@ -69,8 +70,8 @@ class DocumentNumberService
     {
         $now = now();
         $rendered = str_replace(
-            ['{YYYY}', '{YY}', '{MM}', '{DD}'],
-            [$now->format('Y'), $now->format('y'), $now->format('m'), $now->format('d')],
+            ['{YYYY}', '{YYY}', '{YY}', '{MM}', '{DD}'],
+            [$now->format('Y'), substr($now->format('Y'), -3), $now->format('y'), $now->format('m'), $now->format('d')],
             $pattern,
         );
 

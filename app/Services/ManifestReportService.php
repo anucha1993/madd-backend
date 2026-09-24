@@ -22,8 +22,13 @@ use Illuminate\Support\Collection;
  * - Metal / Form / Other: addon_lines bucketed by their snapshotted category ("Metal Box",
  *   "Form / OT Fee", "Other" respectively — see AddonCategorySeeder). Any chargeBreakdown line
  *   whose charge code category isn't one of the above also falls into Other.
- * - Ref: the shipment's issued Receipt/Tax Invoice document number, if any (global one-per-
- *   shipment lock — see receipt_shipment), else blank.
+ * - Ref: the shipment's issued Receipt/Tax Invoice "เล่มที่/เลขที่" (vol_no/no), since only
+ *   shipments with an ISSUED receipt are ever included in this report (see
+ *   ManifestReportController::queryShipments).
+ * - Remark: the receipt's variance_amount (grand_total vs. shipment_total_snapshot, see
+ *   Receipt::getVarianceAmountAttribute) formatted as "ส่วนต่าง ±X.XX" — blank when the buyer
+ *   was billed exactly the shipment's sell price (the normal case) or for legacy receipts with
+ *   no snapshot at all.
  * - Weight Dim: standard air-freight volumetric formula (L x W x H cm / 5000) per package,
  *   since no dedicated dimensional-weight field is stored separately from the carrier's own
  *   billed/chargeable weight.
@@ -46,6 +51,12 @@ class ManifestReportService
         $result = [];
         foreach ($groups as $group) {
             $first = $group->first();
+            // Multiple Shipment bookings can share the same real-world tracking number (e.g. a
+            // package re-billed/split across several internal records) — the Manifest must only
+            // ever show ONE row per tracking number, not one per Shipment (confirmed with user
+            // 2026-09-24). Shipments with no tracking number at all never merge with each other.
+            $byTracking = $group->groupBy(fn (Shipment $s) => $s->tracking_number ?: 'shipment-'.$s->id);
+
             $result[] = [
                 'header' => [
                     'date' => $this->formatDateRange($from, $to, $group),
@@ -54,7 +65,7 @@ class ManifestReportService
                     'branch_code' => $first->branch?->code ?? '-',
                     'carrier' => $first->carrier,
                 ],
-                'rows' => $group->map(fn (Shipment $s) => $this->rowForShipment($s, $chargeCodesByProvider->get($s->carrier)))->values()->all(),
+                'rows' => $byTracking->map(fn ($shipments) => $this->rowForTracking($shipments, $chargeCodesByProvider))->values()->all(),
             ];
         }
 
@@ -70,6 +81,36 @@ class ManifestReportService
         $thai = fn (Carbon $d) => $d->format('d/m/').($d->year + 543);
 
         return $from && $to ? $thai(Carbon::parse($from)).'-'.$thai(Carbon::parse($to)) : '-';
+    }
+
+    /**
+     * Merges every Shipment sharing one tracking number into a single Manifest row: numeric
+     * charge/weight/package columns are summed across all of them, while descriptive columns
+     * (Zone/Pay/Dest/Type/Shipper/Consignee/Ins-Co/Tracking itself) are taken from the first
+     * (earliest-created) shipment — it doesn't matter which one is "the reference" since all
+     * their data is combined either way (confirmed with user 2026-09-24).
+     *
+     * @param  Collection<int, Shipment>  $shipments
+     */
+    private function rowForTracking(Collection $shipments, Collection $chargeCodesByProvider): array
+    {
+        $rows = $shipments->map(fn (Shipment $s) => $this->rowForShipment($s, $chargeCodesByProvider->get($s->carrier)))->values();
+
+        if ($rows->count() === 1) {
+            return $rows->first();
+        }
+
+        $merged = $rows->first();
+        foreach (['weight_act', 'weight_dim', 'freight', 'sur', 'accs', 'ins', 'metal', 'form', 'other', 'total_charge', 'inv_value'] as $key) {
+            $merged[$key] = round((float) $rows->sum($key), 2);
+        }
+        $merged['pkg'] = (int) $rows->sum('pkg');
+        // Almost always identical across the group (one tracking = one receipt in practice) —
+        // joined instead of just picked-first in the rare case they do differ.
+        $merged['ref'] = $rows->pluck('ref')->filter()->unique()->implode(', ') ?: null;
+        $merged['remark'] = $rows->pluck('remark')->filter()->unique()->implode('; ') ?: null;
+
+        return $merged;
     }
 
     private function rowForShipment(Shipment $shipment, ?Collection $chargeCodes): array
@@ -131,7 +172,22 @@ class ManifestReportService
             }
         }
 
-        $ref = $shipment->receipts()->first()?->no;
+        // Only ISSUED receipts count here — queryShipments() already restricts the whole report
+        // to shipments with at least one, so this is always non-null in practice (see
+        // ManifestReportController::queryShipments's whereHas + eager-load constraint).
+        $receipt = $shipment->receipts->first();
+        $ref = $receipt ? trim(($receipt->vol_no ?? '').'/'.($receipt->no ?? ''), '/') : null;
+
+        // Remark only fires when the buyer was actually billed a different amount than the
+        // shipment's own sell price at issue time (see Receipt::getVarianceAmountAttribute) —
+        // null/0 variance (the normal case) leaves Remark blank.
+        $remark = null;
+        if ($receipt && $receipt->variance_amount !== null) {
+            $variance = round((float) $receipt->variance_amount, 2);
+            if ($variance !== 0.0) {
+                $remark = 'ส่วนต่าง '.($variance > 0 ? '+' : '').number_format($variance, 2);
+            }
+        }
 
         return [
             'tracking' => $shipment->tracking_number,
@@ -154,7 +210,7 @@ class ManifestReportService
             'form' => round($form, 2),
             'other' => round($otherFromApi + $otherFromAddon, 2),
             'total_charge' => (float) $shipment->order_total,
-            'remark' => null,
+            'remark' => $remark,
             'inv_value' => round($invValue, 2),
         ];
     }

@@ -18,7 +18,7 @@ class ManifestReportController extends Controller
     }
 
     private const COLUMNS = [
-        'tracking' => 'Tracking', 'ref' => 'Ref', 'zone' => 'Zone',
+        'tracking' => 'Tracking', 'ref' => 'Vol./No.', 'zone' => 'Zone',
         'weight_act' => 'Act', 'weight_dim' => 'Dim',
         'pay' => 'Pay', 'dest' => 'Dest', 'type' => 'Type', 'pkg' => 'Pkg',
         'shipper' => 'Shipper', 'consignee' => 'Consignee',
@@ -27,14 +27,27 @@ class ManifestReportController extends Controller
         'total_charge' => 'Total Charge', 'remark' => 'Remark', 'inv_value' => 'Inv.Value',
     ];
 
+    /** Matches the reference manifest template's manually-tuned column widths. */
+    private const COLUMN_WIDTHS = [
+        'tracking' => 24.14, 'ref' => 19.43, 'zone' => 6.71,
+        'weight_act' => 18.71, 'weight_dim' => 15,
+        'pay' => 8.71, 'dest' => 8.86, 'type' => 13, 'pkg' => 7.43,
+        'shipper' => 33.14, 'consignee' => 25.43,
+        'freight' => 19.14, 'sur' => 7.43, 'accs' => 8.86,
+        'ins' => 13, 'ins_co' => 11.29, 'metal' => 10, 'form' => 8.86, 'other' => 26.86,
+        'total_charge' => 28, 'remark' => 11.29, 'inv_value' => 15.14,
+    ];
+
     /**
      * Resolves the "Daily/Weekly/Monthly/Yearly/Custom" quick-range presets shown on /manifest
      * into a concrete [from, to] date pair — Custom just passes date_from/date_to straight
      * through (already validated as required together in that case).
+     *
+     * @param  array{range?: string, date_from?: string, date_to?: string}  $filters
      */
-    private function resolveDateRange(Request $request): array
+    private function resolveDateRange(array $filters): array
     {
-        $preset = $request->query('range', 'daily');
+        $preset = $filters['range'] ?? 'daily';
         $today = now()->startOfDay();
 
         return match ($preset) {
@@ -42,29 +55,40 @@ class ManifestReportController extends Controller
             'monthly' => [$today->copy()->startOfMonth(), now()->endOfDay()],
             'yearly' => [$today->copy()->startOfYear(), now()->endOfDay()],
             'custom' => [
-                $request->query('date_from') ? \Illuminate\Support\Carbon::parse($request->query('date_from'))->startOfDay() : $today,
-                $request->query('date_to') ? \Illuminate\Support\Carbon::parse($request->query('date_to'))->endOfDay() : now()->endOfDay(),
+                ! empty($filters['date_from']) ? \Illuminate\Support\Carbon::parse($filters['date_from'])->startOfDay() : $today,
+                ! empty($filters['date_to']) ? \Illuminate\Support\Carbon::parse($filters['date_to'])->endOfDay() : now()->endOfDay(),
             ],
             default => [$today, now()->endOfDay()],
         };
     }
 
-    private function queryShipments(Request $request)
+    /**
+     * @param  array{range?: string, date_from?: string, date_to?: string, branch_id?: int|string, carrier?: string, agent_account_id?: int|string}  $filters
+     */
+    private function queryShipments(array $filters)
     {
-        [$from, $to] = $this->resolveDateRange($request);
+        [$from, $to] = $this->resolveDateRange($filters);
 
-        $query = Shipment::with(['agentAccount.agent', 'branch'])
+        // Only shipments that actually have an ISSUED Receipt/Tax Invoice belong on a manifest
+        // (this is a billing-facing document, not a raw booking log) — VOIDED receipts don't
+        // count, same as the "issued" semantics used everywhere else in the app.
+        $query = Shipment::with(['agentAccount.agent', 'branch', 'receipts' => function ($q) {
+            $q->where('status', 'ISSUED');
+        }])
             ->where('status', 'booked')
+            ->whereHas('receipts', function ($q) {
+                $q->where('status', 'ISSUED');
+            })
             ->whereBetween('created_at', [$from, $to]);
 
-        if ($request->filled('branch_id')) {
-            $query->where('branch_id', $request->query('branch_id'));
+        if (! empty($filters['branch_id'])) {
+            $query->where('branch_id', $filters['branch_id']);
         }
-        if ($request->filled('carrier')) {
-            $query->where('carrier', $request->query('carrier'));
+        if (! empty($filters['carrier'])) {
+            $query->where('carrier', $filters['carrier']);
         }
-        if ($request->filled('agent_account_id')) {
-            $query->where('agent_account_id', $request->query('agent_account_id'));
+        if (! empty($filters['agent_account_id'])) {
+            $query->where('agent_account_id', $filters['agent_account_id']);
         }
 
         return $query->orderBy('branch_id')->orderBy('agent_account_id')->orderBy('created_at')->get();
@@ -73,8 +97,9 @@ class ManifestReportController extends Controller
     /** JSON preview shown on-screen before exporting — same grouping/columns as the Excel file. */
     public function index(Request $request)
     {
-        $shipments = $this->queryShipments($request);
-        [$from, $to] = $this->resolveDateRange($request);
+        $filters = $request->query();
+        $shipments = $this->queryShipments($filters);
+        [$from, $to] = $this->resolveDateRange($filters);
 
         return response()->json([
             'groups' => $this->manifestReportService->buildGroups($shipments, $from, $to),
@@ -84,8 +109,27 @@ class ManifestReportController extends Controller
 
     public function export(Request $request)
     {
-        $shipments = $this->queryShipments($request);
-        [$from, $to] = $this->resolveDateRange($request);
+        $content = $this->buildManifestXlsx($request->query());
+        $filename = 'manifest-'.now()->format('Ymd-His').'.xlsx';
+
+        return response()->streamDownload(function () use ($content) {
+            echo $content;
+        }, $filename, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ]);
+    }
+
+    /**
+     * Builds the raw .xlsx bytes for the given filters — shared by the HTTP export() download
+     * and the scheduled-report mailer (App\Console\Commands\SendScheduledReports) so both paths
+     * produce byte-identical output.
+     *
+     * @param  array{range?: string, date_from?: string, date_to?: string, branch_id?: int|string, carrier?: string, agent_account_id?: int|string}  $filters
+     */
+    public function buildManifestXlsx(array $filters): string
+    {
+        $shipments = $this->queryShipments($filters);
+        [$from, $to] = $this->resolveDateRange($filters);
         $groups = $this->manifestReportService->buildGroups($shipments, $from, $to);
 
         $spreadsheet = new Spreadsheet();
@@ -105,14 +149,11 @@ class ManifestReportController extends Controller
             $this->writeGroupSheet($sheet, $group, $columnLetters, $lastCol);
         }
 
-        $filename = 'manifest-'.now()->format('Ymd-His').'.xlsx';
         $writer = new Xlsx($spreadsheet);
+        ob_start();
+        $writer->save('php://output');
 
-        return response()->streamDownload(function () use ($writer) {
-            $writer->save('php://output');
-        }, $filename, [
-            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        ]);
+        return ob_get_clean();
     }
 
     /** Excel sheet titles: max 31 chars, no \ / ? * [ ] : characters, and must be unique per workbook. */
@@ -139,45 +180,78 @@ class ManifestReportController extends Controller
 
         $sheet->setCellValue("A{$row}", 'MANIFEST');
         $sheet->mergeCells("A{$row}:{$lastCol}{$row}");
-        $sheet->getStyle("A{$row}")->getFont()->setBold(true)->setSize(16);
+        $sheet->getStyle("A{$row}")->getFont()->setBold(true)->setSize(26);
         $sheet->getStyle("A{$row}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        // Without an explicit height, the 16pt font overflows past the default row height into
-        // whichever cells below happen to be empty in that column.
-        $sheet->getRowDimension($row)->setRowHeight(24);
+        $sheet->getRowDimension($row)->setRowHeight(32.25);
         $row++;
 
-        $sheet->setCellValue("A{$row}", 'Date :');
-        $sheet->setCellValue("B{$row}", $header['date']);
-        $sheet->setCellValue("D{$row}", 'Account Number');
-        $sheet->setCellValue("F{$row}", $header['account_number']);
-        $sheet->setCellValue("H{$row}", 'Branch');
-        $sheet->setCellValue("J{$row}", "{$header['branch_name']} ({$header['branch_code']})");
-        $sheet->setCellValue($lastCol.$row, $header['carrier']);
-        $sheet->getStyle("A{$row}:{$lastCol}{$row}")->getFont()->setBold(true);
+        // Info row: label/value pairs merged across the same column boundaries as the data
+        // table below (Date, Account Number, Branch label+value, carrier) so the grid lines up.
+        $infoRow = $row;
+        $sheet->setCellValue("A{$infoRow}", 'Date :');
+        $sheet->setCellValue("B{$infoRow}", $header['date']);
+        $sheet->mergeCells("B{$infoRow}:C{$infoRow}");
+        $sheet->setCellValue("D{$infoRow}", 'Account Number');
+        $sheet->setCellValue("E{$infoRow}", $header['account_number']);
+        $sheet->mergeCells("E{$infoRow}:F{$infoRow}");
+        $sheet->setCellValue("G{$infoRow}", 'Branch');
+        $sheet->mergeCells("G{$infoRow}:I{$infoRow}");
+        $sheet->setCellValue("J{$infoRow}", "{$header['branch_name']} ({$header['branch_code']})");
+        $sheet->mergeCells("J{$infoRow}:U{$infoRow}");
+        $sheet->setCellValue($lastCol.$infoRow, $header['carrier']);
+        $sheet->getStyle("A{$infoRow}:{$lastCol}{$infoRow}")->getFont()->setBold(true)->setSize(12);
+        $sheet->getStyle("A{$infoRow}:{$lastCol}{$infoRow}")->getAlignment()->setVertical(Alignment::VERTICAL_CENTER);
+        $sheet->getStyle("E{$infoRow}:I{$infoRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->getStyle("J{$infoRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_LEFT);
+        $sheet->getRowDimension($infoRow)->setRowHeight(38.25);
         $row += 2;
 
+        // Two-row column header to match the reference manifest template: "Weight" spans as a
+        // merged super-header over its Act/Dim sub-columns, while every other column merges
+        // vertically across both header rows so it still reads as one label.
         $headerRow = $row;
-        foreach (array_values(self::COLUMNS) as $i => $label) {
-            $sheet->setCellValue($columnLetters[$i].$row, $label);
+        $headerSubRow = $row + 1;
+        foreach (array_keys(self::COLUMNS) as $i => $key) {
+            $label = self::COLUMNS[$key];
+            $col = $columnLetters[$i];
+            if ($key === 'weight_act') {
+                $sheet->setCellValue($col.$headerRow, 'Weight');
+                $sheet->mergeCells("{$col}{$headerRow}:{$columnLetters[$i + 1]}{$headerRow}");
+                $sheet->setCellValue($col.$headerSubRow, $label);
+            } elseif ($key === 'weight_dim') {
+                $sheet->setCellValue($col.$headerSubRow, $label);
+            } else {
+                $sheet->setCellValue($col.$headerRow, $label);
+                $sheet->mergeCells("{$col}{$headerRow}:{$col}{$headerSubRow}");
+            }
         }
-        $sheet->getStyle("A{$row}:{$lastCol}{$row}")->getFont()->setBold(true);
-        $sheet->getStyle("A{$row}:{$lastCol}{$row}")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('1F2937');
-        $sheet->getStyle("A{$row}:{$lastCol}{$row}")->getFont()->getColor()->setRGB('FFFFFF');
-        $sheet->getStyle("A{$row}:{$lastCol}{$row}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        $row++;
+        $sheet->getStyle("A{$headerRow}:{$lastCol}{$headerSubRow}")->getFont()->setBold(true)->setSize(12);
+        $sheet->getStyle("A{$headerRow}:{$lastCol}{$headerSubRow}")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('1F2937');
+        $sheet->getStyle("A{$headerRow}:{$lastCol}{$headerSubRow}")->getFont()->getColor()->setRGB('FFFFFF');
+        $sheet->getStyle("A{$headerRow}:{$lastCol}{$headerSubRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER)->setVertical(Alignment::VERTICAL_CENTER)->setWrapText(true);
+        $sheet->getRowDimension($headerRow)->setRowHeight(15.75);
+        $sheet->getRowDimension($headerSubRow)->setRowHeight(15.75);
+        $row = $headerSubRow + 1;
 
         foreach ($group['rows'] as $data) {
             foreach (array_keys(self::COLUMNS) as $i => $key) {
                 $sheet->setCellValue($columnLetters[$i].$row, $data[$key]);
             }
+            $sheet->getRowDimension($row)->setRowHeight(31.5);
             $row++;
         }
 
-        $sheet->getStyle("A{$headerRow}:{$lastCol}".($row - 1))
-            ->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
+        // Data rows default to a larger-than-PhpSpreadsheet's-default 10pt (user reported the
+        // exported sheet reads too small) — bump the whole body to 12pt, matching the header rows.
+        $dataRange = 'A'.($headerSubRow + 1).":{$lastCol}".($row - 1);
+        $sheet->getStyle($dataRange)->getFont()->setSize(12);
+        $sheet->getStyle($dataRange)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER)->setVertical(Alignment::VERTICAL_CENTER);
 
-        foreach ($columnLetters as $letter) {
-            $sheet->getColumnDimension($letter)->setAutoSize(true);
+        $sheet->getStyle("A1:{$lastCol}".($row - 1))
+            ->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_HAIR);
+
+        foreach ($columnLetters as $i => $letter) {
+            $sheet->getColumnDimension($letter)->setWidth(self::COLUMN_WIDTHS[array_keys(self::COLUMNS)[$i]]);
         }
     }
 }

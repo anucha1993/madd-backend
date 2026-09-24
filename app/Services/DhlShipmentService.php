@@ -75,12 +75,16 @@ class DhlShipmentService
         $currency = $shipment['declaredValueCurrency'] ?? 'THB';
         // Customs declared value — MANDATORY whenever isCustomsDeclarable is true, regardless of
         // whether carrier insurance was purchased (DHL rejects the shipment entirely otherwise:
-        // "required key [declaredValue] not found", confirmed live). Falls back to a nominal 1
-        // per dutiable package when no declared_value was entered, so it always matches the sum
-        // of the exportDeclaration line items built below (DHL cross-checks the two).
+        // "required key [declaredValue] not found", confirmed live). Prefers the free-form
+        // Commercial Invoice line items (shipment-level, not tied to packages) when staff filled
+        // them in; falls back to a nominal 1 per dutiable package otherwise, so it always matches
+        // the sum of the exportDeclaration line items built below (DHL cross-checks the two).
         $dutiablePackages = collect($packages)->filter(fn ($pkg) => empty($pkg['isDocument']));
+        $invoiceLines = collect($shipment['invoiceLines'] ?? []);
         $customsValue = $isCustomsDeclarable
-            ? $dutiablePackages->sum(fn ($pkg) => ((float) ($pkg['declaredValue'] ?? 0)) > 0 ? (float) $pkg['declaredValue'] : 1)
+            ? ($invoiceLines->isNotEmpty()
+                ? $invoiceLines->sum(fn ($line) => (float) ($line['quantity'] ?? 1) * (float) ($line['unit_value'] ?? 0))
+                : $dutiablePackages->sum(fn ($pkg) => ((float) ($pkg['declaredValue'] ?? 0)) > 0 ? (float) $pkg['declaredValue'] : 1))
             : 0;
 
         $expandedPackages = [];
@@ -99,7 +103,7 @@ class DhlShipmentService
             }
         }
 
-        return [
+        $request = [
             'plannedShippingDateAndTime' => now()->addDay()->setTime(10, 0)->format('Y-m-d\TH:i:s \G\M\TP'),
             'pickup' => ['isRequested' => false],
             'productCode' => $shipment['serviceCode'],
@@ -109,7 +113,10 @@ class DhlShipmentService
                 'encodingFormat' => 'pdf',
                 // A6 template = just the cropped thermal-size label (roughly 100x150mm), not the
                 // full A4 sheet the "_A4_" template pads it onto with lots of blank margin.
-                'imageOptions' => [['typeCode' => 'label', 'templateName' => 'ECOM26_84_A6_001', 'isRequested' => true]],
+                'imageOptions' => array_merge(
+                    [['typeCode' => 'label', 'templateName' => 'ECOM26_84_A6_001', 'isRequested' => true]],
+                    $isCustomsDeclarable ? [['typeCode' => 'invoice', 'templateName' => 'COMMERCIAL_INVOICE_P_10', 'isRequested' => true]] : [],
+                ),
             ],
             'customerDetails' => [
                 'shipperDetails' => [
@@ -144,36 +151,88 @@ class DhlShipmentService
                     : null,
             ], fn ($v) => $v !== null),
             'valueAddedServices' => array_merge(
+                collect($shipment['optionalServiceCodes'] ?? ['SF'])->map(fn ($code) => ['serviceCode' => $code])->all(),
                 $insuranceValue > 0 ? [['serviceCode' => 'II', 'value' => $insuranceValue, 'currency' => $currency]] : [],
                 $hasInsuredDocument ? [['serviceCode' => 'IB']] : [],
             ),
         ];
+
+        // "UPLOAD" Commercial Invoice mode (see ShipmentController::store) \u2014 attach the
+        // staff-provided file itself so DHL uses it as the Commercial Invoice (typeCode CIN)
+        // instead of only relying on our own local copy.
+        if (! empty($shipment['uploadedInvoice'])) {
+            $request['documentImages'] = [[
+                'typeCode' => 'CIN',
+                'imageFormat' => $shipment['uploadedInvoice']['format'],
+                'content' => $shipment['uploadedInvoice']['content'],
+            ]];
+        }
+
+        return $request;
     }
 
     /**
-     * One line item per non-document package (documents are never dutiable, so never appear
-     * here) — a nominal 1.00 price/currency is used when no declared value was entered, since
+     * Prefers the free-form Commercial Invoice line items (shipment-level list staff typed on
+     * the Commercial Invoice step — NOT tied 1:1 to physical packages, since a real invoice
+     * usually lists products, not boxes) when provided; falls back to one line item per
+     * non-document package (documents are never dutiable, so never appear here) otherwise — a
+     * nominal 1.00 price/currency is used when no declared value was entered either way, since
      * DHL requires a positive price per line regardless.
      */
     private function buildExportDeclaration(array $shipment, string $currency): array
     {
         $from = $shipment['from'];
-        $dutiablePackages = collect($shipment['packages'])->filter(fn ($pkg) => empty($pkg['isDocument']))->values();
+        $invoiceLines = collect($shipment['invoiceLines'] ?? []);
 
-        $lineItems = $dutiablePackages->map(function ($pkg, $index) use ($from, $currency) {
-            $qty = (int) ($pkg['quantity'] ?? 1);
-            $unitValue = (float) ($pkg['declaredValue'] ?? 0);
+        if ($invoiceLines->isNotEmpty()) {
+            // Per-line weight is preferred (matches DHL MyDHL+ portal's manually-typed line-item
+            // requirement) — falls back to splitting the total dutiable package weight evenly
+            // when a line has no explicit weight, so the request never violates DHL's schema.
+            $totalWeight = collect($shipment['packages'])
+                ->filter(fn ($pkg) => empty($pkg['isDocument']))
+                ->sum(fn ($pkg) => (float) $pkg['weight'] * (int) ($pkg['quantity'] ?? 1));
+            $fallbackPerLineWeight = round($totalWeight / max($invoiceLines->count(), 1), 3) ?: 0.5;
 
-            return [
-                'number' => $index + 1,
-                'description' => $pkg['description'] ?: ($pkg['productType'] ?: 'General Merchandise'),
-                'price' => $unitValue > 0 ? $unitValue : 1,
-                'priceCurrency' => $currency,
-                'quantity' => ['value' => $qty, 'unitOfMeasurement' => 'PCS'],
-                'manufacturerCountry' => $from['country'],
-                'weight' => ['netValue' => (float) $pkg['weight'], 'grossValue' => (float) $pkg['weight']],
-            ];
-        })->values()->all();
+            $lineItems = $invoiceLines->map(function ($line, $index) use ($from, $currency, $fallbackPerLineWeight) {
+                $qty = (float) ($line['quantity'] ?? 1);
+                $unitValue = (float) ($line['unit_value'] ?? 0);
+                $lineWeight = (float) ($line['weight'] ?? 0);
+                $perLineWeight = $lineWeight > 0 ? $lineWeight : $fallbackPerLineWeight;
+
+                return array_filter([
+                    'number' => $index + 1,
+                    'description' => $line['description'] ?: 'General Merchandise',
+                    'price' => $unitValue > 0 ? $unitValue : 1,
+                    'priceCurrency' => $currency,
+                    'quantity' => ['value' => $qty, 'unitOfMeasurement' => 'PCS'],
+                    'manufacturerCountry' => $line['country_of_origin'] ?: $from['country'],
+                    // NOTE: intentionally NOT sending an HS/commodity code here — DHL's Shipment
+                    // API (unlike the separate Landed Cost API) rejects any `commodityCode` key
+                    // on an exportDeclaration line item outright with a schema validation error
+                    // ("extraneous key [commodityCode] is not permitted"), confirmed live against
+                    // the test API. HS codes entered on the Commercial Invoice line are only used
+                    // for the DHL Landed Cost/UPS International Forms flows, not this field.
+                    'weight' => ['netValue' => $perLineWeight, 'grossValue' => $perLineWeight],
+                ], fn ($v) => $v !== null);
+            })->values()->all();
+        } else {
+            $dutiablePackages = collect($shipment['packages'])->filter(fn ($pkg) => empty($pkg['isDocument']))->values();
+
+            $lineItems = $dutiablePackages->map(function ($pkg, $index) use ($from, $currency) {
+                $qty = (int) ($pkg['quantity'] ?? 1);
+                $unitValue = (float) ($pkg['declaredValue'] ?? 0);
+
+                return [
+                    'number' => $index + 1,
+                    'description' => $pkg['description'] ?: ($pkg['productType'] ?: 'General Merchandise'),
+                    'price' => $unitValue > 0 ? $unitValue : 1,
+                    'priceCurrency' => $currency,
+                    'quantity' => ['value' => $qty, 'unitOfMeasurement' => 'PCS'],
+                    'manufacturerCountry' => $from['country'],
+                    'weight' => ['netValue' => (float) $pkg['weight'], 'grossValue' => (float) $pkg['weight']],
+                ];
+            })->values()->all();
+        }
 
         return [
             'lineItems' => $lineItems,
