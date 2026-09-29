@@ -35,5 +35,6 @@ class DatabaseSeeder extends Seeder
         $this->call(AddonCategorySeeder::class);
         $this->call(AddonItemSeeder::class);
         $this->call(ManifestOptionSeeder::class);
+        $this->call(ReceiptLineTemplateSeeder::class);
     }
 }

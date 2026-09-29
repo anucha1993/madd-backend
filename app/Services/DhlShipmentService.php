@@ -21,6 +21,56 @@ class DhlShipmentService
         return $mode === 'test' ? config('services.dhl.api_url_test') : config('services.dhl.api_url');
     }
 
+    /**
+     * DHL has no per-charge "BillShipper/BillReceiver" concept like UPS — instead the `accounts`
+     * array lists which account(s) apply, distinguished only by `typeCode`. Confirmed live
+     * against DHL's own OpenAPI spec (dpdhl-express-api-3.3.2.yaml,
+     * supermodelIoLogisticsExpressAccount): valid typeCode enum is exactly 'shipper', 'payer',
+     * 'duties-taxes' (no separate "receiver"/"third-party" — 'payer' covers both, distinguished
+     * only by which account number is supplied). 'shipper' (our own account) is always present;
+     * 'payer' is added whenever Transportation isn't billed to us; 'duties-taxes' is added only
+     * for Third Party duty/tax billing (Shipper/Receiver duty-tax is handled entirely via
+     * `incoterm` below, no extra account entry needed).
+     */
+    private function buildAccounts(array $shipment, array $account): array
+    {
+        $accounts = [['typeCode' => 'shipper', 'number' => $account['username_acc']]];
+
+        $billTransportationTo = strtoupper($shipment['billTransportationTo'] ?? 'SHIPPER');
+        if ($billTransportationTo !== 'SHIPPER') {
+            $payerNumber = $shipment['billTransportationAccountNumber'] ?? null;
+            if (empty($payerNumber)) {
+                throw new \RuntimeException("Bill Transportation to {$billTransportationTo} ต้องมีเลขบัญชี DHL ของฝ่ายนั้นก่อน");
+            }
+            $accounts[] = ['typeCode' => 'payer', 'number' => $payerNumber];
+        }
+
+        $billDutyTaxTo = strtoupper($shipment['billDutyTaxTo'] ?? 'RECEIVER');
+        if ($billDutyTaxTo === 'THIRD_PARTY') {
+            $dutyTaxNumber = $shipment['billDutyTaxAccountNumber'] ?? null;
+            if (empty($dutyTaxNumber)) {
+                throw new \RuntimeException('Bill Duty and Tax to Third Party ต้องมีเลขบัญชี DHL ของฝ่ายนั้นก่อน');
+            }
+            $accounts[] = ['typeCode' => 'duties-taxes', 'number' => $dutyTaxNumber];
+        }
+
+        return $accounts;
+    }
+
+    /**
+     * Duty/Tax billing is representable without any extra account number via the shipment's
+     * `incoterm`: 'DAP' (Delivered At Place — receiver pays duty/tax at delivery, DHL's existing
+     * default) vs 'DDP' (Delivered Duty Paid — shipper prepays, uses our own account already on
+     * the shipment). Third Party duty/tax billing ALSO needs the 'duties-taxes' account entry
+     * from buildAccounts() above — incoterm alone doesn't cover it.
+     */
+    private function resolveIncoterm(array $shipment): string
+    {
+        $billDutyTaxTo = strtoupper($shipment['billDutyTaxTo'] ?? 'RECEIVER');
+
+        return $billDutyTaxTo === 'SHIPPER' ? 'DDP' : 'DAP';
+    }
+
     private function buildPostalAddress(array $addr): array
     {
         // DHL's schema rejects explicit `null` for optional fields (addressLine2/3) — the key
@@ -107,7 +157,7 @@ class DhlShipmentService
             'plannedShippingDateAndTime' => now()->addDay()->setTime(10, 0)->format('Y-m-d\TH:i:s \G\M\TP'),
             'pickup' => ['isRequested' => false],
             'productCode' => $shipment['serviceCode'],
-            'accounts' => [['typeCode' => 'shipper', 'number' => $account['username_acc']]],
+            'accounts' => $this->buildAccounts($shipment, $account),
             'outputImageProperties' => [
                 'printerDPI' => 300,
                 'encodingFormat' => 'pdf',
@@ -141,7 +191,7 @@ class DhlShipmentService
                 // just the conventional description text DHL's own examples use, no functional
                 // effect on pricing/customs (that's driven entirely by isCustomsDeclarable above).
                 'description' => $shipment['description'] ?: (! $hasNonDocumentPackage ? 'Documents' : 'General Merchandise'),
-                'incoterm' => 'DAP',
+                'incoterm' => $this->resolveIncoterm($shipment),
                 'unitOfMeasurement' => 'metric',
                 // MANDATORY whenever isCustomsDeclarable is true ("...exportDeclaration is
                 // mandatory when provided product is dutiable" — confirmed live against the
@@ -252,6 +302,7 @@ class DhlShipmentService
     public function createShipment(array $account, array $shipment): array
     {
         $messageRef = $this->generateMessageReference();
+        $requestBody = $this->buildShipmentRequest($account, $shipment);
 
         $response = Http::withBasicAuth($account['basic_auth_username'], $account['basic_auth_password'])
             ->withHeaders([
@@ -260,7 +311,7 @@ class DhlShipmentService
                 'Message-Reference-Date' => now()->toRfc7231String(),
             ])
             ->timeout(30)
-            ->post($this->dhlUrl($account['mode'] ?? null).'/shipments', $this->buildShipmentRequest($account, $shipment));
+            ->post($this->dhlUrl($account['mode'] ?? null).'/shipments', $requestBody);
 
         if (! $response->successful()) {
             throw new \RuntimeException('DHL shipment creation failed: '.($response->json('detail') ?? $response->json('title') ?? $response->status()));
@@ -268,7 +319,17 @@ class DhlShipmentService
 
         $raw = $response->json();
 
-        return $this->parseShipmentResponse($raw);
+        $parsed = $this->parseShipmentResponse($raw);
+        // Kept alongside raw_response as dispute evidence — proves exactly what billing
+        // party/account we told DHL to charge (accounts[]/incoterm), in case DHL's own billing
+        // later disagrees with what was actually requested.
+        $parsed['rawRequest'] = $requestBody;
+        // Explicit confirmation the request was actually received/accepted (always 2xx here —
+        // the throw above already handles non-successful responses) without having to dig
+        // through raw_response's nested structure to infer it.
+        $parsed['httpStatus'] = $response->status();
+
+        return $parsed;
     }
 
     /**

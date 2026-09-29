@@ -7,10 +7,11 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * Renders/increments the configurable Vol.No ("เล่มที่") and No. ("เลขที่") document numbers for
- * Receipts/Tax Invoices — one independent auto-incrementing counter per (branch, document_type,
- * field). Pattern placeholders: {YYYY}/{YYY}/{YY}/{MM}/{DD} substitute the current date (4/3/2
- * digit year, month, day); a run of zeros in braces (e.g. "{00001}") is the counter itself,
- * zero-padded to that width.
+ * Receipts/Tax Invoices — one auto-incrementing counter per (branch, field), always keyed under
+ * document_type = CASH_RECEIPT since Cash Receipt + Tax Invoice are issued as a pair and share
+ * the exact same rendered number (see ReceiptController::store()). Pattern placeholders:
+ * {YYYY}/{YYY}/{YY}/{MM}/{DD} substitute the current date (4/3/2 digit year, month, day); a run
+ * of zeros in braces (e.g. "{00001}") is the counter itself, zero-padded to that width.
  */
 class DocumentNumberService
 {

@@ -72,6 +72,10 @@ return [
         // tracking number, which is what actually makes a shipment's label show "EDI-IDIS".
         'paperless_image_url' => env('UPS_PAPERLESS_IMAGE_URL', 'https://onlinetools.ups.com/api/paperlessdocuments/v2/image'),
         'paperless_image_url_test' => env('UPS_PAPERLESS_IMAGE_URL_TEST', 'https://wwwcie.ups.com/api/paperlessdocuments/v2/image'),
+        // Street Level Address Validation + Classification (XAV) — request option "3" (both
+        // validation and classification) is appended onto this base URL by UpsAddressValidationService.
+        'address_validation_url' => env('UPS_ADDRESS_VALIDATION_URL', 'https://onlinetools.ups.com/api/addressvalidation/v2'),
+        'address_validation_url_test' => env('UPS_ADDRESS_VALIDATION_URL_TEST', 'https://wwwcie.ups.com/api/addressvalidation/v2'),
         'transaction_src' => env('UPS_TRANSACTION_SRC', 'testing'),
     ],
 

@@ -13,7 +13,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'agent_id', 'username_acc', 'api_key',
     'client_id', 'client_secret',
     'basic_auth_username', 'basic_auth_password',
-    'status', 'mode',
+    'status', 'mode', 'is_api_enabled',
 ])]
 #[Hidden(['client_secret', 'basic_auth_password'])]
 class AgentAccount extends Model
@@ -26,6 +26,7 @@ class AgentAccount extends Model
     {
         return [
             'status' => 'boolean',
+            'is_api_enabled' => 'boolean',
         ];
     }
 

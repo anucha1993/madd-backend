@@ -14,6 +14,7 @@ use App\Http\Controllers\ChargeFormulaController;
 use App\Http\Controllers\CustomerAddressController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\CountryController;
+use App\Http\Controllers\AddressValidationController;
 use App\Http\Controllers\DhlTrackingController;
 use App\Http\Controllers\R2Controller;
 use App\Http\Controllers\InsuranceCountryCapController;
@@ -24,6 +25,7 @@ use App\Http\Controllers\MarkupRuleController;
 use App\Http\Controllers\PickupController;
 use App\Http\Controllers\ProductWeightBandController;
 use App\Http\Controllers\ReceiptController;
+use App\Http\Controllers\ReceiptLineTemplateController;
 use App\Http\Controllers\ReportScheduleController;
 use App\Http\Controllers\ShippingController;
 use App\Http\Controllers\ShipmentController;
@@ -70,6 +72,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('thai-subdistricts', ThaiSubdistrictController::class);
 
     Route::post('shipping/check-rate', [ShippingController::class, 'checkRate']);
+    Route::post('address-validation/validate', [AddressValidationController::class, 'validate']);
 
     Route::post('shipments', [ShipmentController::class, 'store']);
     Route::post('shipments/upload-commercial-invoice', [ShipmentController::class, 'uploadCommercialInvoiceFile']);
@@ -88,9 +91,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('billing-customers', BillingCustomerController::class);
 
     Route::post('receipts/preview-lines', [ReceiptController::class, 'previewLines']);
+    Route::post('receipts/print-batch', [ReceiptController::class, 'printBatch']);
     Route::post('receipts/{receipt}/void', [ReceiptController::class, 'void']);
     Route::get('receipts/{receipt}/pdf', [ReceiptController::class, 'pdf']);
     Route::apiResource('receipts', ReceiptController::class)->only(['index', 'store', 'show', 'update', 'destroy']);
+    Route::apiResource('receipt-line-templates', ReceiptLineTemplateController::class)->only(['index', 'store', 'update', 'destroy']);
 
     Route::post('pickups', [PickupController::class, 'store']);
     Route::get('pickups', [PickupController::class, 'index']);

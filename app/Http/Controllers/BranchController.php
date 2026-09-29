@@ -62,26 +62,25 @@ class BranchController extends Controller
     }
 
     /**
-     * The 4 Vol.No/No. numbering patterns for this branch (CASH_RECEIPT + TAX_INVOICE, each with
-     * vol_no and no) — auto-creates any missing rows with the DocumentNumberService defaults so
-     * the settings form always has all 4 to edit.
+     * The 2 Vol.No/No. numbering patterns for this branch — Cash Receipt and Tax Invoice are
+     * always issued together as a pair and share the exact same running number (see
+     * 2026-09-25 migration), so only one CASH_RECEIPT-keyed row per field is the source of
+     * truth. Auto-creates any missing rows with the DocumentNumberService defaults so the
+     * settings form always has both to edit.
      */
     public function documentNumberSettings(Branch $branch)
     {
-        $types = ['CASH_RECEIPT', 'TAX_INVOICE'];
         $fields = ['vol_no', 'no'];
         $defaults = ['vol_no' => '001', 'no' => '{00001}'];
 
-        foreach ($types as $type) {
-            foreach ($fields as $field) {
-                DocumentNumberSequence::firstOrCreate(
-                    ['branch_id' => $branch->id, 'document_type' => $type, 'field' => $field],
-                    ['pattern' => $defaults[$field], 'next_number' => 1],
-                );
-            }
+        foreach ($fields as $field) {
+            DocumentNumberSequence::firstOrCreate(
+                ['branch_id' => $branch->id, 'document_type' => 'CASH_RECEIPT', 'field' => $field],
+                ['pattern' => $defaults[$field], 'next_number' => 1],
+            );
         }
 
-        return $branch->documentNumberSequences()->get();
+        return $branch->documentNumberSequences()->where('document_type', 'CASH_RECEIPT')->get();
     }
 
     public function updateDocumentNumberSettings(Request $request, Branch $branch)

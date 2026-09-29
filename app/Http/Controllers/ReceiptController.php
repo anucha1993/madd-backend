@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Receipt;
 use App\Models\ReceiptLine;
 use App\Models\Shipment;
+use App\Services\ChargeMarkupService;
 use App\Services\DocumentNumberService;
 use App\Services\NumberToWordsService;
 use App\Services\ReceiptPdfService;
@@ -50,6 +51,15 @@ class ReceiptController extends Controller
         if ($dateTo = $request->query('date_to')) {
             $query->whereDate('issued_date', '<=', $dateTo);
         }
+        if ($paymentMethod = $request->query('payment_method')) {
+            $query->where('payment_method', 'like', "%{$paymentMethod}%");
+        }
+        if ($request->filled('min_total')) {
+            $query->where('grand_total', '>=', $request->query('min_total'));
+        }
+        if ($request->filled('max_total')) {
+            $query->where('grand_total', '<=', $request->query('max_total'));
+        }
 
         return response()->json($query->paginate(20));
     }
@@ -94,6 +104,13 @@ class ReceiptController extends Controller
                 continue;
             }
             foreach ($chargeBreakdown as $line) {
+                // Cost-only codes (carrier-own Declared Value/Insurance: UPS '400', DHL 'II'/'IB')
+                // are a COST reference only, never a real charge on their own — their actual sell
+                // price is billed separately below via addon_lines' Insurance row. Including both
+                // would double-count the same insurance charge in the suggested receipt lines.
+                if (in_array($line['code'] ?? null, ChargeMarkupService::COST_ONLY_CODES, true)) {
+                    continue;
+                }
                 $description = mb_strtoupper(trim((string) ($line['description'] ?? 'CHARGE'))).$carrierTag;
                 $totalsByDescription[$description] = ($totalsByDescription[$description] ?? 0) + (float) ($line['amount'] ?? 0);
             }
@@ -162,8 +179,17 @@ class ReceiptController extends Controller
     public function store(Request $request)
     {
         $data = $request->validate([
-            'shipment_ids' => ['required', 'array', 'min:1'],
+            // Real system Shipment ids AND/OR free-text manual refs (other carriers not tracked
+            // in this system, see manual_shipment_refs) — at least one of the two is required,
+            // checked further below since neither can be `required` on its own.
+            'shipment_ids' => ['nullable', 'array'],
             'shipment_ids.*' => ['integer', 'exists:shipments,id'],
+            'manual_shipment_refs' => ['nullable', 'array'],
+            'manual_shipment_refs.*' => ['string', 'max:100'],
+            // Defaults to the selected shipments' own branch when omitted — only required when
+            // issuing a manual-only receipt with no real shipment to infer it from. Staff may
+            // still override it even when real shipments ARE selected (2026-09-25).
+            'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
             'billing_customer_id' => ['nullable', 'integer', 'exists:billing_customers,id'],
             'buyer_name' => ['required', 'string', 'max:255'],
             'buyer_tax_id' => ['nullable', 'string', 'max:20'],
@@ -180,20 +206,35 @@ class ReceiptController extends Controller
             'payment_reference' => ['nullable', 'string', 'max:255'],
         ]);
 
-        $shipments = Shipment::whereIn('id', $data['shipment_ids'])->get();
-        $this->assertShipmentsBillable($shipments);
-        $branchId = $shipments->first()->branch_id;
+        $manualRefs = array_values(array_filter($data['manual_shipment_refs'] ?? []));
+        if (empty($data['shipment_ids']) && empty($manualRefs)) {
+            throw ValidationException::withMessages([
+                'shipment_ids' => 'กรุณาเลือก Shipment หรือระบุเลข Shipment อย่างน้อย 1 รายการ',
+            ]);
+        }
 
-        $targetTotal = round((float) $shipments->sum('order_total'), 2);
-        $linesTotal = round(collect($data['lines'])->sum('amount'), 2);
+        $shipments = ! empty($data['shipment_ids']) ? Shipment::whereIn('id', $data['shipment_ids'])->get() : collect();
+        if ($shipments->isNotEmpty()) {
+            $this->assertShipmentsBillable($shipments);
+        }
+
+        $branchId = $data['branch_id'] ?? $shipments->first()?->branch_id;
+        if (! $branchId) {
+            throw ValidationException::withMessages(['branch_id' => 'กรุณาเลือกสาขา']);
+        }
+
+        // Only real shipments have a system-tracked sell price to compare against — manual refs
+        // contribute nothing, and the variance display/edit-page comparison is simply skipped
+        // (null) when there's no real shipment at all (see Receipt::getVarianceAmountAttribute()).
+        $targetTotal = $shipments->isNotEmpty() ? round((float) $shipments->sum('order_total'), 2) : null;
         // Line-items total no longer needs to match the shipments' sell price exactly — some
         // customers are billed MORE than the shipment cost. The difference is recorded via
         // shipment_total_snapshot (see Receipt::getVarianceAmountAttribute()) instead of blocked.
 
-        $totals = $this->computeTotals($data['lines'], $linesTotal, (float) ($data['vat_rate'] ?? 7.00));
+        $totals = $this->computeTotals($data['lines'], (float) ($data['vat_rate'] ?? 7.00));
 
         try {
-            [$cashReceipt, $taxInvoice] = DB::transaction(function () use ($data, $branchId, $totals, $targetTotal, $request, $shipments) {
+            [$cashReceipt, $taxInvoice] = DB::transaction(function () use ($data, $branchId, $totals, $targetTotal, $manualRefs, $request, $shipments) {
                 $groupId = (string) Str::uuid();
 
                 $commonFields = [
@@ -201,6 +242,7 @@ class ReceiptController extends Controller
                     'branch_id' => $branchId,
                     'issued_date' => now()->toDateString(),
                     'shipment_total_snapshot' => $targetTotal,
+                    'manual_shipment_refs' => ! empty($manualRefs) ? $manualRefs : null,
                     'billing_customer_id' => $data['billing_customer_id'] ?? null,
                     'buyer_name' => $data['buyer_name'],
                     'buyer_tax_id' => $data['buyer_tax_id'] ?? null,
@@ -215,14 +257,16 @@ class ReceiptController extends Controller
 
                 $cashReceipt = Receipt::create(array_merge($commonFields, [
                     'type' => 'CASH_RECEIPT',
-                    'vol_no' => $this->documentNumberService->next($branchId, 'CASH_RECEIPT', 'vol_no'),
-                    'no' => $this->documentNumberService->next($branchId, 'CASH_RECEIPT', 'no'),
+                    'vol_no' => $sharedVolNo = $this->documentNumberService->next($branchId, 'CASH_RECEIPT', 'vol_no'),
+                    'no' => $sharedNo = $this->documentNumberService->next($branchId, 'CASH_RECEIPT', 'no'),
                 ], $totals['cash_receipt']));
 
                 $taxInvoice = Receipt::create(array_merge($commonFields, [
                     'type' => 'TAX_INVOICE',
-                    'vol_no' => $this->documentNumberService->next($branchId, 'TAX_INVOICE', 'vol_no'),
-                    'no' => $this->documentNumberService->next($branchId, 'TAX_INVOICE', 'no'),
+                    // Issued together as one pair — always the exact same vol_no/no as the Cash
+                    // Receipt above, not a separately-run counter.
+                    'vol_no' => $sharedVolNo,
+                    'no' => $sharedNo,
                 ], $totals['tax_invoice']));
 
                 foreach ([$cashReceipt, $taxInvoice] as $receipt) {
@@ -231,10 +275,14 @@ class ReceiptController extends Controller
 
                 // Per-type global lock — the unique index on (shipment_id, type) throws a
                 // QueryException if a race condition already attached one of these shipments to
-                // either document type elsewhere, aborting the whole transaction.
-                $shipmentIds = $shipments->pluck('id');
-                $cashReceipt->shipments()->attach($shipmentIds->mapWithKeys(fn ($id) => [$id => ['type' => 'CASH_RECEIPT']])->all());
-                $taxInvoice->shipments()->attach($shipmentIds->mapWithKeys(fn ($id) => [$id => ['type' => 'TAX_INVOICE']])->all());
+                // either document type elsewhere, aborting the whole transaction. Manual refs
+                // (see manual_shipment_refs) are never locked/attached here at all — nothing
+                // stops the same external tracking number from appearing on another receipt.
+                if ($shipments->isNotEmpty()) {
+                    $shipmentIds = $shipments->pluck('id');
+                    $cashReceipt->shipments()->attach($shipmentIds->mapWithKeys(fn ($id) => [$id => ['type' => 'CASH_RECEIPT']])->all());
+                    $taxInvoice->shipments()->attach($shipmentIds->mapWithKeys(fn ($id) => [$id => ['type' => 'TAX_INVOICE']])->all());
+                }
 
                 return [$cashReceipt, $taxInvoice];
             });
@@ -249,19 +297,19 @@ class ReceiptController extends Controller
     }
 
     /**
-     * Shared line-items -> financial totals math for BOTH paired documents. Shipment sell prices
-     * are already VAT-INCLUSIVE — VAT is only ever EXTRACTED from the vat-marked lines for the
-     * Tax Invoice's legal breakdown, never added on top, so both documents' grand_total always
-     * equals exactly the same $linesTotal that was entered.
+     * Shared line-items -> financial totals math for BOTH paired documents. A line NOT marked
+     * Non-VAT is entered as its PRE-TAX (exclusive) amount — VAT is ADDED on top of it, so
+     * grand_total = non-vat lines + vat-applicable lines + the added VAT (grand_total is now
+     * HIGHER than the raw sum of entered line amounts whenever any VAT-applicable line exists).
+     * Cash Receipt mirrors the Tax Invoice's grand_total (same amount actually collected).
      *
      * @return array{cash_receipt: array<string, mixed>, tax_invoice: array<string, mixed>}
      */
-    private function computeTotals(array $lines, float $linesTotal, float $vatRate): array
+    private function computeTotals(array $lines, float $vatRate): array
     {
         $nonVatLinesTotal = round(collect($lines)->where('is_non_vat', true)->sum('amount'), 2);
-        $vatInclusiveLinesTotal = round(collect($lines)->where('is_non_vat', false)->sum('amount'), 2);
-        $subtotalVat = round($vatInclusiveLinesTotal / (1 + $vatRate / 100), 2);
-        $vatAmount = round($vatInclusiveLinesTotal - $subtotalVat, 2);
+        $subtotalVat = round(collect($lines)->where('is_non_vat', false)->sum('amount'), 2);
+        $vatAmount = round($subtotalVat * $vatRate / 100, 2);
         $grandTotal = round($nonVatLinesTotal + $subtotalVat + $vatAmount, 2);
 
         return [
@@ -269,11 +317,11 @@ class ReceiptController extends Controller
             // receipt-page.blade.php's isCombinedLine).
             'cash_receipt' => [
                 'subtotal_non_vat' => 0,
-                'subtotal_vat' => $linesTotal,
+                'subtotal_vat' => $grandTotal,
                 'vat_rate' => 0,
                 'vat_amount' => 0,
-                'grand_total' => $linesTotal,
-                'grand_total_words' => $this->numberToWordsService->bahtText($linesTotal),
+                'grand_total' => $grandTotal,
+                'grand_total_words' => $this->numberToWordsService->bahtText($grandTotal),
             ],
             'tax_invoice' => [
                 'subtotal_non_vat' => $nonVatLinesTotal,
@@ -348,8 +396,7 @@ class ReceiptController extends Controller
         // shipment_total_snapshot/variance_amount on the Receipt model). Edited lines simply
         // recompute grand_total from scratch; shipment_total_snapshot stays untouched so the
         // variance is still visible afterward.
-        $linesTotal = round(collect($data['lines'])->sum('amount'), 2);
-        $totals = $this->computeTotals($data['lines'], $linesTotal, (float) ($data['vat_rate'] ?? 7.00));
+        $totals = $this->computeTotals($data['lines'], (float) ($data['vat_rate'] ?? 7.00));
         $pair = $receipt->pairedReceipt();
 
         DB::transaction(function () use ($data, $receipt, $pair, $totals) {
@@ -454,6 +501,25 @@ class ReceiptController extends Controller
     }
 
     /**
+     * Mass Print — one combined PDF covering every selected Receipt/Tax Invoice, in one print job.
+     */
+    public function printBatch(Request $request)
+    {
+        $data = $request->validate([
+            'receipt_ids' => ['required', 'array', 'min:1'],
+            'receipt_ids.*' => ['integer', 'exists:receipts,id'],
+        ]);
+
+        $receipts = Receipt::whereIn('id', $data['receipt_ids'])->orderBy('issued_date')->orderBy('id')->get();
+        $pdf = $this->receiptPdfService->renderBatch($receipts);
+
+        return response($pdf, 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'inline; filename="receipts-'.now()->format('Ymd-His').'.pdf"',
+        ]);
+    }
+
+    /**
      * @param  \Illuminate\Support\Collection<int, Shipment>  $shipments
      */
     private function assertShipmentsBillable($shipments): void
@@ -469,13 +535,10 @@ class ReceiptController extends Controller
                 'shipment_ids' => "Shipment ต่อไปนี้ถูกออกใบเสร็จ/ใบกำกับภาษีไปแล้ว: {$numbers}",
             ]);
         }
-
-        $branchIds = $shipments->pluck('branch_id')->unique();
-        if ($branchIds->count() > 1 || $branchIds->first() === null) {
-            throw ValidationException::withMessages([
-                'shipment_ids' => 'Shipment ที่เลือกต้องมาจากสาขาเดียวกันเท่านั้น (และต้องมีสาขาระบุไว้)',
-            ]);
-        }
+        // Branch is NOT required to match across shipments (or even be set at all) here — the
+        // receipt's own branch_id is resolved/required separately in store() (`$data['branch_id']
+        // ?? $shipments->first()?->branch_id`, with its own "กรุณาเลือกสาขา" error), and staff can
+        // freely override it regardless of what branch(es) the underlying shipments belong to.
     }
 
     private function formatAddress(array $address): string

@@ -247,6 +247,16 @@ class ShipmentController extends Controller
             'payment_method' => ['nullable', 'string', 'max:50'],
             'bill_transportation_to' => ['nullable', 'string', 'max:50'],
             'bill_duty_tax_to' => ['nullable', 'string', 'max:50'],
+            // Required whenever billing isn't to our own Shipper account — UPS's BillReceiver/
+            // BillThirdParty and DHL's payer/duties-taxes account entries both need the OTHER
+            // party's own carrier account number (see UpsShipmentService::buildPaymentInformation
+            // / DhlShipmentService::buildAccounts).
+            'bill_transportation_account_number' => ['nullable', 'string', 'max:20', 'required_if:bill_transportation_to,RECEIVER,THIRD_PARTY'],
+            'bill_transportation_third_party_country' => ['nullable', 'string', 'size:2', 'required_if:bill_transportation_to,THIRD_PARTY'],
+            'bill_transportation_third_party_postal_code' => ['nullable', 'string', 'max:10', 'required_if:bill_transportation_to,THIRD_PARTY'],
+            'bill_duty_tax_account_number' => ['nullable', 'string', 'max:20', 'required_if:bill_duty_tax_to,THIRD_PARTY'],
+            'bill_duty_tax_third_party_country' => ['nullable', 'string', 'size:2', 'required_if:bill_duty_tax_to,THIRD_PARTY'],
+            'bill_duty_tax_third_party_postal_code' => ['nullable', 'string', 'max:10', 'required_if:bill_duty_tax_to,THIRD_PARTY'],
             'ref_invoice_no' => ['nullable', 'string', 'max:255'],
             'ref_insurance_no' => ['nullable', 'string', 'max:255'],
             'ref_purchase_no' => ['nullable', 'string', 'max:255'],
@@ -257,7 +267,7 @@ class ShipmentController extends Controller
         ]);
 
 
-        $account = AgentAccount::with('agent')->where('status', true)->find($data['agent_account_id']);
+        $account = AgentAccount::with('agent')->where('status', true)->where('is_api_enabled', true)->find($data['agent_account_id']);
         if (! $account || $account->agent?->agent_code !== $data['carrier']) {
             return response()->json(['error' => 'ไม่พบบัญชี Carrier ที่เลือกไว้ หรือบัญชีถูกปิดใช้งานแล้ว'], 400);
         }
@@ -322,6 +332,17 @@ class ShipmentController extends Controller
             'invoiceLines' => $data['invoice_lines'] ?? [],
             'optionalServiceCodes' => $data['dhl_optional_services'] ?? ['SF'],
             'upsOptionalServiceCodes' => $data['ups_optional_services'] ?? [],
+            // Who pays freight/duty-tax (Payment Info step) — see UpsShipmentService::
+            // buildPaymentInformation() / DhlShipmentService::resolveIncoterm() for how each
+            // carrier actually applies this.
+            'billTransportationTo' => $data['bill_transportation_to'] ?? null,
+            'billDutyTaxTo' => $data['bill_duty_tax_to'] ?? null,
+            'billTransportationAccountNumber' => $data['bill_transportation_account_number'] ?? null,
+            'billTransportationThirdPartyCountry' => $data['bill_transportation_third_party_country'] ?? null,
+            'billTransportationThirdPartyPostalCode' => $data['bill_transportation_third_party_postal_code'] ?? null,
+            'billDutyTaxAccountNumber' => $data['bill_duty_tax_account_number'] ?? null,
+            'billDutyTaxThirdPartyCountry' => $data['bill_duty_tax_third_party_country'] ?? null,
+            'billDutyTaxThirdPartyPostalCode' => $data['bill_duty_tax_third_party_postal_code'] ?? null,
         ];
 
         // Supplementary Commercial Invoice attachment — attached to the carrier request as
@@ -353,11 +374,24 @@ class ShipmentController extends Controller
             'addon_total' => $data['addon_total'],
             'order_total' => $data['order_total'],
             'currency' => $data['currency'] ?? 'THB',
+            // The carrier's own pre-markup quoted total (see ChargeMarkupService::applyToResults'
+            // costNegotiated/costPublished snapshot) — the real cost reference, kept independent
+            // of freight_amount/order_total above (which already have markup baked in as the
+            // customer-facing sell price). Falls back to published only when no negotiated rate
+            // was returned (e.g. account has no UPS negotiated-rate agreement).
+            'cost_amount' => $data['rate_quote']['costNegotiated'] ?? $data['rate_quote']['costPublished'] ?? null,
+            'cost_currency' => $data['rate_quote']['currency'] ?? $data['currency'] ?? 'THB',
             'customer_type' => $data['customer_type'] ?? null,
             'entity_type' => $data['entity_type'] ?? null,
             'payment_method' => $data['payment_method'] ?? null,
             'bill_transportation_to' => $data['bill_transportation_to'] ?? null,
             'bill_duty_tax_to' => $data['bill_duty_tax_to'] ?? null,
+            'bill_transportation_account_number' => $data['bill_transportation_account_number'] ?? null,
+            'bill_transportation_third_party_country' => $data['bill_transportation_third_party_country'] ?? null,
+            'bill_transportation_third_party_postal_code' => $data['bill_transportation_third_party_postal_code'] ?? null,
+            'bill_duty_tax_account_number' => $data['bill_duty_tax_account_number'] ?? null,
+            'bill_duty_tax_third_party_country' => $data['bill_duty_tax_third_party_country'] ?? null,
+            'bill_duty_tax_third_party_postal_code' => $data['bill_duty_tax_third_party_postal_code'] ?? null,
             'ref_invoice_no' => $data['ref_invoice_no'] ?? null,
             'ref_insurance_no' => $data['ref_insurance_no'] ?? null,
             'ref_purchase_no' => $data['ref_purchase_no'] ?? null,
@@ -380,12 +414,10 @@ class ShipmentController extends Controller
                 ], $shipment, $account->mode));
             }
         } catch (\Throwable $e) {
-            $record = Shipment::create($recordAttributes + [
-                'status' => 'failed',
-                'error_message' => $e->getMessage(),
-            ]);
-
-            return response()->json(['error' => $e->getMessage(), 'shipment_id' => $record->id], 422);
+            // A failed carrier request never actually created a real shipment with the carrier —
+            // don't persist a "failed" Shipment row for it (previously did, cluttering the list
+            // with duplicate-looking attempts every time staff retried after a rejection).
+            return response()->json(['error' => $e->getMessage()], 422);
         }
 
         // UPS returns a separate label per physical piece (PackageResults), so each piece's
@@ -424,6 +456,8 @@ class ShipmentController extends Controller
                 $shipment['uploadedInvoice'] ?? null,
             ),
             'raw_response' => $result['raw'],
+            'raw_request' => $result['rawRequest'] ?? null,
+            'carrier_http_status' => $result['httpStatus'] ?? null,
         ]);
 
         return response()->json($record);
@@ -545,8 +579,10 @@ class ShipmentController extends Controller
             for ($page = 1; $page <= $pageCount; $page++) {
                 $templateId = $mpdf->importPage($page);
                 $size = $mpdf->getTemplateSize($templateId);
+                // orientation MUST be 'P' — mpdf's _setPageSize() swaps sheet-size width/height
+                // whenever orientation is 'L', which would corrupt an already-exact final size.
                 $mpdf->AddPageByArray([
-                    'orientation' => $size['width'] > $size['height'] ? 'L' : 'P',
+                    'orientation' => 'P',
                     'sheet-size' => [$size['width'], $size['height']],
                     'margin-top' => 0,
                     'margin-bottom' => 0,
@@ -744,9 +780,10 @@ class ShipmentController extends Controller
                     $size = $mpdf->getTemplateSize($templateId);
                     // Size THIS page to the imported template's own dimensions (mm) instead of a
                     // fixed A4 canvas — otherwise a compact/thermal-size label gets padded onto
-                    // a much bigger blank page.
+                    // a much bigger blank page. orientation MUST be 'P' — mpdf's _setPageSize()
+                    // swaps sheet-size width/height whenever orientation is 'L'.
                     $mpdf->AddPageByArray([
-                        'orientation' => $size['width'] > $size['height'] ? 'L' : 'P',
+                        'orientation' => 'P',
                         'sheet-size' => [$size['width'], $size['height']],
                     ]);
                     $mpdf->useTemplate($templateId);
@@ -815,9 +852,10 @@ class ShipmentController extends Controller
             $size = $mpdf->getTemplateSize($templateId);
             // Size THIS page to the imported template's own dimensions (mm) instead of a fixed
             // A4 canvas — otherwise a compact/thermal-size label gets padded onto a much bigger
-            // blank page.
+            // blank page. orientation MUST be 'P' — mpdf's _setPageSize() swaps sheet-size
+            // width/height whenever orientation is 'L'.
             $mpdf->AddPageByArray([
-                'orientation' => $size['width'] > $size['height'] ? 'L' : 'P',
+                'orientation' => 'P',
                 'sheet-size' => [$size['width'], $size['height']],
             ]);
             $mpdf->useTemplate($templateId);
@@ -880,6 +918,32 @@ class ShipmentController extends Controller
             ->skip(1)
             ->values();
 
+        // Same PAYMENT OF CHARGES / TOTAL CHARGES data as UPS's waybill (see
+        // buildPaymentOfChargesLines below) — DHL's stand-in previously only printed the label +
+        // tracking numbers, missing this billing evidence entirely. Drawn via raw Text() calls,
+        // NOT WriteHTML() — confirmed live that WriteHTML() silently produces no output at all on
+        // a page built via importPage()/useTemplate() (mpdf's HTML flow engine doesn't attach to
+        // a page whose content came from a raw template import), same reason the pre-existing
+        // tracking-numbers list below was always drawn with Text() too.
+        $trackingLines = [];
+        if ($otherTrackingNumbers->isNotEmpty()) {
+            $trackingLines[] = ['bold' => true, 'text' => 'Tracking Numbers'];
+            // Renumbered 1..N for the DISPLAYED list only (piece #1 is intentionally excluded —
+            // its number is already printed on the label above).
+            foreach ($otherTrackingNumbers as $i => $trackingNumber) {
+                $trackingLines[] = ['bold' => false, 'text' => ($i + 1).'. '.$trackingNumber];
+            }
+        }
+        $lineGroups = array_filter([
+            $this->buildPaymentOfChargesLines($shipment),
+            $trackingLines,
+            $this->buildTotalChargesLines($shipment),
+        ]);
+        $totalLines = array_sum(array_map('count', $lineGroups));
+        // Rough heuristic (mm): ~5mm per line plus a small gap between each group, safer to
+        // overshoot slightly (blank space at the bottom) than clip content off the sheet.
+        $extraHeight = 10 + $totalLines * 5 + (count($lineGroups) - 1) * 3;
+
         $bytes = $this->r2Service->download($storageKey);
         $extension = strtolower(pathinfo($storageKey, PATHINFO_EXTENSION)) ?: 'pdf';
         $tempPath = tempnam(sys_get_temp_dir(), 'dhl-waybill-').'.'.$extension;
@@ -887,14 +951,15 @@ class ShipmentController extends Controller
 
         try {
             $mpdf = new Mpdf(['format' => 'A4']);
-            $extraHeight = $otherTrackingNumbers->isEmpty() ? 0 : 20;
 
             if ($extension === 'pdf') {
                 $mpdf->setSourceFile($tempPath);
                 $templateId = $mpdf->importPage(1);
                 $size = $mpdf->getTemplateSize($templateId);
+                // orientation MUST be 'P' — mpdf's _setPageSize() swaps sheet-size width/height
+                // whenever orientation is 'L', which would corrupt an already-exact final size.
                 $mpdf->AddPageByArray([
-                    'orientation' => $size['width'] > $size['height'] ? 'L' : 'P',
+                    'orientation' => 'P',
                     'sheet-size' => [$size['width'], $size['height'] + $extraHeight],
                     'margin-top' => 0,
                     'margin-bottom' => 0,
@@ -918,19 +983,17 @@ class ShipmentController extends Controller
                 $labelBottomY = $labelHeight + 10;
             }
 
-            if ($otherTrackingNumbers->isNotEmpty()) {
-                // Renumbered 1..N for the DISPLAYED list only (piece #1 is intentionally excluded
-                // — its number is already printed on the label above).
-                $line = ' '.$otherTrackingNumbers
-                    ->map(fn ($trackingNumber, $i) => ($i + 1).'. '.$trackingNumber)
-                    ->implode('   ');
-                // Text() writes at an exact fixed position and never triggers mpdf's automatic
-                // page-break (unlike Write()) — needed since this sits right at the sheet's
-                // bottom edge, past where Write() would otherwise overflow onto a new page.
-                $mpdf->SetFont('', 'B', 9);
-                $mpdf->Text(5, $labelBottomY + 9, 'Tracking Numbers');
-                $mpdf->SetFont('', '', 9);
-                $mpdf->Text(5, $labelBottomY + 15, $line);
+            $y = $labelBottomY + 6;
+            foreach ($lineGroups as $lines) {
+                foreach ($lines as $line) {
+                    // Text() writes at an exact fixed position and never triggers mpdf's automatic
+                    // page-break (unlike Write()) — needed since this sits right at the sheet's
+                    // bottom edge, past where Write() would otherwise overflow onto a new page.
+                    $mpdf->SetFont('', $line['bold'] ? 'B' : '', 9);
+                    $mpdf->Text(5, $y, $line['text']);
+                    $y += 5;
+                }
+                $y += 3;
             }
 
             return $mpdf->Output('', 'S');
@@ -1054,45 +1117,82 @@ class ShipmentController extends Controller
     /**
      * "PAYMENT OF CHARGES" block on a real UPS Shipper's Copy — only the options that actually
      * apply to this shipment are printed, no unchecked alternatives listed (each label still
-     * pulled from the real Shipment record: bill_transportation_to / bill_duty_tax_to, and the
-     * REAL UPS shipper account number that booked it via agentAccount->username_acc). PRE is
-     * always the real state here since this app only ever books via an account (see
-     * UpsShipmentService::buildShipmentRequest — PaymentInformation always sends BillShipper,
-     * never a Collect charge type).
+     * pulled from the real Shipment record: bill_transportation_to / bill_duty_tax_to, and
+     * whichever account number was actually sent to the carrier — see
+     * UpsShipmentService::buildPaymentInformation / DhlShipmentService::buildAccounts).
      */
-    private function buildPaymentOfChargesHtml(Shipment $shipment): string
+    /**
+     * "PAYMENT OF CHARGES" line data — shared by buildPaymentOfChargesHtml() (UPS waybill) and
+     * buildDhlDiyWaybill() (DHL waybill, drawn via raw Text() calls instead of HTML).
+     * @return array<int, array{bold: bool, text: string}>
+     */
+    private function buildPaymentOfChargesLines(Shipment $shipment): array
     {
         $billTransportTo = strtoupper($shipment->bill_transportation_to ?: 'SHIPPER');
         $billDutyTaxTo = strtoupper($shipment->bill_duty_tax_to ?: 'RECEIVER');
         $shipperAccountNumber = $shipment->agentAccount?->username_acc;
 
         $transportLabel = match ($billTransportTo) {
-            'RECEIVER' => 'Bill Transportation to Receiver',
-            'THIRD_PARTY' => 'Bill Transportation to Third Party',
+            'RECEIVER' => 'Bill Transportation to Receiver'.($shipment->bill_transportation_account_number ? ' '.$shipment->bill_transportation_account_number : ''),
+            'THIRD_PARTY' => 'Bill Transportation to Third Party'.($shipment->bill_transportation_account_number ? ' '.$shipment->bill_transportation_account_number : ''),
             default => 'Bill Transportation to Shipper'.($shipperAccountNumber ? ' '.$shipperAccountNumber : ''),
         };
         $dutyTaxLabel = match ($billDutyTaxTo) {
             'SHIPPER' => 'Bill Duty and Tax to Shipper'.($shipperAccountNumber ? ' '.$shipperAccountNumber : ''),
-            'THIRD_PARTY' => 'Bill Duty and Tax to Third Party',
+            'THIRD_PARTY' => 'Bill Duty and Tax to Third Party'.($shipment->bill_duty_tax_account_number ? ' '.$shipment->bill_duty_tax_account_number : ''),
             default => 'Bill Duty and Tax to Receiver',
         };
+        // PRE (prepaid) reflects reality only when Transportation is billed to the Shipper;
+        // Receiver/Third Party transportation billing is a real "Collect"/"Third Party" freight
+        // term now that those accounts are actually sent to the carrier (see
+        // UpsShipmentService::buildPaymentInformation/DhlShipmentService::buildAccounts).
+        $freightTerm = match ($billTransportTo) {
+            'RECEIVER' => 'COLLECT',
+            'THIRD_PARTY' => 'THIRD PARTY',
+            default => 'PRE',
+        };
 
-        return '<div style="font-weight:bold;">PAYMENT OF CHARGES</div>'
-            .'<div>[X] PRE</div>'
-            .'<div>[X] '.htmlspecialchars($transportLabel).'</div>'
-            .'<div>[X] '.htmlspecialchars($dutyTaxLabel).'</div>';
+        return [
+            ['bold' => true, 'text' => 'PAYMENT OF CHARGES'],
+            ['bold' => false, 'text' => '[X] '.$freightTerm],
+            ['bold' => false, 'text' => '[X] '.$transportLabel],
+            ['bold' => false, 'text' => '[X] '.$dutyTaxLabel],
+        ];
+    }
+
+    private function buildPaymentOfChargesHtml(Shipment $shipment): string
+    {
+        return $this->linesToHtml($this->buildPaymentOfChargesLines($shipment));
     }
 
     /**
-     * TOTAL CHARGES — the actual price billed to the customer for this shipment (freight +
-     * addons), same order_total staff entered on the Payment Info step, not a UPS-quoted rate.
+     * TOTAL CHARGES line data — the actual price billed to the customer for this shipment
+     * (freight + addons), same order_total staff entered on the Payment Info step, not a
+     * carrier-quoted rate. Shared by buildTotalChargesHtml() (UPS) and buildDhlDiyWaybill() (DHL).
+     * @return array<int, array{bold: bool, text: string}>
      */
-    private function buildTotalChargesHtml(Shipment $shipment): string
+    private function buildTotalChargesLines(Shipment $shipment): array
     {
         $currency = $shipment->currency ?: 'THB';
 
-        return '<div style="font-weight:bold;">TOTAL CHARGES</div>'
-            .'<div>'.htmlspecialchars($currency).' '.number_format((float) $shipment->order_total, 2).'</div>';
+        return [
+            ['bold' => true, 'text' => 'TOTAL CHARGES'],
+            ['bold' => false, 'text' => $currency.' '.number_format((float) $shipment->order_total, 2)],
+        ];
+    }
+
+    private function buildTotalChargesHtml(Shipment $shipment): string
+    {
+        return $this->linesToHtml($this->buildTotalChargesLines($shipment));
+    }
+
+    /** @param array<int, array{bold: bool, text: string}> $lines */
+    private function linesToHtml(array $lines): string
+    {
+        return implode('', array_map(
+            fn ($line) => '<div'.($line['bold'] ? ' style="font-weight:bold;"' : '').'>'.htmlspecialchars($line['text']).'</div>',
+            $lines,
+        ));
     }
 
     /**

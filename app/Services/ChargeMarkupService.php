@@ -10,9 +10,12 @@ class ChargeMarkupService
     /**
      * These codes carry the carrier's own real cost (used only as a cost reference — see
      * ShippingController/shipment UI) and must never be fixed-overridden or marked up here.
-     * 'IB' is DHL's document-only Extended Liability service (see DhlRateService).
+     * 'IB' is DHL's document-only Extended Liability service (see DhlRateService). Public so
+     * other consumers of a shipment's `rate_quote.chargeBreakdown` (e.g. ReceiptController's
+     * suggested line items) can also exclude these from a real customer-facing sell total —
+     * their actual sell price is billed separately via the Insurance Add-on line instead.
      */
-    private const COST_ONLY_CODES = ['400', 'II', 'IB'];
+    public const COST_ONLY_CODES = ['400', 'II', 'IB'];
 
     /**
      * Apply each account's configured fixed charge overrides (ChargeFixedOverride — intercepts
@@ -47,6 +50,14 @@ class ChargeMarkupService
             if (! empty($result['error']) || empty($result['accountId'])) {
                 return $result;
             }
+
+            // Snapshot the carrier's own totals/breakdown BEFORE any override/markup below
+            // touches them — this is the only trustworthy "real cost" reference (see
+            // Shipment::cost_amount); published/negotiated/chargeBreakdown further down get
+            // mutated into the customer-facing SELL price and must never be read back as cost.
+            $result['costPublished'] = $result['published'] ?? null;
+            $result['costNegotiated'] = $result['negotiated'] ?? null;
+            $result['costBreakdown'] = $result['chargeBreakdown'] ?? [];
 
             $accountOverrides = $overridesByAccount->get($result['accountId']);
             $accountRules = $rulesByAccount->get($result['accountId']);

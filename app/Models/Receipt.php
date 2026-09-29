@@ -12,7 +12,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'type', 'receipt_group_id', 'branch_id', 'vol_no', 'no', 'issued_date',
     'billing_customer_id', 'buyer_name', 'buyer_tax_id', 'buyer_address', 'buyer_is_head_office', 'buyer_branch_no',
     'subtotal_non_vat', 'subtotal_vat', 'vat_rate', 'vat_amount', 'grand_total', 'grand_total_words',
-    'shipment_total_snapshot',
+    'shipment_total_snapshot', 'manual_shipment_refs',
     'payment_method', 'payment_reference',
     'status', 'voided_at', 'void_note', 'created_by',
 ])]
@@ -31,6 +31,7 @@ class Receipt extends Model
             'vat_amount' => 'decimal:2',
             'grand_total' => 'decimal:2',
             'shipment_total_snapshot' => 'decimal:2',
+            'manual_shipment_refs' => 'array',
             'voided_at' => 'datetime',
         ];
     }
@@ -103,8 +104,14 @@ class Receipt extends Model
             $this->load('shipments.agentAccount');
         }
 
-        // An orphaned receipt (no shipments attached at all — e.g. leftover dev/test debris from
-        // a shipment that was itself deleted) is also safe to delete, nothing real is left on it.
-        return $this->shipments->isEmpty() || $this->shipments->every(fn (Shipment $s) => $s->is_test);
+        if ($this->shipments->isEmpty()) {
+            // A manual-only receipt (see manual_shipment_refs) is a real production document by
+            // design, never test/deletable. A GENUINELY orphaned receipt (e.g. leftover dev/test
+            // debris from a Shipment record that was itself later deleted) has no manual refs
+            // either, so it still falls through to "deletable" here.
+            return empty($this->manual_shipment_refs);
+        }
+
+        return $this->shipments->every(fn (Shipment $s) => $s->is_test);
     }
 }

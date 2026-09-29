@@ -34,6 +34,73 @@ class UpsShipmentService
     }
 
     /**
+     * Builds PaymentInformation.ShipmentCharge from the shipment's real billTransportationTo/
+     * billDutyTaxTo selections (Payment Info step) instead of always hardcoding BillShipper for
+     * everything — a real bug found 2026-09-28: the printed "Payment of Charges" waybill section
+     * always claimed whatever staff picked, but UPS itself was NEVER actually told, so every
+     * booking silently billed MADD's own account regardless of the selection.
+     * - Type 02 (Duties and Taxes) is OPTIONAL per UPS's schema — omitting it entirely (the
+     *   RECEIVER case, and the default) means UPS applies its normal default of the
+     *   importer/receiver handling duty/tax directly with customs, no account needed.
+     * - Schema confirmed live against UPS's own Rating.yaml/java-api-examples (GitHub UPS-API
+     *   org): BillReceiver needs only AccountNumber (Address is optional, PostalCode only).
+     *   BillThirdParty needs AccountNumber AND Address.CountryCode (PostalCode recommended,
+     *   especially for US/CA accounts).
+     */
+    private function buildPaymentInformation(array $shipment, array $account): array
+    {
+        $charges = [
+            array_merge(['Type' => '01'], $this->buildBillingParty(
+                strtoupper($shipment['billTransportationTo'] ?? 'SHIPPER'),
+                $account,
+                $shipment['billTransportationAccountNumber'] ?? null,
+                $shipment['billTransportationThirdPartyCountry'] ?? null,
+                $shipment['billTransportationThirdPartyPostalCode'] ?? null,
+            )),
+        ];
+
+        $billDutyTaxTo = strtoupper($shipment['billDutyTaxTo'] ?? 'RECEIVER');
+        if ($billDutyTaxTo !== 'RECEIVER') {
+            $charges[] = array_merge(['Type' => '02'], $this->buildBillingParty(
+                $billDutyTaxTo,
+                $account,
+                $shipment['billDutyTaxAccountNumber'] ?? null,
+                $shipment['billDutyTaxThirdPartyCountry'] ?? null,
+                $shipment['billDutyTaxThirdPartyPostalCode'] ?? null,
+            ));
+        }
+
+        return ['ShipmentCharge' => $charges];
+    }
+
+    private function buildBillingParty(string $billTo, array $account, ?string $accountNumber, ?string $thirdPartyCountry, ?string $thirdPartyPostalCode): array
+    {
+        if ($billTo === 'RECEIVER') {
+            if (empty($accountNumber)) {
+                throw new \RuntimeException('Bill to Receiver ต้องมีเลขบัญชี UPS ของผู้รับก่อน');
+            }
+
+            return ['BillReceiver' => ['AccountNumber' => $accountNumber]];
+        }
+
+        if ($billTo === 'THIRD_PARTY') {
+            if (empty($accountNumber) || empty($thirdPartyCountry)) {
+                throw new \RuntimeException('Bill to Third Party ต้องมีเลขบัญชี UPS และประเทศของฝ่ายนั้นก่อน');
+            }
+
+            return ['BillThirdParty' => [
+                'AccountNumber' => $accountNumber,
+                'Address' => array_filter([
+                    'CountryCode' => $thirdPartyCountry,
+                    'PostalCode' => $thirdPartyPostalCode,
+                ]),
+            ]];
+        }
+
+        return ['BillShipper' => ['AccountNumber' => $account['username_acc']]];
+    }
+
+    /**
      * $shipment packages carry a `useCarrierInsurance` flag (set by the caller from which
      * Insurance Add-on was actually sold) — only THOSE packages' declared value is sent to UPS
      * as PackageServiceOptions.DeclaredValue, so we're never charged/declared insurance for a
@@ -67,16 +134,7 @@ class UpsShipmentService
                 'Phone' => ['Number' => $from['phone'] ?: '0000000000'],
                 'Address' => $this->buildAddress($from),
             ],
-            'PaymentInformation' => [
-                // UPS schema requires ShipmentCharge as an array of objects (<= 3 items),
-                // even though we only ever send one (Type 01 = Transportation, billed to shipper).
-                'ShipmentCharge' => [
-                    [
-                        'Type' => '01',
-                        'BillShipper' => ['AccountNumber' => $account['username_acc']],
-                    ],
-                ],
-            ],
+            'PaymentInformation' => $this->buildPaymentInformation($shipment, $account),
             'Service' => ['Code' => (string) $shipment['serviceCode']],
             // A package ROW's `quantity` means N physical identical boxes — UPS has no
             // per-package "quantity" field, so each row is expanded into `quantity` separate
@@ -381,9 +439,10 @@ class UpsShipmentService
             }
         }
 
+        $requestBody = $this->buildShipmentRequest($account, $shipment);
         $response = Http::withToken($token)
             ->timeout(30)
-            ->post($this->upsUrl('ship_url', $mode), $this->buildShipmentRequest($account, $shipment));
+            ->post($this->upsUrl('ship_url', $mode), $requestBody);
 
         if (! $response->successful()) {
             if ($response->status() === 401) {
@@ -395,6 +454,14 @@ class UpsShipmentService
         $raw = $response->json();
 
         $parsed = $this->parseShipmentResponse($raw);
+        // Kept alongside raw_response as dispute evidence — proves exactly what billing
+        // party/account we told UPS to charge (e.g. BillReceiver vs BillShipper), in case UPS's
+        // own billing later disagrees with what was actually requested.
+        $parsed['rawRequest'] = $requestBody;
+        // Explicit confirmation the request was actually received/accepted (always 2xx here —
+        // the throw above already handles non-successful responses) without having to dig
+        // through raw_response's nested structure to infer it.
+        $parsed['httpStatus'] = $response->status();
 
         // Best-effort, same reasoning as the Upload call above: link the uploaded document to the
         // shipment we just booked so it actually shows the "EDI-IDIS" marking for customs, but

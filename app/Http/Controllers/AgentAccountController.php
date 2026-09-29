@@ -36,6 +36,7 @@ class AgentAccountController extends Controller
             'basic_auth_password' => ['nullable', 'string'],
             'status' => ['boolean'],
             'mode' => ['nullable', 'in:test,production'],
+            'is_api_enabled' => ['boolean'],
         ]);
 
         $account = AgentAccount::create($data);
@@ -60,6 +61,7 @@ class AgentAccountController extends Controller
             'basic_auth_password' => ['nullable', 'string'],
             'status' => ['boolean'],
             'mode' => ['nullable', 'in:test,production'],
+            'is_api_enabled' => ['boolean'],
         ]);
 
         // Blank secret fields mean "leave unchanged", not "clear the value".

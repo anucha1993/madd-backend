@@ -94,7 +94,10 @@ class ShippingController extends Controller
             'upsOptionalServiceCodes' => $data['ups_optional_services'] ?? [],
         ];
 
-        $accountsQuery = AgentAccount::with('agent')->where('status', true);
+        // is_api_enabled=false accounts (e.g. Kerry/Flash \u2014 other couriers with no real API
+        // integration, see 2026-09-25) are only ever selectable when issuing a Receipt manually,
+        // never quotable/bookable here.
+        $accountsQuery = AgentAccount::with('agent')->where('status', true)->where('is_api_enabled', true);
 
         // Branches without "access all" restrict quoting to their assigned accounts
         // (branches with no assignments configured yet fall back to every active account).
