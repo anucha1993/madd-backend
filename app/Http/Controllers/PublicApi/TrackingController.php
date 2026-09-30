@@ -27,7 +27,7 @@ class TrackingController extends Controller
         /** @var ApiClient $client */
         $client = $request->attributes->get('api_client');
         $trackingNumber = strtoupper(preg_replace('/\s+/', '', $trackingNumber));
-        $log = ['api_client_id' => $client->id, 'endpoint' => 'tracking', 'reference' => mb_substr($trackingNumber, 0, 50), 'ip' => $request->ip(), 'end_user_ip' => $request->attributes->get('end_user_ip')];
+        $log = ['api_client_id' => $client->id, 'endpoint' => $request->is('api/public/v1/web/*') ? 'web_tracking' : 'tracking', 'reference' => mb_substr($trackingNumber, 0, 50), 'ip' => $request->ip(), 'end_user_ip' => $request->attributes->get('end_user_ip')];
 
         if (! $client->allow_tracking) {
             return $this->fail($log, $startedAt, 403, 'endpoint_not_allowed', 'API key นี้ไม่ได้เปิดใช้การติดตามพัสดุ');

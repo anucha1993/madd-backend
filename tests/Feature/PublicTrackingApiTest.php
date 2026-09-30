@@ -88,6 +88,23 @@ class PublicTrackingApiTest extends TestCase
         $this->assertSame(0, $this->calls);
     }
 
+    public function test_browser_calls_are_allowed_only_from_registered_origins(): void
+    {
+        $this->shipment();
+        $this->client->update(['browser_origins' => ['https://madd.co.th']]);
+
+        $this->withHeader('Origin', 'https://evil.example')->getJson('/api/public/v1/web/tracking/5084355500')->assertForbidden();
+        $this->getJson('/api/public/v1/web/tracking/5084355500')->assertForbidden(); // no Origin
+
+        $this->withHeader('Origin', 'https://MADD.co.th')->getJson('/api/public/v1/web/tracking/5084355500')
+            ->assertOk()->assertJsonPath('status', 'in_transit')
+            ->assertHeader('Access-Control-Allow-Origin', 'https://madd.co.th');
+        $this->assertSame('web_tracking', ApiRequestLog::latest('id')->value('endpoint'));
+
+        $this->client->update(['allow_tracking' => false]);
+        $this->withHeader('Origin', 'https://madd.co.th')->getJson('/api/public/v1/web/tracking/5084355500')->assertForbidden();
+    }
+
     public function test_endpoint_can_be_disabled_per_key(): void
     {
         $this->shipment();

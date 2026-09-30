@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Controllers\PublicApi\RateController;
+use App\Http\Middleware\AuthenticateWebOrigin;
 use App\Models\ApiClient;
 use App\Models\ApiRequestLog;
 use App\Services\PublicRateService;
@@ -57,7 +58,7 @@ class ApiClientController extends Controller
 
     public function logs(Request $request)
     {
-        $data = $request->validate(['api_client_id' => ['nullable', 'integer'], 'status' => ['nullable', 'in:ok,failed'], 'endpoint' => ['nullable', 'in:rates,tracking']]);
+        $data = $request->validate(['api_client_id' => ['nullable', 'integer'], 'status' => ['nullable', 'in:ok,failed'], 'endpoint' => ['nullable', 'in:rates,tracking,web_tracking']]);
         $query = ApiRequestLog::with('apiClient:id,name')->latest('created_at')->latest('id');
         foreach (['api_client_id', 'endpoint'] as $field) {
             if (! empty($data[$field])) {
@@ -112,12 +113,19 @@ class ApiClientController extends Controller
                     $fail("{$value} ไม่ใช่ IP / CIDR ที่ถูกต้อง");
                 }
             }],
+            'browser_origins' => ['nullable', 'array'],
+            'browser_origins.*' => ['string', 'max:200', function ($attribute, $value, $fail) {
+                if (! AuthenticateWebOrigin::normalize($value)) {
+                    $fail("{$value} ต้องเป็น URL เต็ม เช่น https://madd.co.th");
+                }
+            }],
             'allow_rates' => ['boolean'],
             'allow_tracking' => ['boolean'],
             'status' => ['boolean'],
         ]);
         $data['carriers'] = $data['carriers'] ?? null ?: null;
         $data['allowed_ips'] = array_values(array_filter($data['allowed_ips'] ?? [])) ?: null;
+        $data['browser_origins'] = array_values(array_unique(array_filter(array_map([AuthenticateWebOrigin::class, 'normalize'], $data['browser_origins'] ?? [])))) ?: null;
 
         return $data;
     }

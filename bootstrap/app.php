@@ -20,10 +20,13 @@ return Application::configure(basePath: dirname(__DIR__))
         // returning a clean 401. Never redirect guests — always fall through to a JSON 401.
         $middleware->redirectGuestsTo(fn () => null);
 
+        $middleware->replace(\Illuminate\Http\Middleware\HandleCors::class, \App\Http\Middleware\HandleCors::class);
+
         $middleware->alias([
             'perm' => \App\Http\Middleware\RequirePermission::class,
             'record.scope' => \App\Http\Middleware\EnsureRecordInScope::class,
             'api.client' => \App\Http\Middleware\AuthenticateApiClient::class,
+            'api.web' => \App\Http\Middleware\AuthenticateWebOrigin::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

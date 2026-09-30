@@ -57,6 +57,8 @@ Route::prefix('public/v1')->middleware('api.client')->group(function () {
     Route::get('countries', [PublicRateController::class, 'countries']);
     Route::get('tracking/{trackingNumber}', [PublicTrackingController::class, 'show']);
 });
+// Same tracking answer, called from the visitor's browser on a registered website (Origin, no key).
+Route::get('public/v1/web/tracking/{trackingNumber}', [PublicTrackingController::class, 'show'])->middleware('api.web');
 
 // Every authenticated route also passes through `record.scope` (a Shipment/Receipt/Pickup bound
 // from the URL outside the user's data scope 404s). `perm:` keys come from

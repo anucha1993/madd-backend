@@ -20,6 +20,8 @@
       noScans: "ยังไม่มีการสแกนจาก Carrier — ข้อมูลจะอัปเดตเมื่อ Courier รับพัสดุแล้ว",
       cancelled: "Shipment นี้ถูกยกเลิกแล้ว",
       invalid: "กรุณากรอกเลข Tracking ให้ถูกต้อง",
+      notFound: "ไม่พบเลข Tracking นี้ในระบบ กรุณาตรวจสอบเลขอีกครั้ง",
+      rateLimited: "ค้นหาบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่",
       searching: "กำลังค้นหา...",
       loading: "กำลังดึงข้อมูลจาก Carrier...",
       button: "ติดตาม",
@@ -42,6 +44,8 @@
       noScans: "No carrier scans yet — updates will appear once the courier collects the parcel.",
       cancelled: "This shipment has been cancelled.",
       invalid: "Please enter a valid tracking number.",
+      notFound: "We couldn't find this tracking number. Please check it and try again.",
+      rateLimited: "Too many searches. Please wait a moment and try again.",
       searching: "Searching...",
       loading: "Fetching the latest status from the carrier...",
       button: "Track",
@@ -169,9 +173,25 @@
       result.innerHTML = "";
       result.appendChild(el("div", { class: "madd-tracking__loading", text: t.loading }));
 
-      fetch(config.ajaxUrl, { method: "POST", body: body, credentials: "same-origin" })
-        .then(function (res) {
-          return res.json();
+      // 1) Straight from the visitor's browser to MADD (the site must be listed under "browser
+      //    origins" on the API key) — avoids routing every look-up through the web server's IP.
+      // 2) Anything else (origin not registered, network/CORS error, old MADD) falls back to
+      //    this site's admin-ajax, which calls MADD server-to-server with the API key.
+      var direct = config.apiUrl
+        ? fetch(config.apiUrl + "/public/v1/web/tracking/" + encodeURIComponent(number), { method: "GET", mode: "cors", credentials: "omit" }).then(function (res) {
+            if (res.ok) return res.json().then(function (data) { return { success: true, data: data }; });
+            if (res.status === 404) return { success: false, data: { message: t.notFound } };
+            if (res.status === 429) return { success: false, data: { message: t.rateLimited } };
+            if (res.status === 422) return { success: false, data: { message: t.invalid } };
+            throw new Error("fallback");
+          })
+        : Promise.reject(new Error("fallback"));
+
+      direct
+        .catch(function () {
+          return fetch(config.ajaxUrl, { method: "POST", body: body, credentials: "same-origin" }).then(function (res) {
+            return res.json();
+          });
         })
         .then(function (json) {
           if (json && json.success) {

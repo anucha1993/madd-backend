@@ -1,7 +1,7 @@
 === MADD Tracking ===
 Requires at least: 5.8
 Requires PHP: 7.4
-Stable tag: 1.1.1
+Stable tag: 1.2.0
 
 ฟอร์มติดตามพัสดุ (UPS / DHL) สำหรับ Shipment ที่จองผ่านระบบ MADD
 
@@ -20,6 +20,11 @@ Stable tag: 1.1.1
      [madd_tracking title="ติดตามพัสดุของคุณ"]
      [madd_tracking lang="en"]      ภาษาอังกฤษ (ไม่ใส่ lang = ตามภาษาของหน้า Polylang/WPML)
 6. ลิงก์ตรงส่งให้ลูกค้า: https://your-site/ติดตามพัสดุ/?tn=5084355500
+
+== เรียกจาก Browser โดยตรง (แนะนำ) ==
+ที่ MADD › Public API › แก้ไข Key › "เว็บไซต์ที่ให้ Browser ของลูกค้าเรียก Tracking ได้โดยตรง" ใส่ https://madd.co.th (และ https://www.madd.co.th ถ้ามี)
+- Browser ของลูกค้าเรียก MADD เอง ไม่ผ่าน Server เว็บ — ไม่ติด Firewall ที่จำกัดการเชื่อมต่อจาก IP ของ Server เว็บ
+- ไม่มี API Key ในหน้าเว็บ (เฉพาะ Tracking ซึ่งไม่มีข้อมูลส่วนตัว) — ถ้ายังไม่ได้ตั้ง Plugin จะใช้ทางเดิมผ่าน Server ให้อัตโนมัติ
 
 == ความปลอดภัย ==
 - Browser ลูกค้าคุยกับ WordPress เท่านั้น — WordPress เรียก MADD จากฝั่ง Server, API Key ไม่ถูกส่งไป Browser
