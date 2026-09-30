@@ -37,8 +37,6 @@ class AgentAccountController extends Controller
             'status' => ['boolean'],
             'mode' => ['nullable', 'in:test,production'],
             'is_api_enabled' => ['boolean'],
-            // DHL contact(s) emailed when a DHL waybill is voided (see CarrierCancelNotifier).
-            'cancel_notify_emails' => ['nullable', 'string', 'max:500'],
         ]);
 
         $account = AgentAccount::create($data);
@@ -64,8 +62,6 @@ class AgentAccountController extends Controller
             'status' => ['boolean'],
             'mode' => ['nullable', 'in:test,production'],
             'is_api_enabled' => ['boolean'],
-            // DHL contact(s) emailed when a DHL waybill is voided (see CarrierCancelNotifier).
-            'cancel_notify_emails' => ['nullable', 'string', 'max:500'],
         ]);
 
         // Blank secret fields mean "leave unchanged", not "clear the value".

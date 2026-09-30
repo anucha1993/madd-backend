@@ -5,9 +5,9 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * DHL Express can only be told about a cancelled waybill by a person, so voiding emails the
- * account's DHL contact(s) (agent_accounts.cancel_notify_emails — e.g. the Account Manager)
- * and records when/to whom that request went (see CarrierCancelNotifier).
+ * DHL Express can only be told about a cancelled waybill by a person — records when staff told
+ * DHL and whom (ShipmentController::markCarrierCancelNotified). agent_accounts.cancel_notify_emails
+ * was for an auto-email that was dropped again (see the drop_cancel_notify_emails migration).
  */
 return new class extends Migration
 {

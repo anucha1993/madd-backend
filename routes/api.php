@@ -134,7 +134,7 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
         Route::post('shipments/{shipment}/void', [ShipmentController::class, 'void']);
         Route::post('shipments/{shipment}/unvoid', [ShipmentController::class, 'unvoid']);
         Route::post('shipments/{shipment}/confirm-carrier-cancel', [ShipmentController::class, 'confirmCarrierCancel']);
-        Route::post('shipments/{shipment}/request-carrier-cancel', [ShipmentController::class, 'requestCarrierCancel']);
+        Route::post('shipments/{shipment}/carrier-cancel-notified', [ShipmentController::class, 'markCarrierCancelNotified']);
     });
     Route::delete('shipments/{shipment}', [ShipmentController::class, 'destroy'])->middleware('perm:shipment.delete');
 

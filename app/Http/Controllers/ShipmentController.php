@@ -9,7 +9,6 @@ use App\Models\Branch;
 use App\Models\BranchCarrierAccount;
 use App\Models\Shipment;
 use App\Services\AccessService;
-use App\Services\CarrierCancelNotifier;
 use App\Services\DhlShipmentService;
 use App\Services\PickupCanceller;
 use App\Services\R2Service;
@@ -788,25 +787,29 @@ class ShipmentController extends Controller
                 'void_note' => 'Voided in MADD — DHL Express has no shipment-cancel API; contact DHL to cancel this waybill.',
                 'carrier_cancel_status' => 'pending',
             ]);
-            $carrierNotice = app(CarrierCancelNotifier::class)->requestCancellation($shipment, $request->user());
         }
 
-        return $this->withCancellation($shipment) + [
-            'pickup_notice' => $this->releasePickupsFor($shipment),
-            'carrier_notice' => $carrierNotice ?? null,
-            'carrier_message' => $shipment->carrier === 'DHL' ? CarrierCancelNotifier::messageFor($shipment->fresh('agentAccount'), $request->user()) : null,
-        ];
+        return $this->withCancellation($shipment) + ['pickup_notice' => $this->releasePickupsFor($shipment)];
     }
 
-    /** (Re)send the "please cancel this waybill" email to the account's DHL contact(s). */
-    public function requestCarrierCancel(Request $request, Shipment $shipment)
+    /**
+     * Staff record that they told DHL (in person / by phone / their own email) to cancel the
+     * waybill — who they told or through which channel goes in `notified_to`. The shipment
+     * stays 'pending' until DHL's confirmation is recorded (confirmCarrierCancel()).
+     */
+    public function markCarrierCancelNotified(Request $request, Shipment $shipment)
     {
+        $data = $request->validate(['notified_to' => ['nullable', 'string', 'max:500']]);
         if ($shipment->status !== 'voided' || $shipment->carrier_cancel_status !== 'pending') {
             return response()->json(['error' => 'Shipment นี้ไม่ได้อยู่ในสถานะรอยืนยันการยกเลิกกับ Carrier'], 422);
         }
-        $notice = app(CarrierCancelNotifier::class)->requestCancellation($shipment, $request->user());
 
-        return $this->withCancellation($shipment) + ['carrier_notice' => $notice];
+        $shipment->update([
+            'carrier_cancel_requested_at' => now(),
+            'carrier_cancel_requested_to' => $data['notified_to'] ?? null,
+        ]);
+
+        return $this->withCancellation($shipment);
     }
 
     /**

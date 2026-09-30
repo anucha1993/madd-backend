@@ -101,27 +101,18 @@ class ShipmentVoidTest extends TestCase
         $this->assertSame(['SOLO1'], $this->cancelledPickups);
     }
 
-    public function test_dhl_void_emails_the_accounts_dhl_contact_when_configured(): void
+    public function test_staff_record_that_dhl_was_notified(): void
     {
-        \Illuminate\Support\Facades\Mail::fake();
-        $smtp = $this->createMock(\App\Services\SmtpSettingService::class);
-        $smtp->method('isConfigured')->willReturn(true);
-        $smtp->method('isEnabled')->willReturn(true);
-        $this->app->instance(\App\Services\SmtpSettingService::class, $smtp);
-
-        // No contact set yet -> nothing sent, staff told to notify DHL themselves.
         $s = $this->shipment();
-        $this->postJson("/api/shipments/{$s->id}/void")->assertOk()
-            ->assertJsonPath('carrier_notice.sent', false)->assertJsonPath('carrier_cancel_requested_at', null);
-        \Illuminate\Support\Facades\Mail::assertNothingSent();
-        $this->postJson("/api/shipments/{$s->id}/request-carrier-cancel")->assertOk()->assertJsonPath('carrier_notice.sent', false);
+        $this->postJson("/api/shipments/{$s->id}/void")->assertOk()->assertJsonPath('carrier_cancel_requested_at', null);
 
-        DB::table('agent_accounts')->where('id', $this->accountId)->update(['cancel_notify_emails' => 'am@dhl.test, bad-email']);
-        $s2 = $this->shipment();
-        $res = $this->postJson("/api/shipments/{$s2->id}/void", ['reason' => 'จองผิด'])->assertOk();
-        $res->assertJsonPath('carrier_notice.sent', true)->assertJsonPath('carrier_notice.to', ['am@dhl.test'])->assertJsonPath('carrier_cancel_requested_to', 'am@dhl.test');
-        $this->assertStringContainsString($s2->tracking_number, $res->json('carrier_message'));
-        \Illuminate\Support\Facades\Mail::assertSent(\App\Mail\ScheduledReportMail::class, fn ($m) => $m->hasTo('am@dhl.test') && str_contains($m->bodyText, 'จองผิด'));
+        $res = $this->postJson("/api/shipments/{$s->id}/carrier-cancel-notified", ['notified_to' => 'คุณเอ DHL (โทร)'])->assertOk();
+        $res->assertJsonPath('carrier_cancel_status', 'pending')->assertJsonPath('carrier_cancel_requested_to', 'คุณเอ DHL (โทร)');
+        $this->assertNotNull($res->json('carrier_cancel_requested_at'));
+
+        // Only while waiting for DHL.
+        $booked = $this->shipment();
+        $this->postJson("/api/shipments/{$booked->id}/carrier-cancel-notified")->assertStatus(422);
     }
 
     public function test_pending_cancellation_filter_and_status_normalisation(): void
