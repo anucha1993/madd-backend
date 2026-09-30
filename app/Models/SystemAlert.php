@@ -36,7 +36,7 @@ class SystemAlert extends Model
     {
         try {
             $message = mb_substr($message, 0, 1000);
-            $fingerprint = hash('sha256', $source.'|'.$message);
+            $fingerprint = static::fingerprint($source, $message);
             $open = static::where('fingerprint', $fingerprint)->whereNull('resolved_at')->first();
             if ($open) {
                 $open->update(['occurrences' => $open->occurrences + 1, 'last_seen_at' => now(), 'context' => $context ?: $open->context]);
@@ -50,6 +50,22 @@ class SystemAlert extends Model
         } catch (Throwable) {
             // Never let alerting itself fail the caller (e.g. DB down while reporting).
         }
+    }
+
+    public static function isOpen(string $source, string $message): bool
+    {
+        return static::where('fingerprint', static::fingerprint($source, $message))->whereNull('resolved_at')->exists();
+    }
+
+    /** Auto-resolve (resolved_by stays null) once the condition behind an alert has cleared. */
+    public static function resolveOpen(string $source, string $message): void
+    {
+        static::where('fingerprint', static::fingerprint($source, $message))->whereNull('resolved_at')->update(['resolved_at' => now()]);
+    }
+
+    private static function fingerprint(string $source, string $message): string
+    {
+        return hash('sha256', $source.'|'.mb_substr($message, 0, 1000));
     }
 
     public static function recordException(Throwable $e): void

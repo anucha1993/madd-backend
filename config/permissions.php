@@ -168,6 +168,18 @@ return [
             ],
             'scope' => true,
         ],
+        'supply_stock' => [
+            'label' => 'Stock วัสดุห่อ (Packing Supplies)',
+            'category' => 'operations',
+            'actions' => ['view' => 'ดู', 'receive' => 'รับเข้า / ปรับยอด', 'settings' => 'ตั้ง Min / Max', 'report' => 'รายงาน'],
+            'action_hints' => [
+                'view' => 'ยอดคงเหลือแยกสาขา + ประวัติการเคลื่อนไหว (การจองตัด Stock ให้อัตโนมัติ)',
+                'receive' => 'รับของเข้า Stock และปรับยอดหลังนับจริง',
+                'settings' => 'จุดแจ้งเตือนใกล้หมด (Min) และยอดสูงสุด (Max) ของแต่ละสาขา',
+                'report' => 'สรุปยกมา / รับเข้า / ใช้ไป / คงเหลือ + Export Excel',
+            ],
+            'scope' => true,
+        ],
         'billing_customer' => [
             'label' => 'ลูกค้าใบกำกับภาษี',
             'category' => 'operations',

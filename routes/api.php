@@ -36,6 +36,7 @@ use App\Http\Controllers\ShipmentController;
 use App\Http\Controllers\ShipmentDraftController;
 use App\Http\Controllers\SmtpSettingController;
 use App\Http\Controllers\SupplyController;
+use App\Http\Controllers\SupplyStockController;
 use App\Http\Controllers\ThaiSubdistrictController;
 use App\Http\Controllers\TrackingSyncController;
 use App\Http\Controllers\UpsTrackingController;
@@ -211,6 +212,13 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
     });
 
     Route::get('supplies', [SupplyController::class, 'index']);
+    Route::get('supply-stock', [SupplyStockController::class, 'index'])->middleware('perm:supply_stock.view');
+    Route::get('supply-stock/movements', [SupplyStockController::class, 'movements'])->middleware('perm:supply_stock.view');
+    Route::post('supply-stock/receive', [SupplyStockController::class, 'receive'])->middleware('perm:supply_stock.receive');
+    Route::post('supply-stock/adjust', [SupplyStockController::class, 'adjust'])->middleware('perm:supply_stock.receive');
+    Route::put('supply-stock/limits', [SupplyStockController::class, 'limits'])->middleware('perm:supply_stock.settings');
+    Route::get('supply-stock/report', [SupplyStockController::class, 'report'])->middleware('perm:supply_stock.report');
+    Route::get('supply-stock/report/export', [SupplyStockController::class, 'reportExport'])->middleware('perm:supply_stock.report');
     Route::get('supplies/{supply}', [SupplyController::class, 'show']);
     Route::apiResource('supplies', SupplyController::class)->only(['store', 'update', 'destroy'])->middleware('perm:config.supplies');
 

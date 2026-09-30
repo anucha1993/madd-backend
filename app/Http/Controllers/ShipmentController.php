@@ -15,6 +15,7 @@ use App\Services\DhlShipmentService;
 use App\Services\PickupCanceller;
 use App\Services\R2Service;
 use App\Services\RateQuoteVault;
+use App\Services\SupplyStockService;
 use App\Services\UpsShipmentService;
 use Illuminate\Http\Request;
 use Mpdf\Mpdf;
@@ -27,6 +28,7 @@ class ShipmentController extends Controller
         private R2Service $r2Service,
         private AccessService $access,
         private RateQuoteVault $quoteVault,
+        private SupplyStockService $supplyStock,
     ) {
     }
 
@@ -512,6 +514,12 @@ class ShipmentController extends Controller
             'raw_request' => $result['rawRequest'] ?? null,
             'carrier_http_status' => $result['httpStatus'] ?? null,
         ]);
+        // The carrier booking already succeeded — a stock error must never fail the response.
+        try {
+            $this->supplyStock->syncShipment($record, true, $request->user());
+        } catch (\Throwable $e) {
+            report($e);
+        }
 
         return response()->json($record);
     }
@@ -692,6 +700,7 @@ class ShipmentController extends Controller
             return response()->json(['error' => 'Shipment นี้ถูกออกใบเสร็จ/ใบกำกับภาษีไปแล้ว กรุณาลบเอกสารนั้นก่อน'], 422);
         }
 
+        $this->supplyStock->syncShipment($shipment, false, request()->user());
         $shipment->delete();
 
         return response()->noContent();
@@ -734,6 +743,10 @@ class ShipmentController extends Controller
                 $allowed = [$base, round($base * (1 + (float) $item->markup_percent / 100), 2)];
             } elseif (! empty($line['supply_id']) && ($supply = Supply::find($line['supply_id']))) {
                 $allowed = [(float) $supply->sale_price];
+                // Deducted from branch stock (SupplyStockService), which counts whole units.
+                if (floor((float) $line['quantity']) != (float) $line['quantity']) {
+                    return "จำนวน \"{$line['name']}\" ต้องเป็นจำนวนเต็ม";
+                }
             }
             if ($allowed !== null && ! collect($allowed)->contains(fn ($p) => abs($p - (float) $line['unit_price']) <= $tolerance)) {
                 return "ราคา \"{$line['name']}\" ไม่ตรงกับราคาที่ตั้งไว้ในระบบ กรุณาโหลดหน้าใหม่แล้วลองอีกครั้ง";
@@ -754,6 +767,16 @@ class ShipmentController extends Controller
         }
 
         return null;
+    }
+
+    /** Void returns the shipment's Packing Supplies to its branch stock; unvoid takes them again. */
+    private function returnSuppliesSafely(Shipment $shipment, bool $active): void
+    {
+        try {
+            $this->supplyStock->syncShipment($shipment, $active, request()->user());
+        } catch (\Throwable $e) {
+            report($e);
+        }
     }
 
     /** Staff saw the courier collect this one shipment (see Shipment::markPickedUpManually). */
@@ -817,6 +840,8 @@ class ShipmentController extends Controller
             ]);
         }
 
+        $this->returnSuppliesSafely($shipment, false);
+
         return $this->withCancellation($shipment) + ['pickup_notice' => $this->releasePickupsFor($shipment)];
     }
 
@@ -861,6 +886,7 @@ class ShipmentController extends Controller
             'carrier_cancel_requested_at' => null,
             'carrier_cancel_requested_to' => null,
         ]);
+        $this->returnSuppliesSafely($shipment, true);
 
         return $this->withCancellation($shipment);
     }
