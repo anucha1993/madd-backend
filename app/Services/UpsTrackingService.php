@@ -90,12 +90,17 @@ class UpsTrackingService
                 }, $pkg['activity'] ?? []);
 
                 $deliveryDateEntry = collect($pkg['deliveryDate'] ?? [])->first();
+                // Only the country codes of the addresses are kept — names/streets are personal data.
+                $addressCountry = fn (string $type) => collect($pkg['packageAddress'] ?? [])->firstWhere('type', $type)['address']['countryCode'] ?? null;
 
                 $packages[] = [
                     'trackingNumber' => $pkg['trackingNumber'] ?? $shipment['inquiryNumber'] ?? null,
                     'currentStatusDescription' => $pkg['currentStatus']['description'] ?? null,
                     'currentStatusCode' => $pkg['currentStatus']['code'] ?? null,
                     'scheduledDeliveryDate' => $this->formatDate($deliveryDateEntry['date'] ?? null),
+                    'originCountry' => $addressCountry('ORIGIN'),
+                    'destinationCountry' => $addressCountry('DESTINATION'),
+                    'serviceName' => $pkg['service']['description'] ?? null,
                     'activities' => $activities,
                     'podAvailable' => isset($pkg['deliveryInformation']),
                     'podImageBase64' => $pkg['deliveryInformation']['pod'] ?? null,

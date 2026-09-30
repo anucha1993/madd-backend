@@ -44,7 +44,8 @@ class PublicTrackingService
             'tracking_number' => $asked,
             'carrier' => $shipment->carrier,
             'service_name' => $shipment->service_label,
-            'origin_country' => $shipment->origin['country'] ?? null,
+            // MADD books from Thailand only — the origin form has no country field.
+            'origin_country' => $shipment->origin['country'] ?? 'TH',
             'destination_country' => $shipment->destination['country'] ?? null,
             'booked_at' => $shipment->created_at?->toDateString(),
         ];
@@ -71,6 +72,10 @@ class PublicTrackingService
             // Label created but the carrier has no scans yet.
             return $base + $this->status('not_picked_up') + ['carrier_status' => null, 'picked_up_at' => null, 'delivered_at' => null, 'estimated_delivery' => null, 'events' => []];
         }
+
+        // Countries missing on the MADD record (e.g. older bookings) come from the carrier.
+        $base['origin_country'] ??= $package['originCountry'] ?? null;
+        $base['destination_country'] ??= $package['destinationCountry'] ?? null;
 
         return $base + $this->fromPackage($shipment->carrier, $package, (bool) $shipment->picked_up_at);
     }
@@ -118,7 +123,14 @@ class PublicTrackingService
             return null;
         }
 
-        return ['tracking_number' => $trackingNumber, 'carrier' => $carrier, 'service_name' => null, 'origin_country' => null, 'destination_country' => null, 'booked_at' => null]
+        return [
+            'tracking_number' => $trackingNumber,
+            'carrier' => $carrier,
+            'service_name' => $package['serviceName'] ?? null,
+            'origin_country' => $package['originCountry'] ?? null,
+            'destination_country' => $package['destinationCountry'] ?? null,
+            'booked_at' => null,
+        ]
             + $this->fromPackage($carrier, $package, false);
     }
 

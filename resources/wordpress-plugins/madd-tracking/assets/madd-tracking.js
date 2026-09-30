@@ -7,6 +7,7 @@
   var I18N = {
     th: {
       locale: "th-TH",
+      regionLocale: "th",
       steps: ["สร้างรายการ", "รอรับพัสดุ", "ระหว่างขนส่ง", "จัดส่งสำเร็จ"],
       status: { not_picked_up: "รอ Courier เข้ารับพัสดุ", in_transit: "อยู่ระหว่างขนส่ง", delivered: "จัดส่งสำเร็จ", cancelled: "ยกเลิกการจัดส่ง" },
       caption: "เลข Tracking",
@@ -31,6 +32,7 @@
     },
     en: {
       locale: "en-GB",
+      regionLocale: "en",
       steps: ["Label created", "Awaiting pickup", "In transit", "Delivered"],
       status: { not_picked_up: "Awaiting pickup", in_transit: "In transit", delivered: "Delivered", cancelled: "Cancelled" },
       caption: "Tracking number",
@@ -89,6 +91,28 @@
       return d.toLocaleString(t.locale, opts);
     }
 
+    var regionNames = null;
+    try {
+      regionNames = new Intl.DisplayNames([t.regionLocale], { type: "region" });
+    } catch (e) {
+      /* old browser — show the ISO codes */
+    }
+    function country(code) {
+      if (!code) return "";
+      try {
+        return (regionNames && regionNames.of(code)) || code;
+      } catch (e) {
+        return code;
+      }
+    }
+
+    function carrierBadge(carrier) {
+      var logo = config.logos && config.logos[carrier];
+      return el("div", { class: "madd-tracking__carrier madd-tracking__carrier--" + String(carrier).toLowerCase() }, [
+        logo ? el("img", { src: logo, alt: carrier, loading: "lazy" }) : el("span", { text: carrier }),
+      ]);
+    }
+
     function steps(status) {
       if (status === "cancelled") return el("div", { class: "madd-tracking__cancelled", text: t.cancelled });
       var reached = STEP_INDEX[status] || 1;
@@ -103,9 +127,10 @@
 
     function render(data) {
       result.innerHTML = "";
+      var route = [country(data.origin_country), country(data.destination_country)].filter(Boolean).join(" → ");
       var facts = [
-        [t.carrier, data.carrier + (data.service_name ? " · " + data.service_name : "")],
-        [t.route, (data.origin_country || "?") + " → " + (data.destination_country || "?")],
+        [t.carrier, data.service_name || data.carrier],
+        route ? [t.route, route] : null,
         data.booked_at ? [t.booked, formatDate(data.booked_at)] : null,
         data.picked_up_at ? [t.pickedUp, formatDate(data.picked_up_at, true)] : null,
         data.delivered_at
@@ -128,7 +153,10 @@
       result.appendChild(
         el("div", { class: "madd-tracking__card" }, [
           el("div", { class: "madd-tracking__head" }, [
-            el("div", {}, [el("div", { class: "madd-tracking__caption", text: t.caption }), el("div", { class: "madd-tracking__number", text: data.tracking_number })]),
+            el("div", { class: "madd-tracking__id" }, [
+              carrierBadge(data.carrier),
+              el("div", {}, [el("div", { class: "madd-tracking__caption", text: t.caption }), el("div", { class: "madd-tracking__number", text: data.tracking_number })]),
+            ]),
             el("div", { class: "madd-tracking__status madd-tracking__status--" + data.status, text: t.status[data.status] || data.status_text }),
           ]),
           steps(data.status),
