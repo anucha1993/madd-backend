@@ -101,6 +101,42 @@ class ShipmentVoidTest extends TestCase
         $this->assertSame(['SOLO1'], $this->cancelledPickups);
     }
 
+    public function test_dhl_void_emails_the_accounts_dhl_contact_when_configured(): void
+    {
+        \Illuminate\Support\Facades\Mail::fake();
+        $smtp = $this->createMock(\App\Services\SmtpSettingService::class);
+        $smtp->method('isConfigured')->willReturn(true);
+        $smtp->method('isEnabled')->willReturn(true);
+        $this->app->instance(\App\Services\SmtpSettingService::class, $smtp);
+
+        // No contact set yet -> nothing sent, staff told to notify DHL themselves.
+        $s = $this->shipment();
+        $this->postJson("/api/shipments/{$s->id}/void")->assertOk()
+            ->assertJsonPath('carrier_notice.sent', false)->assertJsonPath('carrier_cancel_requested_at', null);
+        \Illuminate\Support\Facades\Mail::assertNothingSent();
+        $this->postJson("/api/shipments/{$s->id}/request-carrier-cancel")->assertOk()->assertJsonPath('carrier_notice.sent', false);
+
+        DB::table('agent_accounts')->where('id', $this->accountId)->update(['cancel_notify_emails' => 'am@dhl.test, bad-email']);
+        $s2 = $this->shipment();
+        $res = $this->postJson("/api/shipments/{$s2->id}/void", ['reason' => 'จองผิด'])->assertOk();
+        $res->assertJsonPath('carrier_notice.sent', true)->assertJsonPath('carrier_notice.to', ['am@dhl.test'])->assertJsonPath('carrier_cancel_requested_to', 'am@dhl.test');
+        $this->assertStringContainsString($s2->tracking_number, $res->json('carrier_message'));
+        \Illuminate\Support\Facades\Mail::assertSent(\App\Mail\ScheduledReportMail::class, fn ($m) => $m->hasTo('am@dhl.test') && str_contains($m->bodyText, 'จองผิด'));
+    }
+
+    public function test_pending_cancellation_filter_and_status_normalisation(): void
+    {
+        $pending = $this->shipment();
+        $this->postJson("/api/shipments/{$pending->id}/void")->assertOk();
+        $this->shipment(); // still booked
+
+        $ids = collect($this->getJson('/api/shipments?cancel=pending')->json('data'))->pluck('id')->all();
+        $this->assertSame([$pending->id], $ids);
+
+        $pending->fresh()->update(['status' => ' Booked ']);
+        $this->assertSame('booked', DB::table('shipments')->where('id', $pending->id)->value('status'));
+    }
+
     public function test_confirm_and_unvoid_rules(): void
     {
         $s = $this->shipment();

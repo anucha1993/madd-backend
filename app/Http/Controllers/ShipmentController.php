@@ -9,6 +9,7 @@ use App\Models\Branch;
 use App\Models\BranchCarrierAccount;
 use App\Models\Shipment;
 use App\Services\AccessService;
+use App\Services\CarrierCancelNotifier;
 use App\Services\DhlShipmentService;
 use App\Services\PickupCanceller;
 use App\Services\R2Service;
@@ -111,6 +112,10 @@ class ShipmentController extends Controller
         }
         // Collection progress groups — "picked up" comes from picked_up_at (tracking scan or
         // staff confirmation), since an on-call Pickup itself never proves anything was taken.
+        // Voided DHL waybills DHL hasn't confirmed cancelling yet (no cancel API — see void()).
+        if ($request->query('cancel') === 'pending') {
+            $query->where('status', 'voided')->where('carrier_cancel_status', 'pending');
+        }
         $activePickup = fn ($q) => $q->where('status', 'requested');
         match ($request->query('tracking')) {
             'not_picked_up' => $query->where('status', 'booked')->whereNull('picked_up_at')->whereDoesntHave('pickups', $activePickup),
@@ -783,9 +788,25 @@ class ShipmentController extends Controller
                 'void_note' => 'Voided in MADD — DHL Express has no shipment-cancel API; contact DHL to cancel this waybill.',
                 'carrier_cancel_status' => 'pending',
             ]);
+            $carrierNotice = app(CarrierCancelNotifier::class)->requestCancellation($shipment, $request->user());
         }
 
-        return $this->withCancellation($shipment) + ['pickup_notice' => $this->releasePickupsFor($shipment)];
+        return $this->withCancellation($shipment) + [
+            'pickup_notice' => $this->releasePickupsFor($shipment),
+            'carrier_notice' => $carrierNotice ?? null,
+            'carrier_message' => $shipment->carrier === 'DHL' ? CarrierCancelNotifier::messageFor($shipment->fresh('agentAccount'), $request->user()) : null,
+        ];
+    }
+
+    /** (Re)send the "please cancel this waybill" email to the account's DHL contact(s). */
+    public function requestCarrierCancel(Request $request, Shipment $shipment)
+    {
+        if ($shipment->status !== 'voided' || $shipment->carrier_cancel_status !== 'pending') {
+            return response()->json(['error' => 'Shipment นี้ไม่ได้อยู่ในสถานะรอยืนยันการยกเลิกกับ Carrier'], 422);
+        }
+        $notice = app(CarrierCancelNotifier::class)->requestCancellation($shipment, $request->user());
+
+        return $this->withCancellation($shipment) + ['carrier_notice' => $notice];
     }
 
     /**
@@ -806,6 +827,8 @@ class ShipmentController extends Controller
             'void_reason' => null,
             'void_note' => null,
             'carrier_cancel_status' => null,
+            'carrier_cancel_requested_at' => null,
+            'carrier_cancel_requested_to' => null,
         ]);
 
         return $this->withCancellation($shipment);

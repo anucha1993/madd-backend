@@ -21,7 +21,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
     'ref_invoice_no', 'ref_insurance_no', 'ref_purchase_no', 'rate_quote',
     'label_storage_key', 'waybill_storage_key', 'commercial_invoice_storage_key', 'raw_response', 'raw_request', 'carrier_http_status', 'error_message',
     'voided_at', 'void_note', 'voided_by', 'void_reason',
-    'carrier_cancel_status', 'carrier_cancel_confirmed_at', 'carrier_cancel_confirmed_by', 'carrier_cancel_reference',
+    'carrier_cancel_status', 'carrier_cancel_requested_at', 'carrier_cancel_requested_to', 'carrier_cancel_confirmed_at', 'carrier_cancel_confirmed_by', 'carrier_cancel_reference',
     'tracking_status', 'tracking_raw_status', 'tracking_synced_at', 'delivered_at',
     'picked_up_at', 'picked_up_source', 'picked_up_by',
 ])]
@@ -53,6 +53,7 @@ class Shipment extends Model
             'cost_amount' => 'decimal:2',
             'voided_at' => 'datetime',
             'carrier_cancel_confirmed_at' => 'datetime',
+            'carrier_cancel_requested_at' => 'datetime',
             'tracking_synced_at' => 'datetime',
             'delivered_at' => 'datetime',
             'picked_up_at' => 'datetime',
@@ -99,6 +100,15 @@ class Shipment extends Model
     public function branch(): BelongsTo
     {
         return $this->belongsTo(Branch::class);
+    }
+
+    /**
+     * The app only ever compares lowercase statuses ('booked', 'voided', ...) — normalise on
+     * write so a hand-typed "Booked" or "booked " can't silently break every status check.
+     */
+    public function setStatusAttribute(?string $value): void
+    {
+        $this->attributes['status'] = $value === null ? null : strtolower(trim($value));
     }
 
     public function voidedBy(): BelongsTo
