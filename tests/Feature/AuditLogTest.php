@@ -50,10 +50,10 @@ class AuditLogTest extends TestCase
         $this->assertSame(['old' => [], 'new' => ['Staff']], $roles->changes['roles']);
     }
 
-    public function test_system_actions_without_a_user_are_not_logged_and_viewing_needs_permission(): void
+    public function test_system_actions_are_logged_without_a_user_and_viewing_needs_permission(): void
     {
-        Role::where('key', 'staff')->first()->update(['name' => 'Staff X']); // no auth user
-        $this->assertSame(0, AuditLog::count());
+        Role::where('key', 'staff')->first()->update(['name' => 'Staff X']); // no auth user = System (scheduled job / command)
+        $this->assertNull(AuditLog::sole()->user_id);
 
         $staff = User::factory()->create();
         $staff->roles()->sync(Role::where('key', 'staff')->pluck('id'));

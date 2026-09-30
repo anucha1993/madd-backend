@@ -126,6 +126,7 @@ class SupplyStockController extends Controller
     public function reportExport(Request $request)
     {
         [$from, $to, $rows] = $this->reportRows($request);
+        app(\App\Services\AuditLogger::class)->accessed('exported', 'SupplyStockReport', ['filters' => $request->query()], 'Supply Stock Excel');
 
         $spreadsheet = new Spreadsheet();
         $sheet = $spreadsheet->getActiveSheet()->setTitle('Supply Stock');

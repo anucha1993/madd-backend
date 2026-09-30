@@ -959,6 +959,7 @@ class ShipmentController extends Controller
      */
     public function label(Request $request, Shipment $shipment)
     {
+        app(\App\Services\AuditLogger::class)->accessed('document_viewed', $shipment, ['document' => 'label']);
         $trackingNumber = $request->query('tracking_number');
         $storageKey = $shipment->label_storage_key;
         $pieces = collect($shipment->pieces ?? []);
@@ -1008,6 +1009,7 @@ class ShipmentController extends Controller
      */
     public function allLabels(Shipment $shipment)
     {
+        app(\App\Services\AuditLogger::class)->accessed('document_viewed', $shipment, ['document' => 'all_labels']);
         $pieces = collect($shipment->pieces ?? [])->filter(fn ($p) => ! empty($p['label_storage_key']))->values();
         if ($pieces->isEmpty()) {
             return $this->label(request(), $shipment);
@@ -1144,6 +1146,7 @@ class ShipmentController extends Controller
      */
     public function waybill(Shipment $shipment)
     {
+        app(\App\Services\AuditLogger::class)->accessed('document_viewed', $shipment, ['document' => 'waybill']);
         $pdf = $shipment->carrier === 'UPS'
             ? $this->buildUpsDiyWaybill($shipment)
             : $this->buildDhlDiyWaybill($shipment);
@@ -1469,6 +1472,7 @@ class ShipmentController extends Controller
      */
     public function commercialInvoice(Shipment $shipment)
     {
+        app(\App\Services\AuditLogger::class)->accessed('document_viewed', $shipment, ['document' => 'commercial_invoice']);
         $storageKey = $shipment->commercial_invoice_storage_key;
         if (! $storageKey) {
             $recoveredKey = $this->recoverUpsDocument($shipment, $shipment->tracking_number, 'invoice');

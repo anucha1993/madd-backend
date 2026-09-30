@@ -111,6 +111,7 @@ class ManifestReportController extends Controller
     public function export(Request $request)
     {
         $content = $this->buildManifestXlsx($request->query());
+        app(\App\Services\AuditLogger::class)->accessed('exported', 'ManifestReport', ['filters' => $request->query()], 'Manifest Excel');
         $filename = 'manifest-'.now()->format('Ymd-His').'.xlsx';
 
         return response()->streamDownload(function () use ($content) {

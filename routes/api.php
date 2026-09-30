@@ -8,6 +8,7 @@ use App\Http\Controllers\AgentController;
 use App\Http\Controllers\AiController;
 use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\SystemAlertController;
+use App\Http\Controllers\TimelineController;
 use App\Http\Controllers\BillingCustomerController;
 use App\Http\Controllers\BranchCarrierAccountController;
 use App\Http\Controllers\BranchController;
@@ -68,6 +69,9 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
     });
     Route::apiResource('users', UserController::class)->middleware('perm:user.manage');
     Route::get('audit-logs', [AuditLogController::class, 'index'])->middleware('perm:user.audit');
+    Route::get('shipments/{shipment}/timeline', [TimelineController::class, 'shipment'])->middleware('perm:shipment.timeline');
+    Route::get('receipts/{receipt}/timeline', [TimelineController::class, 'receipt'])->middleware('perm:receipt.timeline');
+    Route::get('pickups/{pickup}/timeline', [TimelineController::class, 'pickup'])->middleware('perm:pickup.timeline');
     Route::middleware('perm:config.system_alerts')->group(function () {
         Route::get('system-alerts', [SystemAlertController::class, 'index']);
         Route::get('system-alerts/summary', [SystemAlertController::class, 'summary']);

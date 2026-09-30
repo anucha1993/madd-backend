@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -10,6 +11,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[Fillable(['name', 'type', 'weight', 'length', 'width', 'height', 'icon_url', 'weight_band_id', 'is_featured', 'cost_price', 'sale_price', 'description', 'status'])]
 class Supply extends Model
 {
+    use Auditable;
+
     protected function casts(): array
     {
         return [

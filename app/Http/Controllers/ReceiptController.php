@@ -339,6 +339,14 @@ class ReceiptController extends Controller
      */
     private function replaceLines(Receipt $receipt, array $lines): void
     {
+        // Lines are replaced wholesale (no per-line model events), so the change is logged once
+        // on the Receipt — skipped on first issue, when the 'created' entry already covers it.
+        $summary = fn ($rows) => collect($rows)->values()->map(fn ($l) => trim(($l['description'] ?? '').' = '.number_format((float) ($l['amount'] ?? 0), 2).(! empty($l['is_non_vat']) ? ' (Non-VAT)' : '')))->all();
+        $before = $summary($receipt->lines()->orderBy('sort_order')->get()->toArray());
+        $after = $summary($lines);
+        if ($before && $before !== $after) {
+            app(\App\Services\AuditLogger::class)->record('lines_changed', $receipt, ['lines' => ['old' => $before, 'new' => $after]], $receipt->auditLabel());
+        }
         $receipt->lines()->delete();
         foreach (array_values($lines) as $index => $line) {
             ReceiptLine::create([
@@ -492,6 +500,7 @@ class ReceiptController extends Controller
 
     public function pdf(Receipt $receipt)
     {
+        app(\App\Services\AuditLogger::class)->accessed('printed', $receipt);
         $pdf = $this->receiptPdfService->render($receipt);
 
         return response($pdf, 200, [
@@ -512,6 +521,7 @@ class ReceiptController extends Controller
 
         $receipts = Receipt::visibleTo($request->user())->whereIn('id', $data['receipt_ids'])->orderBy('issued_date')->orderBy('id')->get();
         $pdf = $this->receiptPdfService->renderBatch($receipts);
+        $receipts->each(fn (Receipt $r) => app(\App\Services\AuditLogger::class)->accessed('printed', $r, ['batch' => true]));
 
         return response($pdf, 200, [
             'Content-Type' => 'application/pdf',

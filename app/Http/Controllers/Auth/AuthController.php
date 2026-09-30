@@ -25,12 +25,14 @@ class AuthController extends Controller
         $user = User::where('username', $credentials['username'])->first();
 
         if (! $user || ! Hash::check($credentials['password'], $user->password)) {
+            app(\App\Services\AuditLogger::class)->record('login_failed', 'User', ['username' => ['old' => null, 'new' => $credentials['username']]], $credentials['username'], $user?->id, false);
             throw ValidationException::withMessages([
                 'username' => ['ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง'],
             ]);
         }
 
         $token = $user->createToken('madd-frontend')->plainTextToken;
+        app(\App\Services\AuditLogger::class)->record('login', $user, [], $user->username, null, $user);
 
         return response()->json([
             'user' => $this->withAccess($user),
@@ -40,6 +42,7 @@ class AuthController extends Controller
 
     public function logout(Request $request)
     {
+        app(\App\Services\AuditLogger::class)->record('logout', $request->user(), [], $request->user()->username);
         $request->user()->currentAccessToken()->delete();
 
         return response()->json(['message' => 'ออกจากระบบเรียบร้อย']);

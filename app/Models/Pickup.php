@@ -20,7 +20,7 @@ class Pickup extends Model
 {
     use Auditable, ScopedByAccess;
 
-    protected array $auditExclude = ['raw_response'];
+    protected array $auditExclude = ['raw_response', 'overdue_notified_at'];
 
     protected static string $accessModule = 'pickup';
 

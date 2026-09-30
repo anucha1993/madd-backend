@@ -28,12 +28,13 @@ return [
         'shipment' => [
             'label' => 'Shipments',
             'category' => 'operations',
-            'actions' => ['view' => 'ดู', 'create' => 'จอง', 'void' => 'Void', 'delete' => 'ลบ (Test)'],
+            'actions' => ['view' => 'ดู', 'create' => 'จอง', 'void' => 'Void', 'delete' => 'ลบ (Test)', 'timeline' => 'Timeline'],
             'action_hints' => [
                 'view' => 'รายการ / รายละเอียด / เอกสาร (Label, Waybill, Invoice)',
                 'create' => 'เช็คราคา + จองจริงกับ Carrier, Draft',
                 'void' => 'ยกเลิก Shipment (UPS ยกเลิกกับ Carrier จริง)',
                 'delete' => 'ลบถาวร เฉพาะ Shipment ที่จองด้วยบัญชีโหมด Test',
+                'timeline' => 'ประวัติของ Shipment: ใครจอง / แก้ไข / เปิดเอกสาร / Void / แจ้ง DHL, สถานะจากระบบ, Pickup, ใบเสร็จ และ Stock ที่ใช้ (ช่องที่ถูกซ่อนจะไม่แสดง)',
             ],
             'fields' => [
                 'cost' => [
@@ -142,17 +143,18 @@ return [
         'pickup' => [
             'label' => 'Pickups',
             'category' => 'operations',
-            'actions' => ['view' => 'ดู', 'create' => 'นัด', 'cancel' => 'ยกเลิก / นัดใหม่', 'confirm' => 'ยืนยันรถรับแล้ว'],
-            'action_hints' => ['confirm' => 'กดยืนยันว่า Courier มารับของแล้ว ก่อน Tracking scan จะเข้ามา'],
+            'actions' => ['view' => 'ดู', 'create' => 'นัด', 'cancel' => 'ยกเลิก / นัดใหม่', 'confirm' => 'ยืนยันรถรับแล้ว', 'timeline' => 'Timeline'],
+            'action_hints' => ['confirm' => 'กดยืนยันว่า Courier มารับของแล้ว ก่อน Tracking scan จะเข้ามา', 'timeline' => 'ประวัติการนัด / ยกเลิก / ยืนยันรับของของ Pickup'],
             'scope' => true,
         ],
         'receipt' => [
             'label' => 'ใบเสร็จ / ใบกำกับภาษี',
             'category' => 'operations',
-            'actions' => ['view' => 'ดู', 'create' => 'ออก', 'edit' => 'แก้ไข', 'void' => 'Void', 'delete' => 'ลบ (Test)'],
+            'actions' => ['view' => 'ดู', 'create' => 'ออก', 'edit' => 'แก้ไข', 'void' => 'Void', 'delete' => 'ลบ (Test)', 'timeline' => 'Timeline'],
             'action_hints' => [
                 'view' => 'รายการ / พิมพ์ PDF',
                 'delete' => 'ลบถาวร เฉพาะเอกสารของ Shipment โหมด Test',
+                'timeline' => 'ประวัติของเอกสาร: ออก / แก้ไขรายการ / พิมพ์ / Void',
             ],
             'fields' => [
                 'buyer' => [
