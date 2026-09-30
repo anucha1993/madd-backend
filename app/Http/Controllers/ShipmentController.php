@@ -314,7 +314,7 @@ class ShipmentController extends Controller
                 // Only actually used by DhlShipmentService to build the mandatory
                 // content.exportDeclaration.lineItems block for customs-declarable shipments.
                 'description' => $pkg['description'] ?? null,
-                'productType' => $pkg['product_type'] === 'OTHER' ? ($pkg['product_type_other'] ?? null) : ($pkg['product_type'] ?? null),
+                'productType' => ($pkg['product_type'] ?? null) === 'OTHER' ? ($pkg['product_type_other'] ?? null) : ($pkg['product_type'] ?? null),
             ];
         }, $data['packages']);
 
