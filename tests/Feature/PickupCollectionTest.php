@@ -156,6 +156,48 @@ class PickupCollectionTest extends TestCase
         $this->assertSame([$overdue->id], collect($this->getJson('/api/pickups?overdue=1')->json('data'))->pluck('id')->all());
     }
 
+    public function test_sync_skips_shipments_older_than_the_age_limit(): void
+    {
+        $old = $this->shipment();
+        $old->forceFill(['created_at' => now()->subDays(61)])->save();
+        $fake = new class extends DhlTrackingService
+        {
+            public array $asked = [];
+
+            public function __construct()
+            {
+            }
+
+            public function trackByNumber(string $username, string $password, string $trackingNumber, ?string $mode = null): array
+            {
+                $this->asked[] = $trackingNumber;
+
+                return ['packages' => []];
+            }
+        };
+        $this->app->instance(DhlTrackingService::class, $fake);
+        $recent = $this->shipment();
+
+        $this->artisan('shipments:sync-tracking', ['--force' => true])->assertSuccessful();
+
+        $this->assertSame([$recent->tracking_number], $fake->asked);
+    }
+
+    public function test_quotable_accounts_follow_branch_assignments(): void
+    {
+        $other = DB::table('agent_accounts')->insertGetId(['agent_id' => DB::table('agents')->value('id'), 'username_acc' => '999', 'mode' => 'test', 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('branch_carrier_accounts')->insert(['branch_id' => $this->branch->id, 'agent_account_id' => $this->accountId, 'allowed_service_codes' => json_encode(['P']), 'created_at' => now(), 'updated_at' => now()]);
+        $resolver = app(\App\Services\QuotableAccountResolver::class);
+
+        $staff = $this->staff();
+        $result = $resolver->forUser($staff);
+        $this->assertSame([$this->accountId], $result['query']->pluck('id')->all());
+        $this->assertSame(['P'], $result['allowedServiceCodes'][$this->accountId]);
+
+        $all = User::factory()->create(['can_access_all_branches' => true]);
+        $this->assertEqualsCanonicalizing([$this->accountId, $other], $resolver->forUser($all)['query']->pluck('id')->all());
+    }
+
     public function test_tracking_filter_groups(): void
     {
         $unscheduled = $this->shipment();

@@ -28,6 +28,10 @@ class SyncShipmentTracking extends Command
     private const INTERVAL_KEY = 'tracking_sync.interval_minutes';
     private const LAST_RUN_KEY = 'tracking_sync.last_run_at';
 
+    private const MAX_AGE_DAYS = 60;
+
+    private const MAX_PER_RUN = 200;
+
     public function handle(UpsTrackingService $upsTrackingService, DhlTrackingService $dhlTrackingService, TrackingStatusClassifier $classifier): int
     {
         $force = (bool) $this->option('force');
@@ -51,12 +55,20 @@ class SyncShipmentTracking extends Command
         $errors = [];
         $updates = [];
 
+        // Bounded per run so a growing backlog can't make one run hammer the carrier APIs (or
+        // outlast the next scheduled tick): shipments older than MAX_AGE_DAYS are given up on,
+        // and the least-recently-synced (never-synced first) go first, so every shipment still
+        // gets its turn across consecutive runs.
         $shipments = Shipment::with('agentAccount')
             ->where('status', 'booked')
             ->where(function ($q) {
                 $q->whereNull('tracking_status')->orWhere('tracking_status', '!=', 'delivered');
             })
             ->whereNotNull('tracking_number')
+            ->where('created_at', '>=', now()->subDays(self::MAX_AGE_DAYS))
+            ->orderByRaw('tracking_synced_at IS NOT NULL')
+            ->orderBy('tracking_synced_at')
+            ->limit(self::MAX_PER_RUN)
             ->get();
 
         foreach ($shipments as $shipment) {
