@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MADD Rate Quote
  * Description: ฟอร์มเช็คราคาค่าส่งระหว่างประเทศ (UPS / DHL) ราคาเดียวกับหน้าร้าน จากระบบ MADD — shortcode [madd_rate_quote] (ภาษาอังกฤษ: [madd_rate_quote lang="en"])
- * Version: 1.0.0
+ * Version: 1.0.1
  * Requires at least: 5.8
  * Requires PHP: 7.4
  * Author: MADD
@@ -20,7 +20,7 @@ if (! defined('ABSPATH')) {
 final class Madd_Rate_Quote
 {
     const OPTION = 'madd_rate_quote';
-    const VERSION = '1.0.0';
+    const VERSION = '1.0.1';
     const NONCE = 'madd_rate_quote';
     const COUNTRIES_CACHE = 'madd_rate_quote_countries';
 
@@ -237,7 +237,8 @@ final class Madd_Rate_Quote
     public static function shortcode($atts = [])
     {
         $atts = shortcode_atts(['lang' => '', 'title' => ''], $atts, 'madd_rate_quote');
-        $lang = strtolower((string) $atts['lang']);
+        // Letters only — tolerates lang=”en” when an editor turned the quotes into curly ones.
+        $lang = strtolower(preg_replace('/[^a-z]/i', '', (string) $atts['lang']));
         if (! in_array($lang, ['th', 'en'], true)) {
             $site = function_exists('pll_current_language') ? pll_current_language('slug') : (defined('ICL_LANGUAGE_CODE') ? ICL_LANGUAGE_CODE : get_locale());
             $lang = strpos(strtolower((string) $site), 'th') === 0 ? 'th' : 'en';
