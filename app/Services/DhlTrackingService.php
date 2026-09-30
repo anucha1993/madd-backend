@@ -26,7 +26,8 @@ class DhlTrackingService
             $message = $response->json('detail')
                 ?? $response->json('title')
                 ?? "DHL Tracking request failed (HTTP {$response->status()})";
-            throw new \RuntimeException($message);
+            // The HTTP status is kept as the code: 404 = the carrier has no scans for it (yet).
+            throw new \RuntimeException($message, $response->status());
         }
 
         return $this->normalize($response->json());

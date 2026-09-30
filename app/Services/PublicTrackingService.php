@@ -52,9 +52,17 @@ class PublicTrackingService
         }
 
         $account = $shipment->agentAccount;
-        $result = $shipment->carrier === 'UPS'
-            ? $this->ups->trackByInquiry($account->client_id, $account->client_secret, $asked, [], $account->mode)
-            : $this->dhl->trackByNumber($account->basic_auth_username, $account->basic_auth_password, $shipment->tracking_number, $account->mode);
+        try {
+            $result = $shipment->carrier === 'UPS'
+                ? $this->ups->trackByInquiry($account->client_id, $account->client_secret, $asked, [], $account->mode)
+                : $this->dhl->trackByNumber($account->basic_auth_username, $account->basic_auth_password, $shipment->tracking_number, $account->mode);
+        } catch (\RuntimeException $e) {
+            // A freshly booked label isn't in the carrier's tracking system until its first scan.
+            if ($e->getCode() !== 404) {
+                throw $e;
+            }
+            $result = ['packages' => []];
+        }
         $package = $result['packages'][0] ?? null;
 
         if (! $package) {

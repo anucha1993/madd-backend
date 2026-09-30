@@ -129,6 +129,12 @@ class SyncShipmentTracking extends Command
                 ] + $pickupUpdate);
                 $updated++;
             } catch (\Throwable $e) {
+                // 404 = label created but not scanned by the carrier yet — not a sync failure.
+                if ($e->getCode() === 404) {
+                    $shipment->update(['tracking_synced_at' => now()]);
+
+                    continue;
+                }
                 $errors[] = ['shipment_id' => $shipment->id, 'tracking_number' => $shipment->tracking_number, 'message' => $e->getMessage()];
             }
         }

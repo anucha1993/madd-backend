@@ -57,7 +57,8 @@ class UpsTrackingService
             $message = $response->json('response.errors.0.message')
                 ?? $response->json('errors.0.message')
                 ?? "UPS Tracking request failed (HTTP {$response->status()})";
-            throw new \RuntimeException($message);
+            // The HTTP status is kept as the code: 404 = the carrier has no scans for it (yet).
+            throw new \RuntimeException($message, $response->status());
         }
 
         return $this->normalize($response->json());

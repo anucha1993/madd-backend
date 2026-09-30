@@ -105,6 +105,16 @@ class PublicTrackingApiTest extends TestCase
         $this->withHeader('Origin', 'https://madd.co.th')->getJson('/api/public/v1/web/tracking/5084355500')->assertForbidden();
     }
 
+    public function test_a_label_the_carrier_has_not_scanned_yet_is_awaiting_pickup(): void
+    {
+        $this->shipment();
+        $this->mock(DhlTrackingService::class, fn ($m) => $m->shouldReceive('trackByNumber')->andThrow(new \RuntimeException('No data found', 404)));
+
+        $this->withToken($this->key)->getJson('/api/public/v1/tracking/5084355500')->assertOk()
+            ->assertJsonPath('status', 'not_picked_up')
+            ->assertJsonPath('events', []);
+    }
+
     public function test_endpoint_can_be_disabled_per_key(): void
     {
         $this->shipment();
