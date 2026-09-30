@@ -27,7 +27,7 @@ class ReceiptController extends Controller
     {
         // Eager-load shipments.agentAccount up front so the `is_test` accessor (used to decide
         // whether the row's Delete action is shown) never triggers a per-row N+1 query.
-        $query = Receipt::with('branch', 'shipments.agentAccount')->latest();
+        $query = Receipt::visibleTo($request->user())->with('branch', 'shipments.agentAccount')->latest();
 
         if ($type = $request->query('type')) {
             $query->where('type', $type);
@@ -81,7 +81,7 @@ class ReceiptController extends Controller
             'shipment_ids.*' => ['integer', 'exists:shipments,id'],
         ]);
 
-        $shipments = Shipment::whereIn('id', $data['shipment_ids'])->get();
+        $shipments = Shipment::visibleTo($request->user())->whereIn('id', $data['shipment_ids'])->get();
         $this->assertShipmentsBillable($shipments);
 
         $branchId = $shipments->first()->branch_id;
@@ -213,7 +213,7 @@ class ReceiptController extends Controller
             ]);
         }
 
-        $shipments = ! empty($data['shipment_ids']) ? Shipment::whereIn('id', $data['shipment_ids'])->get() : collect();
+        $shipments = ! empty($data['shipment_ids']) ? Shipment::visibleTo($request->user())->whereIn('id', $data['shipment_ids'])->get() : collect();
         if ($shipments->isNotEmpty()) {
             $this->assertShipmentsBillable($shipments);
         }
@@ -339,6 +339,14 @@ class ReceiptController extends Controller
      */
     private function replaceLines(Receipt $receipt, array $lines): void
     {
+        // Lines are replaced wholesale (no per-line model events), so the change is logged once
+        // on the Receipt — skipped on first issue, when the 'created' entry already covers it.
+        $summary = fn ($rows) => collect($rows)->values()->map(fn ($l) => trim(($l['description'] ?? '').' = '.number_format((float) ($l['amount'] ?? 0), 2).(! empty($l['is_non_vat']) ? ' (Non-VAT)' : '')))->all();
+        $before = $summary($receipt->lines()->orderBy('sort_order')->get()->toArray());
+        $after = $summary($lines);
+        if ($before && $before !== $after) {
+            app(\App\Services\AuditLogger::class)->record('lines_changed', $receipt, ['lines' => ['old' => $before, 'new' => $after]], $receipt->auditLabel());
+        }
         $receipt->lines()->delete();
         foreach (array_values($lines) as $index => $line) {
             ReceiptLine::create([
@@ -492,6 +500,7 @@ class ReceiptController extends Controller
 
     public function pdf(Receipt $receipt)
     {
+        app(\App\Services\AuditLogger::class)->accessed('printed', $receipt);
         $pdf = $this->receiptPdfService->render($receipt);
 
         return response($pdf, 200, [
@@ -510,8 +519,9 @@ class ReceiptController extends Controller
             'receipt_ids.*' => ['integer', 'exists:receipts,id'],
         ]);
 
-        $receipts = Receipt::whereIn('id', $data['receipt_ids'])->orderBy('issued_date')->orderBy('id')->get();
+        $receipts = Receipt::visibleTo($request->user())->whereIn('id', $data['receipt_ids'])->orderBy('issued_date')->orderBy('id')->get();
         $pdf = $this->receiptPdfService->renderBatch($receipts);
+        $receipts->each(fn (Receipt $r) => app(\App\Services\AuditLogger::class)->accessed('printed', $r, ['batch' => true]));
 
         return response($pdf, 200, [
             'Content-Type' => 'application/pdf',

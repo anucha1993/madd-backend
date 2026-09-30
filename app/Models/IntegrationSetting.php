@@ -2,12 +2,17 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 
 #[Fillable(['key', 'value'])]
 class IntegrationSetting extends Model
 {
+    use Auditable;
+
+    protected array $auditExclude = ['value'];
+
     public static function get(string $key): ?string
     {
         return static::where('key', $key)->value('value');

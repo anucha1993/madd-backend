@@ -9,9 +9,13 @@ class SupplyController extends Controller
 {
     private const MAX_FEATURED = 6;
 
-    public function index()
+    /** `stocks` = balances at the caller's own branches, shown in the booking form. */
+    public function index(Request $request)
     {
-        return Supply::with('weightBand')->orderBy('name')->get();
+        $branchIds = $request->user()?->branches()->pluck('branches.id') ?? collect();
+
+        return Supply::with(['weightBand', 'stocks' => fn ($q) => $q->whereIn('branch_id', $branchIds)->select('id', 'supply_id', 'branch_id', 'quantity', 'min_qty', 'max_qty')])
+            ->orderBy('name')->get();
     }
 
     public function store(Request $request)

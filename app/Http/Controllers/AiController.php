@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\AgentAccount;
+use App\Services\AccessService;
+use App\Services\ChargeMarkupService;
 use App\Services\DhlRateService;
 use App\Services\OpenAiService;
+use App\Services\QuotableAccountResolver;
 use App\Services\UpsRateService;
 use Illuminate\Http\Request;
 
@@ -14,6 +16,9 @@ class AiController extends Controller
         private OpenAiService $openAi,
         private UpsRateService $upsRateService,
         private DhlRateService $dhlRateService,
+        private ChargeMarkupService $chargeMarkupService,
+        private AccessService $access,
+        private QuotableAccountResolver $quotableAccounts,
     ) {
     }
 
@@ -176,7 +181,10 @@ class AiController extends Controller
             'packages' => [$package],
         ];
 
-        $accounts = AgentAccount::with('agent')->where('status', true)->get();
+        // Same accounts/services the user could really book with (their branches' assignments),
+        // not every account in the system.
+        ['query' => $accountsQuery, 'allowedServiceCodes' => $allowedServiceCodes] = $this->quotableAccounts->forUser($request->user());
+        $accounts = $accountsQuery->get();
         $upsAccounts = $accounts->filter(fn ($a) => $a->agent?->agent_code === 'UPS' && $a->client_id && $a->client_secret);
         $dhlAccounts = $accounts->filter(fn ($a) => $a->agent?->agent_code === 'DHL' && $a->basic_auth_username && $a->basic_auth_password);
 
@@ -189,6 +197,7 @@ class AiController extends Controller
                 'client_id' => $a->client_id,
                 'client_secret' => $a->client_secret,
                 'mode' => $a->mode,
+                'allowed_service_codes' => $allowedServiceCodes[$a->id] ?? null,
             ])->values()->all(),
             $shipment,
             $serviceCodes,
@@ -201,11 +210,19 @@ class AiController extends Controller
                 'basic_auth_username' => $a->basic_auth_username,
                 'basic_auth_password' => $a->basic_auth_password,
                 'mode' => $a->mode,
+                'allowed_service_codes' => $allowedServiceCodes[$a->id] ?? null,
             ])->values()->all(),
             $shipment,
         );
 
-        $okResults = array_values(array_filter([...$upsResults, ...$dhlResults], fn ($r) => empty($r['error'])));
+        // Same sell-price markup as the real check-rate (previously skipped here, so the chat
+        // answered with the carrier's raw COST), then stripped to what this user's Role may see
+        // BEFORE it reaches either the LLM prompt or the browser — the model can't leak a cost
+        // or markup figure it was never given.
+        $okResults = array_map(
+            fn ($r) => $this->access->sanitizeRateQuote($request->user(), $r),
+            $this->chargeMarkupService->applyToResults(array_values(array_filter([...$upsResults, ...$dhlResults], fn ($r) => empty($r['error'])))),
+        );
         usort($okResults, fn ($a, $b) => ($a['negotiated'] ?? $a['published'] ?? PHP_INT_MAX) <=> ($b['negotiated'] ?? $b['published'] ?? PHP_INT_MAX));
 
         // Pick the cheapest few PER CARRIER so both UPS and DHL show up in the reply

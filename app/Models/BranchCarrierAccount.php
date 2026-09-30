@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -10,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[Fillable(['branch_id', 'agent_account_id', 'label', 'tracking_prefix', 'is_default', 'allowed_service_codes'])]
 class BranchCarrierAccount extends Model
 {
-    use HasFactory;
+    use Auditable, HasFactory;
 
     protected function casts(): array
     {

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -10,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[Fillable(['agent_id', 'agent_account_id', 'charge_code_id', 'rule_type', 'formula', 'value', 'unit', 'status'])]
 class MarkupRule extends Model
 {
-    use HasFactory;
+    use Auditable, HasFactory;
 
     protected function casts(): array
     {

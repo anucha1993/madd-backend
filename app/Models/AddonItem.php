@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -9,6 +10,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[Fillable(['addon_category_id', 'name', 'carriers', 'customer_types', 'product_types', 'price_type', 'price', 'markup_percent', 'trigger_type', 'status', 'note'])]
 class AddonItem extends Model
 {
+    use Auditable;
+
     protected function casts(): array
     {
         return [

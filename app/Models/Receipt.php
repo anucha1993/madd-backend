@@ -2,6 +2,9 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\Auditable;
+use App\Models\Concerns\HidesRestrictedFields;
+use App\Models\Concerns\ScopedByAccess;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -18,6 +21,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 ])]
 class Receipt extends Model
 {
+    use Auditable, HidesRestrictedFields, ScopedByAccess;
+
+    protected static string $accessModule = 'receipt';
+
     protected $appends = ['is_test', 'variance_amount'];
 
     protected function casts(): array

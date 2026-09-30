@@ -19,9 +19,20 @@ return Application::configure(basePath: dirname(__DIR__))
         // logic, which tries route('login') and crashes with RouteNotFoundException instead of
         // returning a clean 401. Never redirect guests — always fall through to a JSON 401.
         $middleware->redirectGuestsTo(fn () => null);
+
+        $middleware->alias([
+            'perm' => \App\Http\Middleware\RequirePermission::class,
+            'record.scope' => \App\Http\Middleware\EnsureRecordInScope::class,
+            'api.client' => \App\Http\Middleware\AuthenticateApiClient::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
+        // Every reported failure (uncaught 500s, R2 uploads, UPS paperless…) also lands in
+        // Config › System Alerts. Validation/auth/404 exceptions are in dontReport and skip this.
+        $exceptions->report(function (Throwable $e) {
+            \App\Models\SystemAlert::recordException($e);
+        });
     })->create();

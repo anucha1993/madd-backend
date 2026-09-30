@@ -79,6 +79,11 @@ return [
         'transaction_src' => env('UPS_TRANSACTION_SRC', 'testing'),
     ],
 
+    // See App\Casts\CarrierSecret — enable only once every server on this DB shares APP_KEY.
+    'carrier_secrets' => [
+        'encrypt' => (bool) env('CARRIER_SECRETS_ENCRYPT', false),
+    ],
+
     'dhl' => [
         'api_url' => env('DHL_API_URL', 'https://express.api.dhl.com/mydhlapi'),
         'api_url_test' => env('DHL_API_URL_TEST', 'https://express.api.dhl.com/mydhlapi/test'),

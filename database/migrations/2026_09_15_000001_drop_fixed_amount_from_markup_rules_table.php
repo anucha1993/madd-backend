@@ -12,6 +12,11 @@ return new class extends Migration
      */
     public function up(): void
     {
+        // The migration that ADDED fixed_amount was later deleted, so on a fresh database the
+        // column never exists — guard so migrations replay from empty (tests, new installs).
+        if (! Schema::hasColumn('markup_rules', 'fixed_amount')) {
+            return;
+        }
         Schema::table('markup_rules', function (Blueprint $table) {
             $table->dropColumn('fixed_amount');
         });

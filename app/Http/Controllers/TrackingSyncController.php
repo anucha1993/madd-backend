@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Console\Commands\NotifyOverduePickups;
 use App\Models\IntegrationSetting;
 use App\Models\TrackingSyncLog;
 use Illuminate\Http\Request;
@@ -19,6 +20,8 @@ class TrackingSyncController extends Controller
             'enabled' => IntegrationSetting::get(self::ENABLED_KEY) !== '0',
             'interval_minutes' => (int) (IntegrationSetting::get(self::INTERVAL_KEY) ?: 15),
             'last_run_at' => IntegrationSetting::get(self::LAST_RUN_KEY),
+            // Extra addresses for the overdue-pickup email (the pickup's creator always gets it).
+            'pickup_alert_recipients' => NotifyOverduePickups::extraRecipients(),
         ]);
     }
 
@@ -27,10 +30,15 @@ class TrackingSyncController extends Controller
         $data = $request->validate([
             'enabled' => ['required', 'boolean'],
             'interval_minutes' => ['required', 'integer', 'min:1', 'max:1440'],
+            'pickup_alert_recipients' => ['nullable', 'array'],
+            'pickup_alert_recipients.*' => ['email'],
         ]);
 
         IntegrationSetting::set(self::ENABLED_KEY, $data['enabled'] ? '1' : '0');
         IntegrationSetting::set(self::INTERVAL_KEY, (string) $data['interval_minutes']);
+        if (array_key_exists('pickup_alert_recipients', $data)) {
+            IntegrationSetting::set(NotifyOverduePickups::RECIPIENTS_KEY, implode(',', array_unique($data['pickup_alert_recipients'] ?? [])));
+        }
 
         return $this->showSettings();
     }

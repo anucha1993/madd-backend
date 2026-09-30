@@ -2,6 +2,9 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\Auditable;
+use App\Models\Concerns\HidesRestrictedFields;
+use App\Models\Concerns\ScopedByAccess;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -17,11 +20,19 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
     'bill_duty_tax_account_number', 'bill_duty_tax_third_party_country', 'bill_duty_tax_third_party_postal_code',
     'ref_invoice_no', 'ref_insurance_no', 'ref_purchase_no', 'rate_quote',
     'label_storage_key', 'waybill_storage_key', 'commercial_invoice_storage_key', 'raw_response', 'raw_request', 'carrier_http_status', 'error_message',
-    'voided_at', 'void_note',
+    'voided_at', 'void_note', 'voided_by', 'void_reason',
+    'carrier_cancel_status', 'carrier_cancel_requested_at', 'carrier_cancel_requested_to', 'carrier_cancel_confirmed_at', 'carrier_cancel_confirmed_by', 'carrier_cancel_reference',
     'tracking_status', 'tracking_raw_status', 'tracking_synced_at', 'delivered_at',
+    'picked_up_at', 'picked_up_source', 'picked_up_by',
 ])]
 class Shipment extends Model
 {
+    use Auditable, HidesRestrictedFields, ScopedByAccess;
+
+    protected array $auditExclude = ['raw_response', 'raw_request', 'rate_quote', 'packages', 'origin', 'destination', 'invoice_lines', 'addon_lines', 'pieces', 'tracking_raw_status', 'tracking_synced_at'];
+
+    protected static string $accessModule = 'shipment';
+
     protected $appends = ['is_test'];
 
     protected function casts(): array
@@ -41,9 +52,44 @@ class Shipment extends Model
             'order_total' => 'decimal:2',
             'cost_amount' => 'decimal:2',
             'voided_at' => 'datetime',
+            'carrier_cancel_confirmed_at' => 'datetime',
+            'carrier_cancel_requested_at' => 'datetime',
             'tracking_synced_at' => 'datetime',
             'delivered_at' => 'datetime',
+            'picked_up_at' => 'datetime',
         ];
+    }
+
+    /**
+     * The saved rate_quote snapshot holds carrier cost / markup detail / raw response — strip
+     * whatever the viewer's `rate` field access hides (see AccessService::sanitizeRateQuote),
+     * keeping the sell-price breakdown the view page and receipts need.
+     */
+    public function toArray(): array
+    {
+        $array = parent::toArray();
+        if (is_array($array['rate_quote'] ?? null) && ($user = auth()->user())) {
+            $array['rate_quote'] = app(\App\Services\AccessService::class)->sanitizeRateQuote($user, $array['rate_quote']);
+        }
+
+        return $array;
+    }
+
+    /**
+     * Staff saw the courier take it — counts as collected immediately (grouping, Pickup
+     * progress) until the carrier's own scan arrives and replaces picked_up_at/source.
+     */
+    public function markPickedUpManually(?User $user): void
+    {
+        if ($this->picked_up_at) {
+            return;
+        }
+        $this->update([
+            'picked_up_at' => now(),
+            'picked_up_source' => 'manual',
+            'picked_up_by' => $user?->id,
+            'tracking_status' => in_array($this->tracking_status, ['in_transit', 'delivered'], true) ? $this->tracking_status : 'in_transit',
+        ]);
     }
 
     public function agentAccount(): BelongsTo
@@ -54,6 +100,25 @@ class Shipment extends Model
     public function branch(): BelongsTo
     {
         return $this->belongsTo(Branch::class);
+    }
+
+    /**
+     * The app only ever compares lowercase statuses ('booked', 'voided', ...) — normalise on
+     * write so a hand-typed "Booked" or "booked " can't silently break every status check.
+     */
+    public function setStatusAttribute(?string $value): void
+    {
+        $this->attributes['status'] = $value === null ? null : strtolower(trim($value));
+    }
+
+    public function voidedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'voided_by');
+    }
+
+    public function carrierCancelConfirmedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'carrier_cancel_confirmed_by');
     }
 
     public function createdBy(): BelongsTo

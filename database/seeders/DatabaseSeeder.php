@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Models\Role;
 use App\Models\User;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
@@ -18,12 +19,14 @@ class DatabaseSeeder extends Seeder
     {
         // User::factory(10)->create();
 
-        User::factory()->create([
+        $admin = User::factory()->create([
             'name' => 'Administrator',
             'username' => 'admin',
             'email' => 'admin@madd.local',
             'password' => Hash::make('password123'),
         ]);
+        // Roles themselves are seeded by the create_roles_tables migration.
+        $admin->roles()->syncWithoutDetaching(Role::where('key', 'admin')->pluck('id'));
 
         $this->call(AgentSeeder::class);
         $this->call(ThaiSubdistrictSeeder::class);
