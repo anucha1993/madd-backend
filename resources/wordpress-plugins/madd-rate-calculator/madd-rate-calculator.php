@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MADD Rate Calculator
  * Description: ฟอร์มเช็คราคาค่าส่งระหว่างประเทศ (UPS / DHL) และติดตามพัสดุ จากระบบ MADD — shortcode [madd_rate_calculator] และ [madd_tracking]
- * Version: 1.1.0
+ * Version: 1.1.1
  * Requires PHP: 7.4
  * Author: MADD
  * Text Domain: madd-rate-calculator
@@ -18,7 +18,7 @@ if (! defined('ABSPATH')) {
 final class Madd_Rate_Calculator
 {
     const OPTION = 'madd_rate_calculator';
-    const VERSION = '1.1.0';
+    const VERSION = '1.1.1';
     const COUNTRIES_CACHE = 'madd_rate_countries';
 
     public static function init()
@@ -69,7 +69,7 @@ final class Madd_Rate_Calculator
             'sanitize_callback' => function ($input) {
                 $old = get_option(self::OPTION, []);
                 $clean = [
-                    'api_url' => esc_url_raw(trim($input['api_url'] ?? '')),
+                    'api_url' => esc_url_raw(self::base_url($input['api_url'] ?? '')),
                     'turnstile_site_key' => sanitize_text_field($input['turnstile_site_key'] ?? ''),
                     'contact_url' => esc_url_raw(trim($input['contact_url'] ?? '')),
                     'contact_label' => sanitize_text_field($input['contact_label'] ?? ''),
@@ -101,7 +101,7 @@ final class Madd_Rate_Calculator
                         <th scope="row"><label for="madd_api_url">MADD API URL</label></th>
                         <td>
                             <input id="madd_api_url" name="<?php echo esc_attr(self::OPTION); ?>[api_url]" type="url" class="regular-text" value="<?php echo esc_attr($s['api_url']); ?>" placeholder="https://api.example.com/api" <?php disabled(defined('MADD_RATE_API_URL')); ?>>
-                            <p class="description">URL ของ MADD backend ที่ลงท้ายด้วย <code>/api</code><?php echo defined('MADD_RATE_API_URL') ? ' — กำหนดไว้ใน wp-config.php แล้ว' : ''; ?></p>
+                            <p class="description">ใส่แค่ถึง <code>/api</code> เช่น <code>https://backend.madd-admin.com/api</code> (ไม่ต้องใส่ /public/v1/...)<?php echo defined('MADD_RATE_API_URL') ? ' — กำหนดไว้ใน wp-config.php แล้ว' : ''; ?></p>
                         </td>
                     </tr>
                     <tr>
@@ -168,7 +168,7 @@ final class Madd_Rate_Calculator
         if ($body !== null) {
             $args['body'] = wp_json_encode($body);
         }
-        $response = wp_remote_request(untrailingslashit($s['api_url']).$path, $args);
+        $response = wp_remote_request(self::base_url($s['api_url']).$path, $args);
         if (is_wp_error($response)) {
             return $response;
         }
@@ -181,6 +181,12 @@ final class Madd_Rate_Calculator
         }
 
         return is_array($data) ? $data : new WP_Error('madd_bad_response', 'รูปแบบข้อมูลจาก MADD API ไม่ถูกต้อง');
+    }
+
+    /** The configured URL, trimmed back to ".../api" if a full endpoint was pasted in. */
+    private static function base_url($url)
+    {
+        return preg_replace('#/public(/v1)?(/.*)?$#', '', untrailingslashit(trim($url)));
     }
 
     private static function visitor_ip()

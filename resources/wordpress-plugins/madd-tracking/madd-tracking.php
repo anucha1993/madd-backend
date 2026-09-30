@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MADD Tracking
  * Description: ฟอร์มติดตามพัสดุ (UPS / DHL) จากระบบ MADD — ใส่ในหน้าใดก็ได้ด้วย shortcode [madd_tracking] · ลิงก์ตรง ?tn=เลขTracking
- * Version: 1.0.0
+ * Version: 1.0.1
  * Requires at least: 5.8
  * Requires PHP: 7.4
  * Author: MADD
@@ -19,7 +19,7 @@ if (! defined('ABSPATH')) {
 final class Madd_Tracking
 {
     const OPTION = 'madd_tracking';
-    const VERSION = '1.0.0';
+    const VERSION = '1.0.1';
     const AJAX_ACTION = 'madd_tracking_lookup';
 
     public static function init()
@@ -85,7 +85,7 @@ final class Madd_Tracking
                 $old = get_option(self::OPTION, []);
 
                 return [
-                    'api_url' => esc_url_raw(trim($input['api_url'] ?? '')),
+                    'api_url' => esc_url_raw(self::base_url($input['api_url'] ?? '')),
                     'turnstile_site_key' => sanitize_text_field($input['turnstile_site_key'] ?? ''),
                     'contact_url' => esc_url_raw(trim($input['contact_url'] ?? '')),
                     'contact_label' => sanitize_text_field($input['contact_label'] ?? ''),
@@ -120,8 +120,8 @@ final class Madd_Tracking
                     <tr>
                         <th scope="row"><label for="madd_api_url">MADD API URL</label></th>
                         <td>
-                            <input id="madd_api_url" name="<?php echo $name; ?>[api_url]" type="url" class="regular-text" value="<?php echo esc_attr($s['api_url']); ?>" placeholder="https://api.example.com/api" <?php disabled(defined('MADD_RATE_API_URL')); ?>>
-                            <p class="description">URL ของ MADD backend ที่ลงท้ายด้วย <code>/api</code><?php echo defined('MADD_RATE_API_URL') ? ' — กำหนดไว้ใน wp-config.php แล้ว' : ''; ?></p>
+                            <input id="madd_api_url" name="<?php echo $name; ?>[api_url]" type="url" class="regular-text" value="<?php echo esc_attr($s['api_url']); ?>" placeholder="https://backend.example.com/api" <?php disabled(defined('MADD_RATE_API_URL')); ?>>
+                            <p class="description">ใส่แค่ถึง <code>/api</code> เช่น <code>https://backend.madd-admin.com/api</code> (ไม่ต้องใส่ /public/v1/...)<?php echo defined('MADD_RATE_API_URL') ? ' — กำหนดไว้ใน wp-config.php แล้ว' : ''; ?></p>
                         </td>
                     </tr>
                     <tr>
@@ -179,7 +179,7 @@ final class Madd_Tracking
         if (! $s['api_url'] || ! $s['api_key']) {
             return new WP_Error('madd_not_configured', 'ยังไม่ได้ตั้งค่า MADD API URL / API Key', ['status' => 0]);
         }
-        $response = wp_remote_get(untrailingslashit($s['api_url']).$path, [
+        $response = wp_remote_get(self::base_url($s['api_url']).$path, [
             'timeout' => 30,
             'headers' => [
                 'Authorization' => 'Bearer '.$s['api_key'],
@@ -197,6 +197,12 @@ final class Madd_Tracking
         }
 
         return is_array($data) ? $data : new WP_Error('madd_bad_response', 'รูปแบบข้อมูลจาก MADD ไม่ถูกต้อง', ['status' => 0]);
+    }
+
+    /** The configured URL, trimmed back to ".../api" if a full endpoint was pasted in. */
+    private static function base_url($url)
+    {
+        return preg_replace('#/public(/v1)?(/.*)?$#', '', untrailingslashit(trim($url)));
     }
 
     private static function visitor_ip()

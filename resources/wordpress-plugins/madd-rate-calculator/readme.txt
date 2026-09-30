@@ -1,7 +1,7 @@
 === MADD Rate Calculator ===
 Requires at least: 5.8
 Requires PHP: 7.4
-Stable tag: 1.1.0
+Stable tag: 1.1.1
 
 ฟอร์มเช็คราคาค่าส่งระหว่างประเทศ (UPS / DHL) — ราคาขายเดียวกับหน้าร้าน และฟอร์มติดตามพัสดุ จากระบบ MADD
 
