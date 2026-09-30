@@ -7,19 +7,14 @@ use App\Models\Pickup;
 use App\Models\Role;
 use App\Models\Shipment;
 use App\Models\User;
-use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
-/**
- * Uses DatabaseTransactions (not RefreshDatabase) because the historical migrations can't be
- * replayed from an empty database — run against a copy of the current schema with pending
- * migrations applied (never against the shared real database).
- */
 class AccessControlTest extends TestCase
 {
-    use DatabaseTransactions;
+    use RefreshDatabase;
 
     private Branch $branchA;
 

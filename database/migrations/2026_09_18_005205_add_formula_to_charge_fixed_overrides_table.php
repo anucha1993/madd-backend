@@ -22,6 +22,12 @@ return new class extends Migration
 
         // No doctrine/dbal installed, so use raw SQL instead of Schema::table(...)->change() to
         // make fixed_amount optional (FORMULA rows don't use it).
+        if (DB::getDriverName() === 'sqlite') {
+            // Test suite — sqlite has no MODIFY, Laravel's native change() rebuilds the column.
+            Schema::table('charge_fixed_overrides', fn (Blueprint $table) => $table->decimal('fixed_amount', 10, 2)->nullable()->change());
+
+            return;
+        }
         DB::statement('ALTER TABLE charge_fixed_overrides MODIFY fixed_amount DECIMAL(10,2) NULL');
     }
 

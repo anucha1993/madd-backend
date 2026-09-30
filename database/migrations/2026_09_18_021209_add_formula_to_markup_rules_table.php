@@ -23,6 +23,15 @@ return new class extends Migration
 
         // No doctrine/dbal installed — widen value/unit to nullable via raw SQL instead of
         // Schema::table(...)->change() (FORMULA rules don't use them).
+        if (DB::getDriverName() === 'sqlite') {
+            // Test suite — sqlite has no MODIFY, Laravel's native change() rebuilds the columns.
+            Schema::table('markup_rules', function (Blueprint $table) {
+                $table->decimal('value', 10, 2)->nullable()->change();
+                $table->enum('unit', ['PERCENTAGE', 'BAHT'])->nullable()->change();
+            });
+
+            return;
+        }
         DB::statement("ALTER TABLE markup_rules MODIFY value DECIMAL(10,2) NULL");
         DB::statement("ALTER TABLE markup_rules MODIFY unit ENUM('PERCENTAGE','BAHT') NULL");
     }

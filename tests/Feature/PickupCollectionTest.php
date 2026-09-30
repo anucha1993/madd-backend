@@ -9,7 +9,7 @@ use App\Models\Shipment;
 use App\Models\User;
 use App\Services\DhlTrackingService;
 use App\Services\TrackingStatusClassifier;
-use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -17,11 +17,10 @@ use Tests\TestCase;
 /**
  * On-call pickups aren't linked to tracking numbers by the carrier — collection is proven per
  * shipment by tracking scans (TrackingStatusClassifier) or staff confirmation.
- * DatabaseTransactions for the same reason as AccessControlTest.
  */
 class PickupCollectionTest extends TestCase
 {
-    use DatabaseTransactions;
+    use RefreshDatabase;
 
     private int $accountId;
 
