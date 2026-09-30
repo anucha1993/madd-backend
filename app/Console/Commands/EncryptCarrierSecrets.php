@@ -30,21 +30,25 @@ class EncryptCarrierSecrets extends Command
 
         $dryRun = (bool) $this->option('dry-run');
         $count = 0;
-        foreach (DB::table('agent_accounts')->get(['id', ...self::COLUMNS]) as $row) {
-            $updates = [];
-            foreach (self::COLUMNS as $column) {
-                $raw = $row->{$column};
-                if ($raw !== null && $raw !== '' && ! CarrierSecret::isEncrypted($raw)) {
-                    $updates[$column] = Crypt::encryptString($raw);
+        // All-or-nothing: a failure part-way (e.g. a column too short) must never leave some
+        // accounts encrypted and others not.
+        DB::transaction(function () use ($dryRun, &$count) {
+            foreach (DB::table('agent_accounts')->get(['id', ...self::COLUMNS]) as $row) {
+                $updates = [];
+                foreach (self::COLUMNS as $column) {
+                    $raw = $row->{$column};
+                    if ($raw !== null && $raw !== '' && ! CarrierSecret::isEncrypted($raw)) {
+                        $updates[$column] = Crypt::encryptString($raw);
+                    }
+                }
+                if ($updates) {
+                    $count += count($updates);
+                    if (! $dryRun) {
+                        DB::table('agent_accounts')->where('id', $row->id)->update($updates);
+                    }
                 }
             }
-            if ($updates) {
-                $count += count($updates);
-                if (! $dryRun) {
-                    DB::table('agent_accounts')->where('id', $row->id)->update($updates);
-                }
-            }
-        }
+        });
 
         $this->info(($dryRun ? 'Would encrypt' : 'Encrypted')." {$count} value(s).");
 

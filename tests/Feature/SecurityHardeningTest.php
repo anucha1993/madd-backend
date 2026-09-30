@@ -34,7 +34,8 @@ class SecurityHardeningTest extends TestCase
 
     public function test_encrypt_command_and_cast_read_both_formats(): void
     {
-        $account = $this->account(); // written as plaintext (flag off by default)
+        config(['services.carrier_secrets.encrypt' => false]);
+        $account = $this->account(); // legacy row: written as plaintext
         config(['services.carrier_secrets.encrypt' => true]);
 
         $this->artisan('agent-accounts:encrypt-secrets')->expectsOutput('Encrypted 2 value(s).')->assertSuccessful();
