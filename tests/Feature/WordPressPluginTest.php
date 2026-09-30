@@ -22,7 +22,7 @@ class WordPressPluginTest extends TestCase
         $this->getJson('/api/wordpress-plugins')->assertOk()
             ->assertJsonPath('0.slug', 'madd-tracking')
             ->assertJsonPath('0.name', 'MADD Tracking')
-            ->assertJsonPath('0.version', '1.1.0');
+            ->assertJsonPath('0.version', '1.1.1');
 
         $res = $this->get('/api/wordpress-plugins/madd-tracking/download')->assertOk();
         $path = $res->baseResponse->getFile()->getPathname();

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MADD Tracking
  * Description: ฟอร์มติดตามพัสดุ (UPS / DHL) จากระบบ MADD — shortcode [madd_tracking] (ภาษาอังกฤษ: [madd_tracking lang="en"]) · ลิงก์ตรง ?tn=เลขTracking
- * Version: 1.1.0
+ * Version: 1.1.1
  * Requires at least: 5.8
  * Requires PHP: 7.4
  * Author: MADD
@@ -19,8 +19,11 @@ if (! defined('ABSPATH')) {
 final class Madd_Tracking
 {
     const OPTION = 'madd_tracking';
-    const VERSION = '1.1.0';
+    const VERSION = '1.1.1';
     const AJAX_ACTION = 'madd_tracking_lookup';
+    // How long WordPress reuses an answer before asking MADD again (seconds).
+    const RESULT_CACHE = 300;
+    const NOT_FOUND_CACHE = 120;
 
     public static function init()
     {
@@ -329,12 +332,31 @@ final class Madd_Tracking
             wp_send_json_error(['message' => self::t($lang, 'invalid')], 422);
         }
 
+        // Answer repeat look-ups of the same number from WordPress itself, so visitors pressing
+        // "Track" again and again don't open a new connection to MADD each time.
+        $key = 'madd_trk_'.md5($number);
+        $cached = get_transient($key);
+        if (is_array($cached)) {
+            if (! empty($cached['__not_found'])) {
+                wp_send_json_error(['message' => self::t($lang, 'not_found')], 404);
+            }
+            wp_send_json_success($cached);
+        }
+
         $result = self::api('/public/v1/tracking/'.rawurlencode($number));
         if (is_wp_error($result)) {
             $status = (int) ($result->get_error_data()['status'] ?? 0);
+            if ($status === 404) {
+                set_transient($key, ['__not_found' => true], self::NOT_FOUND_CACHE);
+            }
             $visitor = [404 => 'not_found', 422 => 'invalid', 429 => 'rate_limited'];
             if (isset($visitor[$status])) {
                 wp_send_json_error(['message' => self::t($lang, $visitor[$status])], $status);
+            }
+            // MADD unreachable — the last good answer (up to a day old) beats an error page.
+            $stale = get_transient('madd_trk_stale_'.md5($number));
+            if (is_array($stale)) {
+                wp_send_json_success($stale + ['stale' => true]);
             }
             // Configuration / connectivity problems are for the site admin, not the visitor.
             if (current_user_can('manage_options')) {
@@ -343,6 +365,8 @@ final class Madd_Tracking
             wp_send_json_error(['message' => self::t($lang, 'unavailable')], 502);
         }
 
+        set_transient($key, $result, self::RESULT_CACHE);
+        set_transient('madd_trk_stale_'.md5($number), $result, DAY_IN_SECONDS);
         wp_send_json_success($result);
     }
 }

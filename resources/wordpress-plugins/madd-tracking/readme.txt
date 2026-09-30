@@ -1,7 +1,7 @@
 === MADD Tracking ===
 Requires at least: 5.8
 Requires PHP: 7.4
-Stable tag: 1.1.0
+Stable tag: 1.1.1
 
 ฟอร์มติดตามพัสดุ (UPS / DHL) สำหรับ Shipment ที่จองผ่านระบบ MADD
 
@@ -28,6 +28,7 @@ Stable tag: 1.1.0
 - แนะนำเปิด Cloudflare Turnstile (ฟรี) ที่ Settings › MADD Tracking
 
 == หมายเหตุ ==
+- ผลการค้นหาถูกจำไว้ที่ WordPress 5 นาที (ไม่พบเลข 2 นาที) — กดค้นซ้ำไม่ยิงไปที่ MADD ทุกครั้ง ถ้าเชื่อมต่อ MADD ไม่ได้ จะแสดงผลล่าสุดที่เคยค้นได้ (ไม่เกิน 1 วัน)
 - ถ้าติดตั้ง MADD Rate Calculator (ตัวเต็ม) ภายหลัง ให้ปิด MADD Tracking — ตัวเต็มมี [madd_tracking] อยู่แล้ว
 - ผู้ดูแลเว็บ (Admin) ที่ Login อยู่จะเห็นข้อความ Error จริงเวลาเชื่อมต่อไม่ได้ ลูกค้าทั่วไปจะเห็นแค่ "ไม่พร้อมใช้งานชั่วคราว"
 
