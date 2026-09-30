@@ -7,6 +7,7 @@ use App\Http\Controllers\AgentAccountController;
 use App\Http\Controllers\AgentController;
 use App\Http\Controllers\AiController;
 use App\Http\Controllers\ApiClientController;
+use App\Http\Controllers\WordPressPluginController;
 use App\Http\Controllers\PublicApi\RateController as PublicRateController;
 use App\Http\Controllers\PublicApi\TrackingController as PublicTrackingController;
 use App\Http\Controllers\AuditLogController;
@@ -93,6 +94,8 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
         Route::delete('api-clients/{apiClient}', [ApiClientController::class, 'destroy']);
         Route::post('api-clients/{apiClient}/regenerate', [ApiClientController::class, 'regenerate']);
         Route::post('api-clients/{apiClient}/test', [ApiClientController::class, 'test']);
+        Route::get('wordpress-plugins', [WordPressPluginController::class, 'index']);
+        Route::get('wordpress-plugins/{slug}/download', [WordPressPluginController::class, 'download']);
     });
     Route::middleware('perm:config.system_alerts')->group(function () {
         Route::get('system-alerts', [SystemAlertController::class, 'index']);
