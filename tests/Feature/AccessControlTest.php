@@ -303,7 +303,7 @@ class AccessControlTest extends TestCase
     {
         $manager = Role::create([
             'key' => 'role_admin', 'name' => 'Role admin',
-            'permissions' => ['user.roles', 'user.manage'], 'field_access' => [], 'data_scopes' => [],
+            'permissions' => ['user.roles', 'user.view', 'user.create', 'user.edit', 'user.delete'], 'field_access' => [], 'data_scopes' => [],
         ]);
         $user = User::factory()->create();
         $user->roles()->sync([$manager->id]);

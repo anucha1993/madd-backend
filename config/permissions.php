@@ -185,14 +185,31 @@ return [
         'billing_customer' => [
             'label' => 'ลูกค้าใบกำกับภาษี',
             'category' => 'operations',
-            'actions' => ['manage' => 'จัดการ'],
-            'action_hints' => ['manage' => 'เพิ่ม / แก้ไข / ลบ'],
+            'actions' => ['view' => 'ดู', 'create' => 'เพิ่ม', 'edit' => 'แก้ไข', 'delete' => 'ลบ'],
+            'action_hints' => [
+                'view' => 'หน้า Billing Customers (ฟอร์มออกใบเสร็จค้นหาลูกค้าได้เสมอ)',
+                'create' => 'รวมถึงเพิ่มลูกค้าใหม่จากฟอร์มออกใบเสร็จ',
+            ],
         ],
         'customer' => [
             'label' => 'ลูกค้า / สมุดที่อยู่',
             'category' => 'operations',
-            'actions' => ['manage' => 'จัดการ'],
-            'action_hints' => ['manage' => 'เพิ่ม / แก้ไข / ลบ'],
+            'actions' => ['view' => 'ดู', 'create' => 'เพิ่ม', 'edit' => 'แก้ไข', 'delete' => 'ลบ'],
+            'action_hints' => [
+                'view' => 'หน้า Customers (ฟอร์มจอง Shipment ค้นหาที่อยู่ได้เสมอ)',
+                'create' => 'เพิ่มลูกค้า / ที่อยู่ (ผู้ที่จอง Shipment ได้ บันทึกที่อยู่ใหม่จากฟอร์มจองได้เสมอ)',
+                'edit' => 'แก้ไขข้อมูลลูกค้าและที่อยู่',
+                'delete' => 'ลบลูกค้า / ที่อยู่',
+            ],
+        ],
+        'ai' => [
+            'label' => 'AI Assistant',
+            'category' => 'operations',
+            'actions' => ['rate_chat' => 'ถาม AI เรื่องราคา', 'parse_address' => 'AI กรอกที่อยู่'],
+            'action_hints' => [
+                'rate_chat' => 'ปุ่มแชท AI มุมจอ ประเมินราคาค่าส่ง (ต้นทุนยังซ่อนตามสิทธิ์ข้อมูลราคา)',
+                'parse_address' => 'วางข้อความแล้วให้ AI แยกเป็นช่องที่อยู่ในฟอร์มจอง',
+            ],
         ],
         'tracking' => [
             'label' => 'Tracking',
@@ -212,8 +229,12 @@ return [
         'branch' => [
             'label' => 'สาขา',
             'category' => 'admin',
-            'actions' => ['manage' => 'จัดการ'],
-            'action_hints' => ['manage' => 'เพิ่ม / แก้ไข สาขา, บัญชี Carrier ของสาขา, เลขที่เอกสาร'],
+            'actions' => ['view' => 'ดู', 'create' => 'เพิ่ม', 'edit' => 'แก้ไข', 'delete' => 'ลบ', 'doc_numbers' => 'เลขที่เอกสาร'],
+            'action_hints' => [
+                'view' => 'หน้า Branches (รายชื่อสาขาใช้ในฟอร์มต่างๆ ได้เสมอ)',
+                'edit' => 'แก้ไขข้อมูลสาขา, เปิด/ปิดสาขา, บัญชี Carrier ของสาขา',
+                'doc_numbers' => 'รูปแบบและเลขรันใบเสร็จ / ใบกำกับภาษีของสาขา',
+            ],
         ],
         'config' => [
             'label' => 'Management / System Settings',
@@ -247,8 +268,12 @@ return [
         'user' => [
             'label' => 'ผู้ใช้งานและสิทธิ์',
             'category' => 'admin',
-            'actions' => ['manage' => 'ผู้ใช้งาน', 'roles' => 'Role & สิทธิ์', 'audit' => 'Audit Log'],
-            'action_hints' => ['audit' => 'ดูประวัติว่าใครแก้ไขอะไร เมื่อไร (Role, ผู้ใช้, ราคา, Shipment, ใบเสร็จ)'],
+            'actions' => ['view' => 'ดูผู้ใช้', 'create' => 'เพิ่มผู้ใช้', 'edit' => 'แก้ไขผู้ใช้', 'delete' => 'ลบผู้ใช้', 'roles' => 'Role & สิทธิ์', 'audit' => 'Audit Log'],
+            'action_hints' => [
+                'edit' => 'แก้ไขข้อมูล, รหัสผ่าน, Role และสาขาของผู้ใช้ (Role Super Admin ให้ได้เฉพาะ Super Admin)',
+                'roles' => 'สร้าง / แก้ไขสิทธิ์ของแต่ละ Role',
+                'audit' => 'ดูประวัติว่าใครแก้ไขอะไร เมื่อไร (Role, ผู้ใช้, ราคา, Shipment, ใบเสร็จ)',
+            ],
         ],
     ],
 

@@ -60,14 +60,17 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
 
     // ---- Roles & permissions ----
-    Route::get('access/registry', [RoleController::class, 'registry'])->middleware('perm:user.roles,user.manage');
-    Route::get('roles', [RoleController::class, 'index'])->middleware('perm:user.roles,user.manage');
+    Route::get('access/registry', [RoleController::class, 'registry'])->middleware('perm:user.roles,user.view');
+    Route::get('roles', [RoleController::class, 'index'])->middleware('perm:user.roles,user.view');
     Route::middleware('perm:user.roles')->group(function () {
         Route::post('roles', [RoleController::class, 'store']);
         Route::put('roles/{role}', [RoleController::class, 'update']);
         Route::delete('roles/{role}', [RoleController::class, 'destroy']);
     });
-    Route::apiResource('users', UserController::class)->middleware('perm:user.manage');
+    Route::apiResource('users', UserController::class)->only(['index', 'show'])->middleware('perm:user.view');
+    Route::post('users', [UserController::class, 'store'])->middleware('perm:user.create');
+    Route::put('users/{user}', [UserController::class, 'update'])->middleware('perm:user.edit');
+    Route::delete('users/{user}', [UserController::class, 'destroy'])->middleware('perm:user.delete');
     Route::get('audit-logs', [AuditLogController::class, 'index'])->middleware('perm:user.audit');
     Route::get('shipments/{shipment}/timeline', [TimelineController::class, 'shipment'])->middleware('perm:shipment.timeline');
     Route::get('receipts/{receipt}/timeline', [TimelineController::class, 'receipt'])->middleware('perm:receipt.timeline');
@@ -98,10 +101,13 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
     // ---- Branches ----
     Route::get('branches', [BranchController::class, 'index']);
     Route::get('branches/{branch}', [BranchController::class, 'show']);
-    Route::middleware('perm:branch.manage')->group(function () {
-        Route::apiResource('branches', BranchController::class)->only(['store', 'update', 'destroy']);
-        Route::get('branches/{branch}/carrier-accounts', [BranchCarrierAccountController::class, 'index']);
-        Route::put('branches/{branch}/carrier-accounts', [BranchCarrierAccountController::class, 'sync']);
+    Route::post('branches', [BranchController::class, 'store'])->middleware('perm:branch.create');
+    Route::put('branches/{branch}', [BranchController::class, 'update'])->middleware('perm:branch.edit');
+    Route::delete('branches/{branch}', [BranchController::class, 'destroy'])->middleware('perm:branch.delete');
+    // The branch form (create/edit) also loads + saves which carrier accounts the branch uses.
+    Route::get('branches/{branch}/carrier-accounts', [BranchCarrierAccountController::class, 'index'])->middleware('perm:branch.view,branch.create,branch.edit');
+    Route::put('branches/{branch}/carrier-accounts', [BranchCarrierAccountController::class, 'sync'])->middleware('perm:branch.create,branch.edit');
+    Route::middleware('perm:branch.doc_numbers')->group(function () {
         Route::get('branches/{branch}/document-number-settings', [BranchController::class, 'documentNumberSettings']);
         Route::put('branches/{branch}/document-number-settings', [BranchController::class, 'updateDocumentNumberSettings']);
     });
@@ -111,12 +117,13 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
     Route::get('customers/{customer}', [CustomerController::class, 'show']);
     Route::get('customer-addresses', [CustomerAddressController::class, 'search']);
     Route::get('customers/{customer}/addresses', [CustomerAddressController::class, 'index']);
-    Route::middleware('perm:customer.manage,shipment.create')->group(function () {
-        Route::apiResource('customers', CustomerController::class)->only(['store', 'update', 'destroy']);
-        Route::post('customers/{customer}/addresses', [CustomerAddressController::class, 'store']);
-        Route::put('customer-addresses/{address}', [CustomerAddressController::class, 'update']);
-        Route::delete('customer-addresses/{address}', [CustomerAddressController::class, 'destroy']);
-    });
+    // Booking (shipment.create) saves new senders/receivers to the address book from the form.
+    Route::post('customers', [CustomerController::class, 'store'])->middleware('perm:customer.create,shipment.create');
+    Route::post('customers/{customer}/addresses', [CustomerAddressController::class, 'store'])->middleware('perm:customer.create,customer.edit,shipment.create');
+    Route::put('customers/{customer}', [CustomerController::class, 'update'])->middleware('perm:customer.edit');
+    Route::put('customer-addresses/{address}', [CustomerAddressController::class, 'update'])->middleware('perm:customer.edit');
+    Route::delete('customers/{customer}', [CustomerController::class, 'destroy'])->middleware('perm:customer.delete');
+    Route::delete('customer-addresses/{address}', [CustomerAddressController::class, 'destroy'])->middleware('perm:customer.delete');
 
     // ---- Thai address DB ----
     Route::get('thai-subdistricts/by-zipcode/{zipCode}', [ThaiSubdistrictController::class, 'byZipCode']);
@@ -153,7 +160,9 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
     // ---- Billing ----
     Route::get('billing-customers', [BillingCustomerController::class, 'index']);
     Route::get('billing-customers/{billing_customer}', [BillingCustomerController::class, 'show']);
-    Route::apiResource('billing-customers', BillingCustomerController::class)->only(['store', 'update', 'destroy'])->middleware('perm:billing_customer.manage');
+    Route::post('billing-customers', [BillingCustomerController::class, 'store'])->middleware('perm:billing_customer.create');
+    Route::put('billing-customers/{billing_customer}', [BillingCustomerController::class, 'update'])->middleware('perm:billing_customer.edit');
+    Route::delete('billing-customers/{billing_customer}', [BillingCustomerController::class, 'destroy'])->middleware('perm:billing_customer.delete');
 
     Route::middleware('perm:receipt.view')->group(function () {
         Route::post('receipts/print-batch', [ReceiptController::class, 'printBatch']);
@@ -194,8 +203,8 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
     // ai/settings GET stays open: every page reads `is_enabled` to show/hide AI features, and the
     // key itself is only ever returned masked.
     Route::get('ai/settings', [AiController::class, 'settings']);
-    Route::post('ai/parse-address', [AiController::class, 'parseAddress']);
-    Route::post('ai/rate-chat', [AiController::class, 'rateChat']);
+    Route::post('ai/parse-address', [AiController::class, 'parseAddress'])->middleware('perm:ai.parse_address');
+    Route::post('ai/rate-chat', [AiController::class, 'rateChat'])->middleware('perm:ai.rate_chat');
     Route::middleware('perm:config.integrations')->group(function () {
         Route::put('ai/settings', [AiController::class, 'updateSettings']);
         Route::put('ai/toggle', [AiController::class, 'toggleEnabled']);
