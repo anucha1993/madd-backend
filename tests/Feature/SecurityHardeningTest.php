@@ -67,6 +67,25 @@ class SecurityHardeningTest extends TestCase
             ->assertJsonMissingValidationErrors('invoice_lines.0.quantity');
     }
 
+    public function test_locked_addon_and_supply_prices_are_checked_on_booking(): void
+    {
+        $check = new ReflectionMethod(ShipmentController::class, 'checkSellTotals');
+        $controller = app(ShipmentController::class);
+        $categoryId = DB::table('addon_categories')->insertGetId(['name' => 'Service', 'created_at' => now(), 'updated_at' => now()]);
+        $item = \App\Models\AddonItem::create(['addon_category_id' => $categoryId, 'name' => 'Signature', 'carriers' => ['DHL'], 'price_type' => 'FIXED', 'price' => 50, 'markup_percent' => 10, 'trigger_type' => 'MANUAL', 'status' => true]);
+        $supply = \App\Models\Supply::create(['name' => 'Box S', 'type' => 'BOX', 'sale_price' => 30, 'status' => true]);
+        $base = ['carrier' => 'DHL', 'freight_amount' => 0];
+        $booking = fn (array $lines) => $base + ['addon_lines' => $lines, 'addon_total' => collect($lines)->sum(fn ($l) => $l['quantity'] * $l['unit_price']), 'order_total' => collect($lines)->sum(fn ($l) => $l['quantity'] * $l['unit_price'])];
+
+        $this->assertNull($check->invoke($controller, $booking([['name' => 'Signature', 'addon_item_id' => $item->id, 'quantity' => 1, 'unit_price' => 50]]), null));
+        $this->assertNull($check->invoke($controller, $booking([['name' => 'Signature', 'addon_item_id' => $item->id, 'quantity' => 1, 'unit_price' => 55]]), null)); // + markup
+        $this->assertNotNull($check->invoke($controller, $booking([['name' => 'Signature', 'addon_item_id' => $item->id, 'quantity' => 1, 'unit_price' => 1]]), null));
+        $this->assertNull($check->invoke($controller, $booking([['name' => 'Box S', 'supply_id' => $supply->id, 'quantity' => 2, 'unit_price' => 30]]), null));
+        $this->assertNotNull($check->invoke($controller, $booking([['name' => 'Box S', 'supply_id' => $supply->id, 'quantity' => 2, 'unit_price' => 5]]), null));
+        // Custom / MANUAL lines (no catalog id) stay free-priced.
+        $this->assertNull($check->invoke($controller, $booking([['name' => 'Other', 'quantity' => 1, 'unit_price' => 123]]), null));
+    }
+
     public function test_sell_totals_are_rederived_on_booking(): void
     {
         $check = new ReflectionMethod(ShipmentController::class, 'checkSellTotals');

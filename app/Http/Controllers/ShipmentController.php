@@ -8,6 +8,7 @@ use App\Models\AgentAccount;
 use App\Models\Branch;
 use App\Models\BranchCarrierAccount;
 use App\Models\Shipment;
+use App\Models\Supply;
 use App\Services\AccessService;
 use App\Services\DhlShipmentService;
 use App\Services\PickupCanceller;
@@ -262,6 +263,8 @@ class ShipmentController extends Controller
             'addon_lines.*.category' => ['nullable', 'string'],
             'addon_lines.*.quantity' => ['required', 'numeric', 'min:0'],
             'addon_lines.*.unit_price' => ['required', 'numeric'],
+            'addon_lines.*.addon_item_id' => ['nullable', 'integer'],
+            'addon_lines.*.supply_id' => ['nullable', 'integer'],
 
             'freight_amount' => ['required', 'numeric'],
             'addon_total' => ['required', 'numeric'],
@@ -719,6 +722,22 @@ class ShipmentController extends Controller
         if (abs($lineSum - (float) $data['addon_total']) > $tolerance) {
             return 'ยอด Add-on ไม่ตรงกับผลรวมรายการ กรุณาโหลดหน้าใหม่แล้วลองอีกครั้ง';
         }
+        // Prices the booking form locks (catalog FIXED items, packing supplies) must match their
+        // configured price — a FIXED insurance item may also carry its Add-on markup %.
+        // MANUAL items are staff-typed by design; PERCENT / API_COST derive from declared value /
+        // the carrier's own insurance charge and are locked in the form.
+        foreach ($data['addon_lines'] ?? [] as $line) {
+            $allowed = null;
+            if (! empty($line['addon_item_id']) && ($item = AddonItem::find($line['addon_item_id'])) && $item->price_type === 'FIXED') {
+                $base = (float) $item->price;
+                $allowed = [$base, round($base * (1 + (float) $item->markup_percent / 100), 2)];
+            } elseif (! empty($line['supply_id']) && ($supply = Supply::find($line['supply_id']))) {
+                $allowed = [(float) $supply->sale_price];
+            }
+            if ($allowed !== null && ! collect($allowed)->contains(fn ($p) => abs($p - (float) $line['unit_price']) <= $tolerance)) {
+                return "ราคา \"{$line['name']}\" ไม่ตรงกับราคาที่ตั้งไว้ในระบบ กรุณาโหลดหน้าใหม่แล้วลองอีกครั้ง";
+            }
+        }
         if (abs((float) $data['freight_amount'] + (float) $data['addon_total'] - (float) $data['order_total']) > $tolerance) {
             return 'ยอดรวมไม่ตรงกับค่าขนส่ง + Add-on กรุณาโหลดหน้าใหม่แล้วลองอีกครั้ง';
         }
@@ -753,6 +772,14 @@ class ShipmentController extends Controller
 
         if ($shipment->status !== 'booked') {
             return response()->json(['error' => 'Shipment นี้ไม่ได้อยู่ในสถานะ booked จึงยกเลิกไม่ได้'], 422);
+        }
+        // A cancelled job must not stay billed — the issued Receipt/Tax Invoice has to be voided
+        // first (Billing), otherwise the documents keep charging for a shipment that never went.
+        $issuedReceipts = $shipment->receipts()->where('status', 'ISSUED')->get(['receipts.id', 'vol_no', 'no']);
+        if ($issuedReceipts->isNotEmpty()) {
+            $numbers = $issuedReceipts->map(fn ($r) => trim("{$r->vol_no}/{$r->no}", '/'))->implode(', ');
+
+            return response()->json(['error' => "Shipment นี้มีใบเสร็จ/ใบกำกับภาษีที่ออกแล้ว ({$numbers}) — กรุณา Void เอกสารนั้นก่อนที่หน้า Receipts & Tax Invoices แล้วจึง Void Shipment"], 422);
         }
 
         if ($shipment->carrier === 'UPS') {

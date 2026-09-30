@@ -128,6 +128,23 @@ class ShipmentVoidTest extends TestCase
         $this->assertSame('booked', DB::table('shipments')->where('id', $pending->id)->value('status'));
     }
 
+    public function test_shipment_with_an_issued_receipt_cannot_be_voided_until_the_receipt_is(): void
+    {
+        $s = $this->shipment();
+        $branchId = DB::table('branches')->insertGetId(['name' => 'B', 'code' => 'B1', 'created_at' => now(), 'updated_at' => now()]);
+        $receiptId = DB::table('receipts')->insertGetId([
+            'type' => 'CASH_RECEIPT', 'branch_id' => $branchId, 'vol_no' => 'V1', 'no' => '0001', 'issued_date' => now()->toDateString(),
+            'buyer_name' => 'X', 'grand_total' => 100, 'status' => 'ISSUED', 'created_at' => now(), 'updated_at' => now(),
+        ]);
+        DB::table('receipt_shipment')->insert(['receipt_id' => $receiptId, 'shipment_id' => $s->id]);
+
+        $this->postJson("/api/shipments/{$s->id}/void")->assertStatus(422)->assertJsonFragment(['error' => 'Shipment นี้มีใบเสร็จ/ใบกำกับภาษีที่ออกแล้ว (V1/0001) — กรุณา Void เอกสารนั้นก่อนที่หน้า Receipts & Tax Invoices แล้วจึง Void Shipment']);
+        $this->assertSame('booked', $s->fresh()->status);
+
+        DB::table('receipts')->where('id', $receiptId)->update(['status' => 'VOIDED']);
+        $this->postJson("/api/shipments/{$s->id}/void")->assertOk()->assertJsonPath('status', 'voided');
+    }
+
     public function test_confirm_and_unvoid_rules(): void
     {
         $s = $this->shipment();
