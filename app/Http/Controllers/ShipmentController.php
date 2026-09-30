@@ -8,8 +8,10 @@ use App\Models\AgentAccount;
 use App\Models\Branch;
 use App\Models\BranchCarrierAccount;
 use App\Models\Shipment;
+use App\Services\AccessService;
 use App\Services\DhlShipmentService;
 use App\Services\R2Service;
+use App\Services\RateQuoteVault;
 use App\Services\UpsShipmentService;
 use Illuminate\Http\Request;
 use Mpdf\Mpdf;
@@ -20,6 +22,8 @@ class ShipmentController extends Controller
         private UpsShipmentService $upsShipmentService,
         private DhlShipmentService $dhlShipmentService,
         private R2Service $r2Service,
+        private AccessService $access,
+        private RateQuoteVault $quoteVault,
     ) {
     }
 
@@ -79,7 +83,8 @@ class ShipmentController extends Controller
         // PickupController::store()'s matching server-side guard). `receipts_count` similarly
         // lets the frontend disable a Shipment already attached to any Receipt/Tax Invoice
         // (see receipt_shipment's global lock — voided receipts still count).
-        $query = Shipment::with(['agentAccount.agent', 'branch', 'pickups' => fn ($q) => $q->where('status', 'requested')])
+        $query = Shipment::visibleTo($request->user())
+            ->with(['agentAccount.agent', 'branch', 'pickups' => fn ($q) => $q->where('status', 'requested')])
             ->withCount('receipts')
             ->latest();
 
@@ -103,6 +108,16 @@ class ShipmentController extends Controller
         if ($status = $request->query('status')) {
             $query->where('status', $status);
         }
+        // Collection progress groups — "picked up" comes from picked_up_at (tracking scan or
+        // staff confirmation), since an on-call Pickup itself never proves anything was taken.
+        $activePickup = fn ($q) => $q->where('status', 'requested');
+        match ($request->query('tracking')) {
+            'not_picked_up' => $query->where('status', 'booked')->whereNull('picked_up_at')->whereDoesntHave('pickups', $activePickup),
+            'awaiting_pickup' => $query->where('status', 'booked')->whereNull('picked_up_at')->whereHas('pickups', $activePickup),
+            'in_transit' => $query->whereNotNull('picked_up_at')->where(fn ($q) => $q->whereNull('tracking_status')->orWhere('tracking_status', '!=', 'delivered')),
+            'delivered' => $query->where('tracking_status', 'delivered'),
+            default => null,
+        };
         if ($customerType = $request->query('customer_type')) {
             $query->where('customer_type', $customerType);
         }
@@ -132,13 +147,16 @@ class ShipmentController extends Controller
         $today = now()->startOfDay();
         $monthStart = now()->startOfMonth();
         $monthEnd = now()->endOfMonth();
+        // Same data scope as index() — the KPIs must only ever count what the list can show.
+        $scoped = fn () => Shipment::visibleTo($request->user());
+        $canSeePricing = $this->access->fieldLevel($request->user(), 'shipment', 'pricing') !== 'hidden';
 
         return response()->json([
-            'today_count' => Shipment::where('status', 'booked')->where('created_at', '>=', $today)->count(),
-            'month_count' => Shipment::where('status', 'booked')->whereBetween('created_at', [$monthStart, $monthEnd])->count(),
-            'month_revenue' => (float) Shipment::where('status', 'booked')->whereBetween('created_at', [$monthStart, $monthEnd])->sum('order_total'),
-            'in_transit_count' => Shipment::where('status', 'booked')->count(),
-            'cancelled_count' => Shipment::whereIn('status', ['voided', 'failed'])->whereBetween('created_at', [$monthStart, $monthEnd])->count(),
+            'today_count' => $scoped()->where('status', 'booked')->where('created_at', '>=', $today)->count(),
+            'month_count' => $scoped()->where('status', 'booked')->whereBetween('created_at', [$monthStart, $monthEnd])->count(),
+            'month_revenue' => $canSeePricing ? (float) $scoped()->where('status', 'booked')->whereBetween('created_at', [$monthStart, $monthEnd])->sum('order_total') : null,
+            'in_transit_count' => $scoped()->where('status', 'booked')->count(),
+            'cancelled_count' => $scoped()->whereIn('status', ['voided', 'failed'])->whereBetween('created_at', [$monthStart, $monthEnd])->count(),
         ]);
     }
 
@@ -149,6 +167,10 @@ class ShipmentController extends Controller
      */
     public function store(Request $request)
     {
+        // Field groups with an 'edit' level (billing parties, reference numbers) — see
+        // config/permissions.php.
+        $this->access->assertWritableFields($request, 'shipment');
+
         $data = $request->validate([
             'agent_account_id' => ['required', 'integer'],
             'carrier' => ['required', 'string', 'in:UPS,DHL'],
@@ -357,6 +379,24 @@ class ShipmentController extends Controller
             ];
         }
 
+        // The browser only ever holds a sanitized copy of the quote (see
+        // ShippingController::checkRate) — the full one (carrier cost, markup detail, raw) is
+        // looked up server-side by quoteId, so cost_amount can't be dropped or tampered with by
+        // what the browser sends back. A user who can see cost may still send a legacy/expired
+        // quote as before; anyone else must re-check the rate once it has expired.
+        $rateQuote = $data['rate_quote'] ?? null;
+        if ($rateQuote !== null) {
+            $fullQuote = $this->quoteVault->recall($rateQuote['quoteId'] ?? null, $request->user());
+            if ($fullQuote && (int) ($fullQuote['accountId'] ?? 0) !== $account->id) {
+                return response()->json(['error' => 'ใบเสนอราคาไม่ตรงกับบัญชี Carrier ที่เลือก กรุณาเช็คราคาใหม่'], 422);
+            }
+            if ($fullQuote) {
+                $rateQuote = $fullQuote;
+            } elseif ($this->access->fieldLevel($request->user(), 'rate', 'cost') === 'hidden') {
+                return response()->json(['error' => 'ใบเสนอราคาหมดอายุแล้ว กรุณากดเช็คราคาใหม่ก่อนจอง'], 422);
+            }
+        }
+
         $recordAttributes = [
             'agent_account_id' => $account->id,
             'branch_id' => $this->resolveBranchId($request, $account->id),
@@ -379,8 +419,8 @@ class ShipmentController extends Controller
             // of freight_amount/order_total above (which already have markup baked in as the
             // customer-facing sell price). Falls back to published only when no negotiated rate
             // was returned (e.g. account has no UPS negotiated-rate agreement).
-            'cost_amount' => $data['rate_quote']['costNegotiated'] ?? $data['rate_quote']['costPublished'] ?? null,
-            'cost_currency' => $data['rate_quote']['currency'] ?? $data['currency'] ?? 'THB',
+            'cost_amount' => $rateQuote['costNegotiated'] ?? $rateQuote['costPublished'] ?? null,
+            'cost_currency' => $rateQuote['currency'] ?? $data['currency'] ?? 'THB',
             'customer_type' => $data['customer_type'] ?? null,
             'entity_type' => $data['entity_type'] ?? null,
             'payment_method' => $data['payment_method'] ?? null,
@@ -395,7 +435,7 @@ class ShipmentController extends Controller
             'ref_invoice_no' => $data['ref_invoice_no'] ?? null,
             'ref_insurance_no' => $data['ref_insurance_no'] ?? null,
             'ref_purchase_no' => $data['ref_purchase_no'] ?? null,
-            'rate_quote' => $data['rate_quote'] ?? null,
+            'rate_quote' => $rateQuote,
         ];
 
         try {
@@ -653,6 +693,17 @@ class ShipmentController extends Controller
      * Shipment) — so for DHL this only ever flips our own local status, it never contacts DHL.
      * Only allowed while `status === 'booked'` (can't void something already voided/failed).
      */
+    /** Staff saw the courier collect this one shipment (see Shipment::markPickedUpManually). */
+    public function markPickedUp(Request $request, Shipment $shipment)
+    {
+        if ($shipment->status !== 'booked') {
+            return response()->json(['error' => 'Shipment นี้ไม่ได้อยู่ในสถานะ booked'], 422);
+        }
+        $shipment->markPickedUpManually($request->user());
+
+        return $shipment->fresh()->load('agentAccount.agent', 'branch');
+    }
+
     public function void(Shipment $shipment)
     {
         if ($shipment->status !== 'booked') {
@@ -876,10 +927,11 @@ class ShipmentController extends Controller
 
     /**
      * UPS's "Shipper's Copy" waybill/receipt (ControlLogReceipt) — proof the shipment was
-     * booked, kept separate from the label(s) actually stuck on the boxes. Neither carrier's
-     * API reliably returns one for a TH-origin account (DHL never had it; UPS's
-     * ControlLogReceipt comes back empty for non-US shippers), so a stand-in A4 PDF is built
-     * in-house per carrier — see buildDhlDiyWaybill() and buildUpsDiyWaybill().
+     * booked, kept separate from the label(s) actually stuck on the boxes. UPS's
+     * ControlLogReceipt comes back empty for non-US shippers, so UPS gets a stand-in built
+     * in-house (buildUpsDiyWaybill). DHL returns its own "*WAYBILL DOC*" (see
+     * DhlShipmentService::parseShipmentResponse) — buildDhlDiyWaybill() uses that as the base
+     * page, falling back to the label for shipments booked before it was requested.
      */
     public function waybill(Shipment $shipment)
     {
@@ -898,21 +950,22 @@ class ShipmentController extends Controller
     }
 
     /**
-     * DHL has no carrier-issued Waybill/Shipper's-Copy document (unlike UPS), so this builds a
-     * stand-in in-house: imports the FIRST page of the shipment's own label (piece #1's page —
-     * already carries piece #1's own tracking barcode) onto a slightly taller sheet, then writes
-     * the OTHER pieces' tracking numbers underneath, in ONE horizontal line (piece #1's number
-     * is already on the label itself, no need to repeat it). Single-piece shipments get just the
-     * label page back with no extra list. Returns raw PDF bytes, or null if no label to build from.
+     * Imports the FIRST page of DHL's own "*WAYBILL DOC*" (waybill_storage_key — already lists
+     * every piece's license plate) onto a slightly taller sheet, then writes our PAYMENT OF
+     * CHARGES / TOTAL CHARGES underneath. Shipments booked before the Waybill Doc was requested
+     * fall back to the label's first page (piece #1's page — already carries piece #1's own
+     * tracking barcode) plus the OTHER pieces' tracking numbers, since the label alone doesn't
+     * list them. Returns raw PDF bytes, or null if there's neither document to build from.
      */
     private function buildDhlDiyWaybill(Shipment $shipment): ?string
     {
-        $storageKey = $shipment->label_storage_key;
+        $hasCarrierWaybill = (bool) $shipment->waybill_storage_key;
+        $storageKey = $shipment->waybill_storage_key ?: $shipment->label_storage_key;
         if (! $storageKey) {
             return null;
         }
 
-        $otherTrackingNumbers = collect($shipment->pieces ?? [])
+        $otherTrackingNumbers = $hasCarrierWaybill ? collect() : collect($shipment->pieces ?? [])
             ->pluck('tracking_number')
             ->filter()
             ->skip(1)
@@ -1173,6 +1226,10 @@ class ShipmentController extends Controller
      */
     private function buildTotalChargesLines(Shipment $shipment): array
     {
+        // Printed documents follow the same field access as the JSON API.
+        if ($this->access->fieldLevel(request()->user(), 'shipment', 'pricing') === 'hidden') {
+            return [];
+        }
         $currency = $shipment->currency ?: 'THB';
 
         return [

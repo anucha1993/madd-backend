@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HidesRestrictedFields;
+use App\Models\Concerns\ScopedByAccess;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -19,9 +21,14 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
     'label_storage_key', 'waybill_storage_key', 'commercial_invoice_storage_key', 'raw_response', 'raw_request', 'carrier_http_status', 'error_message',
     'voided_at', 'void_note',
     'tracking_status', 'tracking_raw_status', 'tracking_synced_at', 'delivered_at',
+    'picked_up_at', 'picked_up_source', 'picked_up_by',
 ])]
 class Shipment extends Model
 {
+    use HidesRestrictedFields, ScopedByAccess;
+
+    protected static string $accessModule = 'shipment';
+
     protected $appends = ['is_test'];
 
     protected function casts(): array
@@ -43,7 +50,40 @@ class Shipment extends Model
             'voided_at' => 'datetime',
             'tracking_synced_at' => 'datetime',
             'delivered_at' => 'datetime',
+            'picked_up_at' => 'datetime',
         ];
+    }
+
+    /**
+     * The saved rate_quote snapshot holds carrier cost / markup detail / raw response — strip
+     * whatever the viewer's `rate` field access hides (see AccessService::sanitizeRateQuote),
+     * keeping the sell-price breakdown the view page and receipts need.
+     */
+    public function toArray(): array
+    {
+        $array = parent::toArray();
+        if (is_array($array['rate_quote'] ?? null) && ($user = auth()->user())) {
+            $array['rate_quote'] = app(\App\Services\AccessService::class)->sanitizeRateQuote($user, $array['rate_quote']);
+        }
+
+        return $array;
+    }
+
+    /**
+     * Staff saw the courier take it — counts as collected immediately (grouping, Pickup
+     * progress) until the carrier's own scan arrives and replaces picked_up_at/source.
+     */
+    public function markPickedUpManually(?User $user): void
+    {
+        if ($this->picked_up_at) {
+            return;
+        }
+        $this->update([
+            'picked_up_at' => now(),
+            'picked_up_source' => 'manual',
+            'picked_up_by' => $user?->id,
+            'tracking_status' => in_array($this->tracking_status, ['in_transit', 'delivered'], true) ? $this->tracking_status : 'in_transit',
+        ]);
     }
 
     public function agentAccount(): BelongsTo

@@ -6,6 +6,7 @@ use App\Models\IntegrationSetting;
 use App\Models\Shipment;
 use App\Models\TrackingSyncLog;
 use App\Services\DhlTrackingService;
+use App\Services\TrackingStatusClassifier;
 use App\Services\UpsTrackingService;
 use Illuminate\Console\Command;
 
@@ -27,7 +28,7 @@ class SyncShipmentTracking extends Command
     private const INTERVAL_KEY = 'tracking_sync.interval_minutes';
     private const LAST_RUN_KEY = 'tracking_sync.last_run_at';
 
-    public function handle(UpsTrackingService $upsTrackingService, DhlTrackingService $dhlTrackingService): int
+    public function handle(UpsTrackingService $upsTrackingService, DhlTrackingService $dhlTrackingService, TrackingStatusClassifier $classifier): int
     {
         $force = (bool) $this->option('force');
 
@@ -77,9 +78,24 @@ class SyncShipmentTracking extends Command
                     continue;
                 }
 
-                $newStatus = $this->mapStatus($shipment->carrier, $package['currentStatusCode'] ?? null, $package['currentStatusDescription'] ?? null);
+                $progress = $classifier->classify($shipment->carrier, $package);
+                $newStatus = $progress['status'];
+                // Never walk a shipment back to "not picked up" — a staff confirmation (or an
+                // earlier scan) already proved collection even if the carrier's feed lags.
+                if ($newStatus === 'not_picked_up' && $shipment->picked_up_at) {
+                    $newStatus = $shipment->tracking_status ?: 'in_transit';
+                }
+                // The carrier's own scan is the authoritative collection time — it replaces a
+                // manual confirmation's timestamp once it arrives.
+                $pickupUpdate = [];
+                if ($newStatus !== 'not_picked_up' && $shipment->picked_up_source !== 'carrier' && $progress['picked_up_at']) {
+                    $pickupUpdate = ['picked_up_at' => $progress['picked_up_at'], 'picked_up_source' => 'carrier'];
+                } elseif ($newStatus !== 'not_picked_up' && ! $shipment->picked_up_at) {
+                    $pickupUpdate = ['picked_up_at' => now(), 'picked_up_source' => 'carrier'];
+                }
+
                 if ($newStatus === $shipment->tracking_status) {
-                    $shipment->update(['tracking_synced_at' => now()]);
+                    $shipment->update(['tracking_synced_at' => now()] + $pickupUpdate);
 
                     continue;
                 }
@@ -96,8 +112,8 @@ class SyncShipmentTracking extends Command
                     'tracking_status' => $newStatus,
                     'tracking_raw_status' => $package['currentStatusDescription'] ?? null,
                     'tracking_synced_at' => now(),
-                    'delivered_at' => $newStatus === 'delivered' ? ($shipment->delivered_at ?? now()) : $shipment->delivered_at,
-                ]);
+                    'delivered_at' => $newStatus === 'delivered' ? ($shipment->delivered_at ?? $progress['delivered_at'] ?? now()) : $shipment->delivered_at,
+                ] + $pickupUpdate);
                 $updated++;
             } catch (\Throwable $e) {
                 $errors[] = ['shipment_id' => $shipment->id, 'tracking_number' => $shipment->tracking_number, 'message' => $e->getMessage()];
@@ -118,32 +134,5 @@ class SyncShipmentTracking extends Command
         IntegrationSetting::set(self::LAST_RUN_KEY, now()->toDateTimeString());
 
         return self::SUCCESS;
-    }
-
-    /**
-     * Best-effort mapping — carrier status codes/wording vary by product and aren't fully
-     * documented, so this leans on UPS's own `currentStatusCode` type where available (D  =
-     * Delivered, M = Manifest/label created only) and falls back to keyword matching on the
-     * status description for everything else (including all of DHL, which doesn't expose a
-     * reliable status code in our normalized response).
-     */
-    private function mapStatus(string $carrier, ?string $code, ?string $description): string
-    {
-        if ($carrier === 'UPS' && $code === 'D') {
-            return 'delivered';
-        }
-        if ($carrier === 'UPS' && $code === 'M') {
-            return 'not_picked_up';
-        }
-
-        $desc = strtolower($description ?? '');
-        if ($desc === '') {
-            return 'not_picked_up';
-        }
-        if (str_contains($desc, 'delivered')) {
-            return 'delivered';
-        }
-
-        return 'in_transit';
     }
 }

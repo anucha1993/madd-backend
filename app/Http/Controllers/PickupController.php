@@ -46,7 +46,7 @@ class PickupController extends Controller
 
     public function index(Request $request)
     {
-        $query = Pickup::with('agentAccount.agent', 'shipments')->latest();
+        $query = Pickup::visibleTo($request->user())->with('agentAccount.agent', 'shipments')->latest();
 
         if ($carrier = $request->query('carrier')) {
             $query->where('carrier', $carrier);
@@ -82,7 +82,7 @@ class PickupController extends Controller
             return response()->json(['error' => 'ไม่พบบัญชี Carrier ที่เลือกไว้ หรือบัญชีถูกปิดใช้งานแล้ว'], 400);
         }
 
-        $shipments = Shipment::where('agent_account_id', $account->id)
+        $shipments = Shipment::visibleTo($request->user())->where('agent_account_id', $account->id)
             ->where('status', 'booked')
             ->whereIn('id', $data['shipment_ids'])
             ->with(['pickups' => fn ($q) => $q->where('status', 'requested')])
@@ -94,6 +94,16 @@ class PickupController extends Controller
         // A Shipment already sitting in an active (requested) Pickup must not be added to ANOTHER
         // one — the courier would otherwise be asked to collect the same boxes twice. Staff must
         // cancel/reschedule the existing Pickup first (see PickupController::cancel()).
+        // Already collected (tracking scan or staff confirmation) — nothing left for a courier
+        // to pick up.
+        $alreadyCollected = $shipments->filter(fn (Shipment $s) => $s->picked_up_at !== null);
+        if ($alreadyCollected->isNotEmpty()) {
+            return response()->json([
+                'error' => 'Shipment ต่อไปนี้ Courier รับไปแล้ว ไม่ต้องนัด Pickup: '
+                    .$alreadyCollected->pluck('tracking_number')->filter()->implode(', '),
+            ], 422);
+        }
+
         $alreadyScheduled = $shipments->filter(fn (Shipment $s) => $s->pickups->isNotEmpty());
         if ($alreadyScheduled->isNotEmpty()) {
             return response()->json([
@@ -194,6 +204,22 @@ class PickupController extends Controller
         }
 
         return response()->json($pickup->load('agentAccount.agent', 'shipments'));
+    }
+
+    /**
+     * Staff confirm the courier came for this pickup — marks every attached, not-yet-collected
+     * shipment as picked up (source 'manual') right away instead of waiting for tracking scans.
+     * The carrier's own scan later replaces the timestamp (see SyncShipmentTracking).
+     */
+    public function confirmCollected(Request $request, Pickup $pickup)
+    {
+        if ($pickup->status !== 'requested') {
+            return response()->json(['error' => 'Pickup นี้ไม่ได้อยู่ในสถานะนัดหมาย'], 422);
+        }
+
+        $pickup->shipments()->whereNull('picked_up_at')->get()->each(fn (Shipment $s) => $s->markPickedUpManually($request->user()));
+
+        return $pickup->load('agentAccount.agent', 'shipments');
     }
 
     public function cancel(Request $request, Pickup $pickup)

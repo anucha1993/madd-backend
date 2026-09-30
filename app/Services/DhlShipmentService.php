@@ -6,7 +6,8 @@ use Illuminate\Support\Facades\Http;
 
 /**
  * Books an actual DHL shipment (creates the real air waybill + label) via MyDHL API's
- * POST /shipments — same account credentials/base URL as DhlRateService, but this call is NOT
+ * POST /shipments (label + "*WAYBILL DOC*" + commercial invoice when customs-declarable) —
+ * same account credentials/base URL as DhlRateService, but this call is NOT
  * idempotent: every successful request books a real shipment with DHL.
  */
 class DhlShipmentService
@@ -161,10 +162,17 @@ class DhlShipmentService
             'outputImageProperties' => [
                 'printerDPI' => 300,
                 'encodingFormat' => 'pdf',
+                // Without this flag DHL silently ignores the waybillDoc request below and returns
+                // only the label (confirmed live against the sandbox 2026-09-30). With it, the
+                // Waybill Doc comes back as its OWN document — see parseShipmentResponse().
+                'splitTransportAndWaybillDocLabels' => true,
                 // A6 template = just the cropped thermal-size label (roughly 100x150mm), not the
                 // full A4 sheet the "_A4_" template pads it onto with lots of blank margin.
                 'imageOptions' => array_merge(
                     [['typeCode' => 'label', 'templateName' => 'ECOM26_84_A6_001', 'isRequested' => true]],
+                    // "*WAYBILL DOC* – Hand to Courier": DHL's own shipper copy (shipper/receiver,
+                    // product, payer account, weight, every piece's license plate).
+                    [['typeCode' => 'waybillDoc', 'templateName' => 'ARCH_8x4', 'isRequested' => true, 'hideAccountNumber' => false, 'numberOfCopies' => 1]],
                     $isCustomsDeclarable ? [['typeCode' => 'invoice', 'templateName' => 'COMMERCIAL_INVOICE_P_10', 'isRequested' => true]] : [],
                 ),
             ],
@@ -340,19 +348,24 @@ class DhlShipmentService
      */
     public function parseShipmentResponse(array $raw): array
     {
-        $labelDoc = collect($raw['documents'] ?? [])->firstWhere('typeCode', 'label');
+        // The Waybill Doc (requested via imageOptions waybillDoc + splitTransportAndWaybillDocLabels)
+        // comes back with the SAME typeCode "label" as the transport label itself — DHL gives no
+        // other field to tell them apart, only order: transport label first, Waybill Doc second.
+        // Shipments booked before waybillDoc was requested only ever have the one label.
+        $labelDocs = collect($raw['documents'] ?? [])->where('typeCode', 'label')->values();
+        $labelDoc = $labelDocs->get(0);
+        $waybillDoc = $labelDocs->get(1);
         // DHL auto-generates the Commercial Invoice as its own document (typeCode "invoice")
         // whenever the shipment is customs-declarable — no separate request needed, unlike UPS
-        // which requires explicit InternationalForms. DHL has no equivalent of UPS's separate
-        // Waybill/receipt document — the label itself is the only shipper-facing document.
+        // which requires explicit InternationalForms.
         $invoiceDoc = collect($raw['documents'] ?? [])->firstWhere('typeCode', 'invoice');
 
         return [
             'trackingNumber' => $raw['shipmentTrackingNumber'] ?? null,
             'labelBase64' => $labelDoc['content'] ?? null,
             'labelFormat' => $labelDoc['imageFormat'] ?? 'PDF',
-            'waybillBase64' => null,
-            'waybillFormat' => null,
+            'waybillBase64' => $waybillDoc['content'] ?? null,
+            'waybillFormat' => $waybillDoc ? ($waybillDoc['imageFormat'] ?? 'PDF') : null,
             'commercialInvoiceBase64' => $invoiceDoc['content'] ?? null,
             'commercialInvoiceFormat' => $invoiceDoc['imageFormat'] ?? 'PDF',
             // DHL returns one entry per physical piece here for a multi-piece shipment, each

@@ -4,8 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Models\AgentAccount;
 use App\Models\BranchCarrierAccount;
+use App\Services\AccessService;
 use App\Services\ChargeMarkupService;
 use App\Services\DhlRateService;
+use App\Services\RateQuoteVault;
 use App\Services\UpsRateService;
 use Illuminate\Http\Request;
 
@@ -15,6 +17,8 @@ class ShippingController extends Controller
         private UpsRateService $upsRateService,
         private DhlRateService $dhlRateService,
         private ChargeMarkupService $chargeMarkupService,
+        private AccessService $access,
+        private RateQuoteVault $quoteVault,
     ) {
     }
 
@@ -171,6 +175,18 @@ class ShippingController extends Controller
         );
 
         $results = $this->chargeMarkupService->applyToResults([...$upsResults, ...$dhlResults]);
+
+        // Full quote stays server-side (booking reads cost from it by quoteId); the browser only
+        // gets what this user's Role may see — e.g. front-counter staff get the sell price and
+        // its breakdown, never the carrier cost / markup formula / raw carrier response.
+        $results = array_map(function ($result) use ($user) {
+            if (! empty($result['error'])) {
+                return $this->access->sanitizeRateQuote($user, $result);
+            }
+            $result['quoteId'] = $this->quoteVault->remember($result, $user);
+
+            return $this->access->sanitizeRateQuote($user, $result);
+        }, $results);
 
         return response()->json([
             'accountCount' => $upsAccounts->count() + $dhlAccounts->count(),

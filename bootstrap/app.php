@@ -19,6 +19,11 @@ return Application::configure(basePath: dirname(__DIR__))
         // logic, which tries route('login') and crashes with RouteNotFoundException instead of
         // returning a clean 401. Never redirect guests — always fall through to a JSON 401.
         $middleware->redirectGuestsTo(fn () => null);
+
+        $middleware->alias([
+            'perm' => \App\Http\Middleware\RequirePermission::class,
+            'record.scope' => \App\Http\Middleware\EnsureRecordInScope::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

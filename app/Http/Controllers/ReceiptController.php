@@ -27,7 +27,7 @@ class ReceiptController extends Controller
     {
         // Eager-load shipments.agentAccount up front so the `is_test` accessor (used to decide
         // whether the row's Delete action is shown) never triggers a per-row N+1 query.
-        $query = Receipt::with('branch', 'shipments.agentAccount')->latest();
+        $query = Receipt::visibleTo($request->user())->with('branch', 'shipments.agentAccount')->latest();
 
         if ($type = $request->query('type')) {
             $query->where('type', $type);
@@ -81,7 +81,7 @@ class ReceiptController extends Controller
             'shipment_ids.*' => ['integer', 'exists:shipments,id'],
         ]);
 
-        $shipments = Shipment::whereIn('id', $data['shipment_ids'])->get();
+        $shipments = Shipment::visibleTo($request->user())->whereIn('id', $data['shipment_ids'])->get();
         $this->assertShipmentsBillable($shipments);
 
         $branchId = $shipments->first()->branch_id;
@@ -213,7 +213,7 @@ class ReceiptController extends Controller
             ]);
         }
 
-        $shipments = ! empty($data['shipment_ids']) ? Shipment::whereIn('id', $data['shipment_ids'])->get() : collect();
+        $shipments = ! empty($data['shipment_ids']) ? Shipment::visibleTo($request->user())->whereIn('id', $data['shipment_ids'])->get() : collect();
         if ($shipments->isNotEmpty()) {
             $this->assertShipmentsBillable($shipments);
         }
@@ -510,7 +510,7 @@ class ReceiptController extends Controller
             'receipt_ids.*' => ['integer', 'exists:receipts,id'],
         ]);
 
-        $receipts = Receipt::whereIn('id', $data['receipt_ids'])->orderBy('issued_date')->orderBy('id')->get();
+        $receipts = Receipt::visibleTo($request->user())->whereIn('id', $data['receipt_ids'])->orderBy('issued_date')->orderBy('id')->get();
         $pdf = $this->receiptPdfService->renderBatch($receipts);
 
         return response($pdf, 200, [

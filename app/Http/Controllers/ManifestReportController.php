@@ -72,7 +72,8 @@ class ManifestReportController extends Controller
         // Only shipments that actually have an ISSUED Receipt/Tax Invoice belong on a manifest
         // (this is a billing-facing document, not a raw booking log) — VOIDED receipts don't
         // count, same as the "issued" semantics used everywhere else in the app.
-        $query = Shipment::with(['agentAccount.agent', 'branch', 'receipts' => function ($q) {
+        // Same branch/own data scope as the Shipments list (see AccessService::applyScope).
+        $query = Shipment::visibleTo(request()->user())->with(['agentAccount.agent', 'branch', 'receipts' => function ($q) {
             $q->where('status', 'ISSUED');
         }])
             ->where('status', 'booked')
