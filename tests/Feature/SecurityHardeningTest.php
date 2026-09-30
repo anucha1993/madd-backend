@@ -54,6 +54,19 @@ class SecurityHardeningTest extends TestCase
         $this->assertArrayNotHasKey('basic_auth_password', $account->fresh()->toArray());
     }
 
+    public function test_invoice_line_quantity_must_be_a_whole_number(): void
+    {
+        $admin = \App\Models\User::factory()->create();
+        $admin->roles()->sync(\App\Models\Role::where('key', 'admin')->pluck('id'));
+        \Laravel\Sanctum\Sanctum::actingAs($admin);
+
+        $line = ['description' => 'T-shirt', 'unit_value' => 50];
+        $this->postJson('/api/shipments', ['invoice_lines' => [$line + ['quantity' => 1.5]]])
+            ->assertJsonValidationErrors('invoice_lines.0.quantity');
+        $this->postJson('/api/shipments', ['invoice_lines' => [$line + ['quantity' => 2]]])
+            ->assertJsonMissingValidationErrors('invoice_lines.0.quantity');
+    }
+
     public function test_sell_totals_are_rederived_on_booking(): void
     {
         $check = new ReflectionMethod(ShipmentController::class, 'checkSellTotals');

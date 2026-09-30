@@ -233,7 +233,8 @@ class ShipmentController extends Controller
             'invoice_mode' => ['nullable', 'in:FORM,UPLOAD'],
             'invoice_lines' => ['required', 'array', 'min:1'],
             'invoice_lines.*.description' => ['required', 'string', 'max:500'],
-            'invoice_lines.*.quantity' => ['required', 'numeric', 'min:0.01'],
+            // Whole pieces only — carriers declare units on the Commercial Invoice as integers.
+            'invoice_lines.*.quantity' => ['required', 'integer', 'min:1'],
             'invoice_lines.*.unit_value' => ['required', 'numeric', 'min:0'],
             'invoice_lines.*.weight' => ['nullable', 'numeric', 'min:0'],
             'invoice_lines.*.country_of_origin' => ['nullable', 'string', 'max:2'],
