@@ -130,7 +130,11 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
         Route::get('shipments/{shipment}/commercial-invoice', [ShipmentController::class, 'commercialInvoice']);
         Route::get('shipments/{shipment}', [ShipmentController::class, 'show']);
     });
-    Route::post('shipments/{shipment}/void', [ShipmentController::class, 'void'])->middleware('perm:shipment.void');
+    Route::middleware('perm:shipment.void')->group(function () {
+        Route::post('shipments/{shipment}/void', [ShipmentController::class, 'void']);
+        Route::post('shipments/{shipment}/unvoid', [ShipmentController::class, 'unvoid']);
+        Route::post('shipments/{shipment}/confirm-carrier-cancel', [ShipmentController::class, 'confirmCarrierCancel']);
+    });
     Route::delete('shipments/{shipment}', [ShipmentController::class, 'destroy'])->middleware('perm:shipment.delete');
 
     // ---- Billing ----

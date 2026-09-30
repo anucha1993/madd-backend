@@ -10,6 +10,7 @@ use App\Models\BranchCarrierAccount;
 use App\Models\Shipment;
 use App\Services\AccessService;
 use App\Services\DhlShipmentService;
+use App\Services\PickupCanceller;
 use App\Services\R2Service;
 use App\Services\RateQuoteVault;
 use App\Services\UpsShipmentService;
@@ -742,8 +743,10 @@ class ShipmentController extends Controller
         return $shipment->fresh()->load('agentAccount.agent', 'branch');
     }
 
-    public function void(Shipment $shipment)
+    public function void(Request $request, Shipment $shipment)
     {
+        $data = $request->validate(['reason' => ['nullable', 'string', 'max:500']]);
+
         if ($shipment->status !== 'booked') {
             return response()->json(['error' => 'Shipment นี้ไม่ได้อยู่ในสถานะ booked จึงยกเลิกไม่ได้'], 422);
         }
@@ -764,19 +767,102 @@ class ShipmentController extends Controller
             $shipment->update([
                 'status' => 'voided',
                 'voided_at' => now(),
+                'voided_by' => $request->user()?->id,
+                'void_reason' => $data['reason'] ?? null,
                 'void_note' => 'Cancelled with UPS via Void Shipment API',
             ]);
         } else {
-            // DHL: no carrier API to call — this is a local-only record, staff must still
-            // contact DHL directly (or simply not tender the package) to actually stop it.
+            // DHL: no carrier API to call (confirmed live: DELETE /shipments/{tn} -> 405) — this
+            // is a local record; staff must still tell DHL, tracked as carrier_cancel_status
+            // 'pending' until they confirm it (see confirmCarrierCancel()).
             $shipment->update([
                 'status' => 'voided',
                 'voided_at' => now(),
-                'void_note' => 'Marked cancelled in MADD only — DHL Express has no shipment-cancel API; contact DHL directly to stop this shipment.',
+                'voided_by' => $request->user()?->id,
+                'void_reason' => $data['reason'] ?? null,
+                'void_note' => 'Voided in MADD — DHL Express has no shipment-cancel API; contact DHL to cancel this waybill.',
+                'carrier_cancel_status' => 'pending',
             ]);
         }
 
-        return $shipment->load('agentAccount.agent', 'createdBy');
+        return $this->withCancellation($shipment) + ['pickup_notice' => $this->releasePickupsFor($shipment)];
+    }
+
+    /**
+     * Undo a mistaken DHL void while DHL hasn't been told yet — nothing was cancelled at DHL
+     * (no API), so the waybill is still valid. UPS voids are real carrier cancellations and
+     * can't be undone; a pickup cancelled by the void stays cancelled (schedule a new one).
+     */
+    public function unvoid(Shipment $shipment)
+    {
+        if ($shipment->status !== 'voided' || $shipment->carrier !== 'DHL' || $shipment->carrier_cancel_status !== 'pending') {
+            return response()->json(['error' => 'คืนสถานะได้เฉพาะ Shipment DHL ที่ Void แล้วแต่ยังไม่ได้ยืนยันการยกเลิกกับ DHL'], 422);
+        }
+
+        $shipment->update([
+            'status' => 'booked',
+            'voided_at' => null,
+            'voided_by' => null,
+            'void_reason' => null,
+            'void_note' => null,
+            'carrier_cancel_status' => null,
+        ]);
+
+        return $this->withCancellation($shipment);
+    }
+
+    /** Staff record that DHL confirmed the waybill cancellation (with DHL's reference/case no.). */
+    public function confirmCarrierCancel(Request $request, Shipment $shipment)
+    {
+        $data = $request->validate(['reference' => ['nullable', 'string', 'max:255']]);
+        if ($shipment->status !== 'voided' || $shipment->carrier_cancel_status !== 'pending') {
+            return response()->json(['error' => 'Shipment นี้ไม่ได้อยู่ในสถานะรอยืนยันการยกเลิกกับ Carrier'], 422);
+        }
+
+        $shipment->update([
+            'carrier_cancel_status' => 'confirmed',
+            'carrier_cancel_confirmed_at' => now(),
+            'carrier_cancel_confirmed_by' => $request->user()?->id,
+            'carrier_cancel_reference' => $data['reference'] ?? null,
+        ]);
+
+        return $this->withCancellation($shipment);
+    }
+
+    private function withCancellation(Shipment $shipment): array
+    {
+        return $shipment->fresh()->load('agentAccount.agent', 'createdBy', 'voidedBy:id,name', 'carrierCancelConfirmedBy:id,name')->toArray();
+    }
+
+    /**
+     * A voided shipment must not keep a courier coming. Each active pickup it's on is cancelled
+     * with the carrier when nothing else on it still needs collecting; otherwise it's left alone
+     * (cancelling would strand the other shipments) and staff are told to reschedule it.
+     * Returns a message for the UI, or null when there was no active pickup.
+     */
+    private function releasePickupsFor(Shipment $shipment): ?string
+    {
+        $messages = [];
+        foreach ($shipment->pickups()->where('status', 'requested')->with('shipments')->get() as $pickup) {
+            $others = $pickup->shipments->where('id', '!=', $shipment->id)
+                ->filter(fn (Shipment $s) => $s->status === 'booked' && ! $s->picked_up_at);
+            if ($others->isNotEmpty()) {
+                $messages[] = "Pickup {$pickup->carrier_reference} ยังมี Shipment อื่นรอรับอยู่ ({$others->pluck('tracking_number')->implode(', ')}) จึงไม่ได้ยกเลิก — ถ้าไม่ต้องการให้รับ Shipment นี้ ให้นัด Pickup ใหม่ที่หน้า My Pickups";
+
+                continue;
+            }
+            if (! $pickup->carrier_reference) {
+                continue;
+            }
+            try {
+                app(PickupCanceller::class)->cancel($pickup, request()->user()?->name ?? 'MADD Staff', "Shipment {$shipment->tracking_number} voided");
+                $messages[] = "ยกเลิก Pickup {$pickup->carrier_reference} กับ {$pickup->carrier} แล้ว";
+            } catch (\Throwable $e) {
+                $messages[] = "ยกเลิก Pickup {$pickup->carrier_reference} ไม่สำเร็จ ({$e->getMessage()}) — กรุณายกเลิกที่หน้า My Pickups";
+            }
+        }
+
+        return $messages ? implode("\n", $messages) : null;
     }
 
     /**

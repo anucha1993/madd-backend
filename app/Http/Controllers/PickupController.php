@@ -7,6 +7,7 @@ use App\Models\AgentAccount;
 use App\Models\Pickup;
 use App\Models\Shipment;
 use App\Services\DhlPickupService;
+use App\Services\PickupCanceller;
 use App\Services\UpsPickupService;
 use App\Services\UpsShipmentService;
 use Illuminate\Http\Request;
@@ -239,25 +240,11 @@ class PickupController extends Controller
             'reason' => ['nullable', 'string', 'max:255'],
         ]);
 
-        $pickup->loadMissing('agentAccount.agent');
-        $account = $pickup->agentAccount;
-
         try {
-            if ($pickup->carrier === 'UPS') {
-                $this->withUpsToken($account, fn ($token) => $this->upsPickupService->cancelPickup($token, $pickup->carrier_reference, $account->mode));
-            } else {
-                $this->dhlPickupService->cancelPickup([
-                    'basic_auth_username' => $account->basic_auth_username,
-                    'basic_auth_password' => $account->basic_auth_password,
-                    'mode' => $account->mode,
-                    'username_acc' => $account->username_acc,
-                ], $pickup->carrier_reference, $data['requestor_name'] ?? 'MADD Staff', $data['reason'] ?? 'Cancelled by staff');
-            }
+            app(PickupCanceller::class)->cancel($pickup, $data['requestor_name'] ?? 'MADD Staff', $data['reason'] ?? 'Cancelled by staff');
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 422);
         }
-
-        $pickup->update(['status' => 'cancelled', 'cancelled_at' => now()]);
 
         return $pickup->load('agentAccount.agent', 'shipments');
     }

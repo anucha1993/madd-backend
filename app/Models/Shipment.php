@@ -20,7 +20,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
     'bill_duty_tax_account_number', 'bill_duty_tax_third_party_country', 'bill_duty_tax_third_party_postal_code',
     'ref_invoice_no', 'ref_insurance_no', 'ref_purchase_no', 'rate_quote',
     'label_storage_key', 'waybill_storage_key', 'commercial_invoice_storage_key', 'raw_response', 'raw_request', 'carrier_http_status', 'error_message',
-    'voided_at', 'void_note',
+    'voided_at', 'void_note', 'voided_by', 'void_reason',
+    'carrier_cancel_status', 'carrier_cancel_confirmed_at', 'carrier_cancel_confirmed_by', 'carrier_cancel_reference',
     'tracking_status', 'tracking_raw_status', 'tracking_synced_at', 'delivered_at',
     'picked_up_at', 'picked_up_source', 'picked_up_by',
 ])]
@@ -51,6 +52,7 @@ class Shipment extends Model
             'order_total' => 'decimal:2',
             'cost_amount' => 'decimal:2',
             'voided_at' => 'datetime',
+            'carrier_cancel_confirmed_at' => 'datetime',
             'tracking_synced_at' => 'datetime',
             'delivered_at' => 'datetime',
             'picked_up_at' => 'datetime',
@@ -97,6 +99,16 @@ class Shipment extends Model
     public function branch(): BelongsTo
     {
         return $this->belongsTo(Branch::class);
+    }
+
+    public function voidedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'voided_by');
+    }
+
+    public function carrierCancelConfirmedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'carrier_cancel_confirmed_by');
     }
 
     public function createdBy(): BelongsTo

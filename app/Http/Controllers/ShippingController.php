@@ -154,7 +154,11 @@ class ShippingController extends Controller
         // Full quote stays server-side (booking reads cost from it by quoteId); the browser only
         // gets what this user's Role may see — e.g. front-counter staff get the sell price and
         // its breakdown, never the carrier cost / markup formula / raw carrier response.
-        $results = array_map(function ($result) use ($user) {
+        $modes = $accounts->pluck('mode', 'id');
+        $results = array_map(function ($result) use ($user, $modes) {
+            // Lets the booking form warn before a REAL (production) booking — a DHL one can't be
+            // cancelled through the API afterwards.
+            $result['accountMode'] = $modes[$result['accountId'] ?? 0] ?? null;
             if (! empty($result['error'])) {
                 return $this->access->sanitizeRateQuote($user, $result);
             }
