@@ -396,6 +396,9 @@ class ShipmentController extends Controller
                 return response()->json(['error' => 'ใบเสนอราคาหมดอายุแล้ว กรุณากดเช็คราคาใหม่ก่อนจอง'], 422);
             }
         }
+        if ($priceError = $this->checkSellTotals($data, $fullQuote ?? null)) {
+            return response()->json(['error' => $priceError], 422);
+        }
 
         $recordAttributes = [
             'agent_account_id' => $account->id,
@@ -693,6 +696,40 @@ class ShipmentController extends Controller
      * Shipment) — so for DHL this only ever flips our own local status, it never contacts DHL.
      * Only allowed while `status === 'booked'` (can't void something already voided/failed).
      */
+    /**
+     * The sell price is still computed by the booking form, so re-derive it here instead of
+     * trusting whatever the browser sent (e.g. edited in DevTools before a receipt is issued):
+     * - freight must equal the server-side quote's sell total minus the carrier's own
+     *   insurance lines — the same netting the form does (DHL II/IB, UPS 400), since insurance
+     *   is billed as its own Add-on line; only checkable when the quote came from RateQuoteVault
+     * - addon_total must equal the sum of its lines, order_total = freight + addon_total.
+     * Add-on unit prices themselves stay as entered (MANUAL-priced items are staff-typed).
+     * Returns an error message, or null when consistent.
+     */
+    private function checkSellTotals(array $data, ?array $quote): ?string
+    {
+        $tolerance = 0.01;
+        $lineSum = collect($data['addon_lines'] ?? [])->sum(fn ($l) => (float) $l['quantity'] * (float) $l['unit_price']);
+        if (abs($lineSum - (float) $data['addon_total']) > $tolerance) {
+            return 'ยอด Add-on ไม่ตรงกับผลรวมรายการ กรุณาโหลดหน้าใหม่แล้วลองอีกครั้ง';
+        }
+        if (abs((float) $data['freight_amount'] + (float) $data['addon_total'] - (float) $data['order_total']) > $tolerance) {
+            return 'ยอดรวมไม่ตรงกับค่าขนส่ง + Add-on กรุณาโหลดหน้าใหม่แล้วลองอีกครั้ง';
+        }
+        if ($quote) {
+            $costOnlyCodes = ($quote['carrier'] ?? $data['carrier']) === 'DHL' ? ['II', 'IB'] : ['400'];
+            $costOnly = collect($quote['chargeBreakdown'] ?? [])
+                ->filter(fn ($line) => in_array((string) ($line['code'] ?? ''), $costOnlyCodes, true))
+                ->sum(fn ($line) => (float) ($line['amount'] ?? 0));
+            $expectedFreight = (float) ($quote['negotiated'] ?? $quote['published'] ?? 0) - $costOnly;
+            if (abs($expectedFreight - (float) $data['freight_amount']) > $tolerance) {
+                return 'ค่าขนส่งไม่ตรงกับใบเสนอราคา กรุณากดเช็คราคาใหม่ก่อนจอง';
+            }
+        }
+
+        return null;
+    }
+
     /** Staff saw the courier collect this one shipment (see Shipment::markPickedUpManually). */
     public function markPickedUp(Request $request, Shipment $shipment)
     {
