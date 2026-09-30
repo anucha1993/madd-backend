@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\IntegrationSetting;
 use App\Models\Shipment;
+use App\Models\SystemAlert;
 use App\Models\TrackingSyncLog;
 use App\Services\DhlTrackingService;
 use App\Services\TrackingStatusClassifier;
@@ -142,6 +143,15 @@ class SyncShipmentTracking extends Command
             'updates' => $updates ?: null,
             'forced' => $force,
         ]);
+
+        if ($errors) {
+            // Fixed message so repeated failing runs fold into one open alert.
+            SystemAlert::record('tracking_sync', 'Tracking sync: บาง Shipment ดึงสถานะไม่สำเร็จ', [
+                'error_count' => count($errors),
+                'checked_count' => $checked,
+                'errors' => array_slice($errors, 0, 20),
+            ], 'warning');
+        }
 
         IntegrationSetting::set(self::LAST_RUN_KEY, now()->toDateTimeString());
 

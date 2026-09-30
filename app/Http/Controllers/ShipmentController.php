@@ -9,6 +9,7 @@ use App\Models\Branch;
 use App\Models\BranchCarrierAccount;
 use App\Models\Shipment;
 use App\Models\Supply;
+use App\Models\SystemAlert;
 use App\Services\AccessService;
 use App\Services\DhlShipmentService;
 use App\Services\PickupCanceller;
@@ -911,6 +912,11 @@ class ShipmentController extends Controller
                 app(PickupCanceller::class)->cancel($pickup, request()->user()?->name ?? 'MADD Staff', "Shipment {$shipment->tracking_number} voided");
                 $messages[] = "ยกเลิก Pickup {$pickup->carrier_reference} กับ {$pickup->carrier} แล้ว";
             } catch (\Throwable $e) {
+                SystemAlert::record('pickup_cancel', "ยกเลิก Pickup {$pickup->carrier_reference} ({$pickup->carrier}) อัตโนมัติไม่สำเร็จหลัง Void Shipment", [
+                    'pickup_id' => $pickup->id,
+                    'shipment_id' => $shipment->id,
+                    'error' => $e->getMessage(),
+                ]);
                 $messages[] = "ยกเลิก Pickup {$pickup->carrier_reference} ไม่สำเร็จ ({$e->getMessage()}) — กรุณายกเลิกที่หน้า My Pickups";
             }
         }

@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Mail\ScheduledReportMail;
 use App\Models\IntegrationSetting;
 use App\Models\Pickup;
+use App\Models\SystemAlert;
 use App\Services\SmtpSettingService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Mail;
@@ -64,6 +65,11 @@ class NotifyOverduePickups extends Command
                 $pickup->forceFill(['overdue_notified_at' => now()])->save();
             } catch (\Throwable $e) {
                 $this->error("Pickup #{$pickup->id}: {$e->getMessage()}");
+                SystemAlert::record('pickup_overdue_mail', 'ส่งอีเมลแจ้ง Pickup เลยเวลานัดไม่สำเร็จ', [
+                    'pickup_id' => $pickup->id,
+                    'carrier_reference' => $pickup->carrier_reference,
+                    'error' => $e->getMessage(),
+                ]);
             }
         }
 

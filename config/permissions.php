@@ -220,12 +220,14 @@ return [
                 'report_schedules' => 'Report Schedules',
                 'smtp' => 'SMTP',
                 'column_profiles' => 'Column Profiles',
+                'system_alerts' => 'System Alerts',
             ],
             'action_hints' => [
                 'markup' => 'Mark-up / Charge Codes / สูตรค่าบริการ',
                 'agent_accounts' => 'บัญชี UPS / DHL',
                 'integrations' => 'AI, Cloudflare R2',
                 'column_profiles' => 'กำหนดชุดคอลัมน์ของหน้ารายการ และ Role ที่ใช้ได้ (ผู้ใช้อื่นทำได้แค่เลื่อนลำดับ)',
+                'system_alerts' => 'ดู / ปิดรายการแจ้งเตือนเมื่อระบบทำงานพลาด (อัปโหลดเอกสาร, Tracking Sync, ยกเลิก Pickup, Error 500)',
             ],
         ],
         'user' => [

@@ -29,4 +29,9 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
+        // Every reported failure (uncaught 500s, R2 uploads, UPS paperless…) also lands in
+        // Config › System Alerts. Validation/auth/404 exceptions are in dontReport and skip this.
+        $exceptions->report(function (Throwable $e) {
+            \App\Models\SystemAlert::recordException($e);
+        });
     })->create();
