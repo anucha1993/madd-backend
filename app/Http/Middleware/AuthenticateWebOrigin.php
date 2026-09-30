@@ -9,25 +9,29 @@ use Illuminate\Support\Facades\RateLimiter;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Browser-side Public Tracking API: identified by the page's Origin (listed in an active
- * client's `browser_origins`) instead of an API key, since a key can't be kept secret in a web
- * page. Only used for tracking, which returns no personal data; each visitor is rate-limited by
+ * Browser-side Public API (`api.web:tracking` / `api.web:rates`): identified by the page's
+ * Origin (listed in an active client's `browser_origins`) instead of an API key, since a key
+ * can't be kept secret in a web page. Only tracking (no personal data) and sell-price quotes
+ * are exposed this way, the client must allow that feature, and each visitor is rate-limited by
  * their own IP. Answers carry CORS headers for that Origin only.
  */
 class AuthenticateWebOrigin
 {
-    public function handle(Request $request, Closure $next): Response
+    public function handle(Request $request, Closure $next, string $feature = 'tracking'): Response
     {
         $origin = self::normalize((string) $request->headers->get('Origin'));
-        $client = $origin ? ApiClient::where('status', true)->where('allow_tracking', true)->whereNotNull('browser_origins')->get()
+        $column = $feature === 'rates' ? 'allow_rates' : 'allow_tracking';
+        $client = $origin ? ApiClient::where('status', true)->where($column, true)->whereNotNull('browser_origins')->get()
             ->first(fn (ApiClient $c) => in_array($origin, array_map([self::class, 'normalize'], $c->browser_origins ?? []), true)) : null;
 
         if (! $client) {
-            return response()->json(['error' => ['code' => 'origin_not_allowed', 'message' => 'เว็บไซต์นี้ยังไม่ได้รับอนุญาตให้ใช้ Tracking API']], 403);
+            return response()->json(['error' => ['code' => 'origin_not_allowed', 'message' => 'เว็บไซต์นี้ยังไม่ได้รับอนุญาตให้ใช้ API นี้จาก Browser']], 403);
         }
 
         $ip = (string) $request->ip();
-        foreach ([["web-client:{$client->id}", $client->rate_limit_per_minute], ["web-client:{$client->id}:ip:{$ip}", $client->end_user_limit_per_minute]] as [$bucket, $limit]) {
+        // The country list is static reference data — not worth a visitor's request budget.
+        $limits = $request->is('api/public/v1/web/countries') ? [] : [["web-client:{$client->id}", $client->rate_limit_per_minute], ["web-client:{$client->id}:ip:{$ip}", $client->end_user_limit_per_minute]];
+        foreach ($limits as [$bucket, $limit]) {
             if ($limit > 0 && ! RateLimiter::attempt($bucket, $limit, fn () => true, 60)) {
                 return $this->cors(response()->json(['error' => ['code' => 'rate_limited', 'message' => 'เรียกใช้บ่อยเกินไป กรุณาลองใหม่ในอีกสักครู่']], 429, ['Retry-After' => (string) RateLimiter::availableIn($bucket)]), $origin);
             }

@@ -58,7 +58,7 @@ class ApiClientController extends Controller
 
     public function logs(Request $request)
     {
-        $data = $request->validate(['api_client_id' => ['nullable', 'integer'], 'status' => ['nullable', 'in:ok,failed'], 'endpoint' => ['nullable', 'in:rates,tracking,web_tracking']]);
+        $data = $request->validate(['api_client_id' => ['nullable', 'integer'], 'status' => ['nullable', 'in:ok,failed'], 'endpoint' => ['nullable', 'in:rates,tracking,web_tracking,web_rates']]);
         $query = ApiRequestLog::with('apiClient:id,name')->latest('created_at')->latest('id');
         foreach (['api_client_id', 'endpoint'] as $field) {
             if (! empty($data[$field])) {

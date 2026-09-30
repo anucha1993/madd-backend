@@ -29,7 +29,7 @@ class RateController extends Controller
         $startedAt = microtime(true);
         /** @var ApiClient $client */
         $client = $request->attributes->get('api_client');
-        $log = ['api_client_id' => $client->id, 'endpoint' => 'rates', 'ip' => $request->ip(), 'end_user_ip' => $request->attributes->get('end_user_ip')];
+        $log = ['api_client_id' => $client->id, 'endpoint' => $request->is('api/public/v1/web/*') ? 'web_rates' : 'rates', 'ip' => $request->ip(), 'end_user_ip' => $request->attributes->get('end_user_ip')];
         if (! $client->allow_rates) {
             $this->log($log + ['status_code' => 403, 'error' => 'endpoint_not_allowed'], $startedAt);
 

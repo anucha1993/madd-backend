@@ -103,6 +103,25 @@ class PublicRateApiTest extends TestCase
         $this->withToken($key)->getJson('/api/public/v1/countries')->assertOk()->assertExactJson(['countries' => [['iso2' => 'SG', 'name' => 'Singapore']]]);
     }
 
+    public function test_browser_quotes_need_a_registered_origin_and_allow_rates(): void
+    {
+        [$client] = $this->client(['browser_origins' => ['https://madd.co.th']]);
+        $form = ['destination' => ['country' => 'SG'], 'shipment_type' => 'parcel', 'packages' => [['weight' => '2']]];
+
+        $this->withHeader('Origin', 'https://evil.example')->post('/api/public/v1/web/rates', $form)->assertForbidden();
+
+        $this->withHeader('Origin', 'https://madd.co.th')->post('/api/public/v1/web/rates', $form)
+            ->assertOk()->assertJsonPath('options.0.price', 1234.4)
+            ->assertHeader('Access-Control-Allow-Origin', 'https://madd.co.th');
+        $this->assertSame('web_rates', ApiRequestLog::latest('id')->value('endpoint'));
+
+        DB::table('countries')->insert(['iso2' => 'SG', 'name' => 'Singapore', 'status' => true]);
+        $this->withHeader('Origin', 'https://madd.co.th')->get('/api/public/v1/web/countries')->assertOk()->assertJsonPath('countries.0.iso2', 'SG');
+
+        $client->update(['allow_rates' => false]);
+        $this->withHeader('Origin', 'https://madd.co.th')->post('/api/public/v1/web/rates', $form)->assertForbidden();
+    }
+
     public function test_validation_errors_are_logged(): void
     {
         [, $key] = $this->client();

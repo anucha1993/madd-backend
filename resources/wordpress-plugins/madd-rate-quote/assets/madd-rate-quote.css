@@ -1,0 +1,180 @@
+/* MADD Rate Quote — restyle from your theme via these custom properties, e.g.
+   .madd-quote { --mq-accent: #0f766e; } */
+.madd-quote {
+  --mq-navy: #0b2a36;
+  --mq-navy-2: #164a5c;
+  --mq-accent: var(--mq-navy);
+  --mq-gold: #f5b400;
+  --mq-ink: #0f172a;
+  --mq-muted: #5b6b7c;
+  --mq-line: #e6ebf1;
+  --mq-soft: #f3f6f9;
+  --mq-ok: #12a150;
+  --mq-bad: #d64545;
+  --mq-radius: 22px;
+  max-width: 880px;
+  margin: 0 auto;
+  color: var(--mq-ink);
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+}
+.madd-quote *, .madd-quote *::before, .madd-quote *::after { box-sizing: border-box; }
+.madd-quote__heading { margin: 0 0 14px; }
+.madd-quote__icon { display: inline-flex; width: 18px; height: 18px; flex: 0 0 auto; }
+.madd-quote__icon svg { width: 100%; height: 100%; }
+
+/* ---------- form card ---------- */
+.madd-quote__form {
+  padding: 26px;
+  border: 1px solid rgba(11, 42, 54, .08);
+  border-radius: var(--mq-radius);
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 24px 60px -24px rgba(11, 42, 54, .28);
+}
+.madd-quote__section + .madd-quote__section { margin-top: 24px; padding-top: 24px; border-top: 1px dashed var(--mq-line); }
+.madd-quote__section-title { margin-bottom: 12px; font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--mq-muted); }
+.madd-quote__grid { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 12px; }
+.madd-quote__hint { margin: 8px 2px 0 !important; font-size: 12.5px; color: var(--mq-muted); }
+.madd-quote__field { display: flex; flex-direction: column; gap: 6px; min-width: 0; margin: 0 !important; }
+.madd-quote__label { font-size: 13px; font-weight: 600; color: var(--mq-ink); }
+.madd-quote__control { position: relative; display: flex; }
+.madd-quote input[type="text"], .madd-quote input[type="number"], .madd-quote select {
+  width: 100%; height: 50px !important; margin: 0 !important; padding: 0 14px !important;
+  border: 1px solid transparent !important; border-radius: 12px !important; background: var(--mq-soft) !important;
+  box-shadow: none !important; font: inherit; font-size: 15px !important; color: var(--mq-ink) !important;
+  transition: background-color .15s, border-color .15s, box-shadow .15s; -moz-appearance: textfield;
+}
+.madd-quote input::-webkit-outer-spin-button, .madd-quote input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.madd-quote select {
+  appearance: none; -webkit-appearance: none; padding-right: 40px !important; cursor: pointer;
+  background: var(--mq-soft) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='none' stroke='%235b6b7c' stroke-width='2.2' stroke-linecap='round' viewBox='0 0 24 24'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 14px center !important;
+}
+.madd-quote input:focus, .madd-quote select:focus { outline: 0 !important; background-color: #fff !important; border-color: var(--mq-accent) !important; box-shadow: 0 0 0 4px rgba(11, 42, 54, .08) !important; }
+.madd-quote input::placeholder { color: #9aa8b6; }
+.madd-quote__control.has-unit input { padding-right: 44px !important; }
+.madd-quote__unit { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); font-size: 13px; color: var(--mq-muted); pointer-events: none; }
+
+/* shipment type */
+.madd-quote__types { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.madd-quote__type { position: relative; margin: 0 !important; cursor: pointer; }
+.madd-quote__type input { position: absolute; opacity: 0; pointer-events: none; }
+.madd-quote__type-body {
+  display: flex; align-items: center; gap: 14px; padding: 16px 18px; border: 1.5px solid var(--mq-line); border-radius: 14px;
+  background: #fff; transition: border-color .15s, box-shadow .15s, background .15s;
+}
+.madd-quote__type-body .madd-quote__icon { width: 26px; height: 26px; color: var(--mq-muted); }
+.madd-quote__type-body b { display: block; font-size: 15px; }
+.madd-quote__type-body small { display: block; font-size: 12.5px; color: var(--mq-muted); }
+.madd-quote__type:hover .madd-quote__type-body { border-color: #cfd8e2; }
+.madd-quote__type input:checked + .madd-quote__type-body { border-color: var(--mq-accent); background: linear-gradient(180deg, #fff, #f7fafc); box-shadow: 0 0 0 4px rgba(11, 42, 54, .07); }
+.madd-quote__type input:checked + .madd-quote__type-body .madd-quote__icon { color: var(--mq-accent); }
+.madd-quote__type input:focus-visible + .madd-quote__type-body { outline: 2px solid var(--mq-accent); outline-offset: 2px; }
+
+/* packages */
+.madd-quote__packages { display: flex; flex-direction: column; gap: 10px; }
+.madd-quote__package {
+  display: grid; grid-template-columns: 36px 1.25fr 1fr 1fr 1fr .8fr 40px; align-items: end; gap: 10px;
+  padding: 12px; border: 1px solid var(--mq-line); border-radius: 16px; background: #fcfdfe; animation: mq-rise .3s ease;
+}
+.madd-quote.is-document .madd-quote__package { grid-template-columns: 36px 1.25fr .8fr 40px; }
+.madd-quote.is-document .madd-quote__field.is-dim { display: none; }
+.madd-quote__package-no { align-self: center; padding-top: 22px; font-size: 13px; font-weight: 700; color: var(--mq-muted); text-align: center; }
+.madd-quote__remove {
+  display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 50px; padding: 0 !important; margin: 0 !important;
+  border: 0 !important; border-radius: 12px !important; background: transparent !important; color: #94a3b8 !important; cursor: pointer; box-shadow: none !important;
+}
+.madd-quote__remove:hover { background: #fdecec !important; color: var(--mq-bad) !important; }
+.madd-quote__package-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; }
+.madd-quote__add {
+  display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px !important; margin: 0 !important; border: 1.5px dashed #cfd8e2 !important;
+  border-radius: 12px !important; background: transparent !important; color: var(--mq-accent) !important; font: inherit; font-weight: 600 !important;
+  font-size: 14px !important; text-transform: none !important; cursor: pointer; box-shadow: none !important; min-height: 0 !important; line-height: 1.2 !important;
+}
+.madd-quote__add:hover { border-color: var(--mq-accent) !important; background: #f7fafc !important; }
+.madd-quote__chargeable { display: inline-flex; align-items: baseline; gap: 8px; padding: 8px 14px; border-radius: 999px; background: #fff7df; color: #7a5600; font-size: 13px; cursor: help; }
+.madd-quote__chargeable b { font-size: 15px; color: var(--mq-ink); }
+
+/* submit */
+.madd-quote__error { margin: 18px 0 0 !important; padding: 12px 14px; border-radius: 12px; background: #fdecec; color: var(--mq-bad); font-weight: 500; }
+.madd-quote__submit {
+  display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; height: 60px; margin: 22px 0 0 !important; padding: 0 24px !important;
+  border: 0 !important; border-radius: 16px !important; background: linear-gradient(135deg, var(--mq-navy) 0%, var(--mq-navy-2) 100%) !important;
+  color: #fff !important; font: inherit; font-size: 17px !important; font-weight: 700 !important; letter-spacing: .01em; text-transform: none !important; cursor: pointer;
+  box-shadow: 0 14px 30px -14px rgba(11, 42, 54, .8) !important; transition: transform .15s, box-shadow .2s, opacity .2s; line-height: 1 !important;
+}
+.madd-quote__submit:hover { transform: translateY(-1px); box-shadow: 0 18px 34px -14px rgba(11, 42, 54, .85) !important; }
+.madd-quote__submit .madd-quote__icon { transition: transform .2s; }
+.madd-quote__submit:hover .madd-quote__icon { transform: translateX(3px); }
+.madd-quote__submit:disabled { opacity: .7; transform: none; cursor: wait; }
+
+/* ---------- results ---------- */
+.madd-quote__result { margin-top: 26px; scroll-margin-top: 24px; }
+.madd-quote__loading {
+  display: grid; gap: 12px; padding: 22px; border: 1px solid var(--mq-line); border-radius: var(--mq-radius); background: #fff; color: var(--mq-muted);
+  grid-template-columns: auto 1fr; align-items: center;
+}
+.madd-quote__spinner { width: 22px; height: 22px; border-radius: 50%; border: 3px solid #e6ebf1; border-top-color: var(--mq-gold); animation: mq-spin .8s linear infinite; }
+.madd-quote__skeleton { grid-column: 1 / -1; height: 74px; border-radius: 16px; background: linear-gradient(90deg, #f1f4f8 25%, #f8fafc 50%, #f1f4f8 75%); background-size: 200% 100%; animation: mq-shimmer 1.2s infinite; }
+.madd-quote__result-head { display: flex; align-items: flex-end; justify-content: space-between; margin: 0 4px 14px; }
+.madd-quote__eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--mq-muted); }
+.madd-quote__route { margin-top: 2px; font-size: 22px; font-weight: 700; color: var(--mq-navy); }
+.madd-quote__options { display: flex; flex-direction: column; gap: 12px; }
+.madd-quote__option {
+  display: grid; grid-template-columns: 110px 1fr auto; align-items: center; gap: 20px; padding: 18px 22px;
+  border: 1px solid rgba(11, 42, 54, .08); border-radius: 18px; background: #fff;
+  box-shadow: 0 10px 30px -22px rgba(11, 42, 54, .35); animation: mq-rise .45s cubic-bezier(.2, .8, .2, 1) both;
+  transition: transform .15s, box-shadow .2s;
+}
+.madd-quote__option:hover { transform: translateY(-2px); box-shadow: 0 18px 40px -24px rgba(11, 42, 54, .45); }
+.madd-quote__option.is-best { border-color: rgba(245, 180, 0, .7); box-shadow: 0 0 0 1px rgba(245, 180, 0, .5), 0 18px 40px -24px rgba(180, 120, 0, .45); }
+.madd-quote__carrier { display: flex; align-items: center; justify-content: center; height: 64px; border-radius: 14px; background: var(--mq-soft); }
+.madd-quote__carrier img { display: block; width: auto; max-width: 84px; margin: 0; }
+.madd-quote__carrier--ups img { height: 40px; }
+.madd-quote__carrier--dhl img { height: 18px; }
+.madd-quote__carrier b { font-size: 16px; letter-spacing: .04em; }
+.madd-quote__service { min-width: 0; }
+.madd-quote__badges { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.madd-quote__badges:empty { display: none; }
+.madd-quote__badge { padding: 3px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 700; letter-spacing: .02em; }
+.madd-quote__badge.is-best { background: #fff4d1; color: #8a5a00; }
+.madd-quote__badge.is-fast { background: #e5f7ed; color: #0c7a3c; }
+.madd-quote__service-name { font-size: 16px; font-weight: 700; line-height: 1.3; color: var(--mq-ink); }
+.madd-quote__meta { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 6px; font-size: 13px; color: var(--mq-muted); }
+.madd-quote__meta span { display: inline-flex; align-items: center; gap: 6px; }
+.madd-quote__meta .madd-quote__icon { width: 15px; height: 15px; }
+.madd-quote__price { text-align: right; }
+.madd-quote__amount { font-size: 26px; font-weight: 800; letter-spacing: -.01em; color: var(--mq-navy); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.madd-quote__option.is-best .madd-quote__amount { color: #b27700; }
+.madd-quote__empty { padding: 24px; border: 1px dashed var(--mq-line); border-radius: 18px; background: #fff; color: var(--mq-muted); text-align: center; }
+.madd-quote__disclaimer { margin: 14px 4px 0 !important; font-size: 12.5px; color: var(--mq-muted); }
+.madd-quote__book {
+  display: inline-flex; align-items: center; gap: 10px; margin-top: 16px; padding: 14px 22px; border-radius: 14px;
+  background: #06c755; color: #fff !important; font-weight: 700; text-decoration: none !important; box-shadow: 0 12px 26px -14px rgba(6, 199, 85, .9);
+  transition: transform .15s;
+}
+.madd-quote__book:hover { transform: translateY(-1px); }
+
+@keyframes mq-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes mq-spin { to { transform: rotate(360deg); } }
+@keyframes mq-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+@media (max-width: 760px) {
+  .madd-quote__form { padding: 18px; }
+  .madd-quote__grid { grid-template-columns: 1fr 1fr; }
+  .madd-quote__field.is-country { grid-column: 1 / -1; }
+  .madd-quote__package, .madd-quote.is-document .madd-quote__package { grid-template-columns: repeat(3, 1fr); position: relative; padding-top: 34px; }
+  .madd-quote__package-no { position: absolute; top: 10px; left: 14px; padding: 0; }
+  .madd-quote__field.is-weight { grid-column: span 2; }
+  .madd-quote__remove { position: absolute; top: 2px; right: 4px; height: 34px; }
+  .madd-quote__option { grid-template-columns: 76px 1fr; gap: 14px; padding: 16px; }
+  .madd-quote__carrier { height: 52px; }
+  .madd-quote__carrier--ups img { height: 32px; }
+  .madd-quote__carrier--dhl img { height: 14px; max-width: 64px; }
+  .madd-quote__price { grid-column: 1 / -1; display: flex; justify-content: flex-end; padding-top: 10px; border-top: 1px dashed var(--mq-line); }
+  .madd-quote__amount { font-size: 22px; }
+  .madd-quote__route { font-size: 19px; }
+}
+@media (max-width: 420px) {
+  .madd-quote__types { grid-template-columns: 1fr; }
+  .madd-quote__grid { grid-template-columns: 1fr; }
+}

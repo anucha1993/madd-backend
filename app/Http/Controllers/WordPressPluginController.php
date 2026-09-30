@@ -14,7 +14,7 @@ class WordPressPluginController extends Controller
 {
     private const PLUGINS = [
         'madd-tracking' => 'ฟอร์มติดตามพัสดุ [madd_tracking]',
-        'madd-rate-calculator' => 'ตัวเต็ม: เช็คราคา [madd_rate_calculator] + ติดตามพัสดุ [madd_tracking]',
+        'madd-rate-quote' => 'ฟอร์มเช็คราคาค่าส่ง [madd_rate_quote] — ใช้คู่กับ MADD Tracking ได้',
     ];
 
     public function index()
