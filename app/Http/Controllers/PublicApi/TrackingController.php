@@ -8,6 +8,7 @@ use App\Models\ApiRequestLog;
 use App\Services\PublicTrackingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\RateLimiter;
 
 /**
  * GET /api/public/v1/tracking/{trackingNumber} — status + scan history of a shipment booked in
@@ -38,7 +39,7 @@ class TrackingController extends Controller
 
         $shipment = $this->tracking->find($trackingNumber);
         if (! $shipment) {
-            return $this->fail($log, $startedAt, 404, 'not_found', 'ไม่พบเลข Tracking นี้ในระบบ');
+            return $this->external($client, $trackingNumber, $log, $startedAt);
         }
 
         $cacheKey = 'public-tracking:'.$trackingNumber.':'.$shipment->status;
@@ -56,6 +57,40 @@ class TrackingController extends Controller
         }
 
         $this->log($log + ['status_code' => 200, 'cached' => $cached, 'result_count' => count($data['events']), 'destination_country' => $data['destination_country']], $startedAt);
+
+        return response()->json($data);
+    }
+
+    /** Not a MADD shipment: only for keys allowed to track any number, capped per day. */
+    private function external(ApiClient $client, string $trackingNumber, array $log, float $startedAt)
+    {
+        if (! $client->track_any_number || ! $this->tracking->detectCarrier($trackingNumber)) {
+            return $this->fail($log, $startedAt, 404, 'not_found', 'ไม่พบเลข Tracking นี้ในระบบ');
+        }
+
+        $cacheKey = 'public-tracking-ext:'.$trackingNumber;
+        $data = Cache::get($cacheKey);
+        $cached = $data !== null;
+        if (! $cached) {
+            $bucket = "external-tracking:{$client->id}";
+            if ($client->external_tracking_daily_limit > 0 && ! RateLimiter::attempt($bucket, $client->external_tracking_daily_limit, fn () => true, 86400)) {
+                return $this->fail($log, $startedAt, 429, 'rate_limited', 'วันนี้ค้นหาเลขที่ไม่ได้จองผ่าน MADD ครบจำนวนแล้ว', 'external daily limit');
+            }
+            try {
+                // false = the carrier doesn't know it (cached too, so a typo isn't re-asked for 10 min)
+                $data = $this->tracking->trackExternal($trackingNumber) ?? false;
+            } catch (\Throwable $e) {
+                report($e);
+
+                return $this->fail($log, $startedAt, 502, 'carrier_unavailable', 'ไม่สามารถดึงข้อมูลจาก Carrier ได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง', $e->getMessage());
+            }
+            Cache::put($cacheKey, $data, now()->addMinutes(self::CACHE_MINUTES));
+        }
+        if ($data === false) {
+            return $this->fail($log + ['cached' => $cached], $startedAt, 404, 'not_found', 'ไม่พบเลข Tracking นี้ในระบบ', 'external not_found');
+        }
+
+        $this->log($log + ['status_code' => 200, 'cached' => $cached, 'result_count' => count($data['events']), 'error' => 'external'], $startedAt);
 
         return response()->json($data);
     }

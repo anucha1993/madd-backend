@@ -121,9 +121,14 @@ class ApiClientController extends Controller
             }],
             'allow_rates' => ['boolean'],
             'allow_tracking' => ['boolean'],
+            'track_any_number' => ['boolean'],
+            'external_tracking_daily_limit' => ['nullable', 'integer', 'min:0', 'max:100000'],
             'status' => ['boolean'],
         ]);
         $data['carriers'] = $data['carriers'] ?? null ?: null;
+        if (array_key_exists('external_tracking_daily_limit', $data)) {
+            $data['external_tracking_daily_limit'] ??= 500;
+        }
         $data['allowed_ips'] = array_values(array_filter($data['allowed_ips'] ?? [])) ?: null;
         $data['browser_origins'] = array_values(array_unique(array_filter(array_map([AuthenticateWebOrigin::class, 'normalize'], $data['browser_origins'] ?? [])))) ?: null;
 

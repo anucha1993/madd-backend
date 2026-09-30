@@ -115,6 +115,27 @@ class PublicTrackingApiTest extends TestCase
             ->assertJsonPath('events', []);
     }
 
+    public function test_numbers_not_booked_in_madd_need_track_any_number(): void
+    {
+        $agentId = DB::table('agents')->insertGetId(['agent_name' => 'DHL', 'agent_code' => 'DHL', 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('agent_accounts')->insert(['agent_id' => $agentId, 'username_acc' => '560634572', 'basic_auth_username' => 'u', 'basic_auth_password' => 'p', 'mode' => 'production', 'status' => true, 'is_api_enabled' => true, 'created_at' => now(), 'updated_at' => now()]);
+
+        $this->withToken($this->key)->getJson('/api/public/v1/tracking/1234567890')->assertNotFound();
+        $this->assertSame(0, $this->calls);
+
+        $this->client->update(['track_any_number' => true, 'external_tracking_daily_limit' => 1]);
+        $res = $this->withToken($this->key)->getJson('/api/public/v1/tracking/1234567890')->assertOk()
+            ->assertJsonPath('carrier', 'DHL')
+            ->assertJsonPath('status', 'in_transit')
+            ->assertJsonPath('destination_country', null);
+        $this->assertCount(2, $res->json('events'));
+        $this->withToken($this->key)->getJson('/api/public/v1/tracking/1234567890')->assertOk(); // cached, no quota used
+        $this->assertSame(1, $this->calls);
+
+        $this->withToken($this->key)->getJson('/api/public/v1/tracking/9999999999')->assertStatus(429); // daily cap reached
+        $this->withToken($this->key)->getJson('/api/public/v1/tracking/ABCDEFGHIJ')->assertNotFound(); // not a UPS/DHL format
+    }
+
     public function test_endpoint_can_be_disabled_per_key(): void
     {
         $this->shipment();
