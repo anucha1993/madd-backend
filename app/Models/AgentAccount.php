@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Casts\CarrierSecret;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -27,6 +28,8 @@ class AgentAccount extends Model
         return [
             'status' => 'boolean',
             'is_api_enabled' => 'boolean',
+            'client_secret' => CarrierSecret::class,
+            'basic_auth_password' => CarrierSecret::class,
         ];
     }
 
