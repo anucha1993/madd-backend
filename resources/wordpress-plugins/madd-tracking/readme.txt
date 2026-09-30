@@ -1,7 +1,7 @@
 === MADD Tracking ===
 Requires at least: 5.8
 Requires PHP: 7.4
-Stable tag: 1.0.1
+Stable tag: 1.1.0
 
 ฟอร์มติดตามพัสดุ (UPS / DHL) สำหรับ Shipment ที่จองผ่านระบบ MADD
 
@@ -18,6 +18,7 @@ Stable tag: 1.0.1
 5. สร้างหน้า เช่น "ติดตามพัสดุ" แล้วใส่ shortcode:
      [madd_tracking]
      [madd_tracking title="ติดตามพัสดุของคุณ"]
+     [madd_tracking lang="en"]      ภาษาอังกฤษ (ไม่ใส่ lang = ตามภาษาของหน้า Polylang/WPML)
 6. ลิงก์ตรงส่งให้ลูกค้า: https://your-site/ติดตามพัสดุ/?tn=5084355500
 
 == ความปลอดภัย ==

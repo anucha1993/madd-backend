@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: MADD Tracking
- * Description: ฟอร์มติดตามพัสดุ (UPS / DHL) จากระบบ MADD — ใส่ในหน้าใดก็ได้ด้วย shortcode [madd_tracking] · ลิงก์ตรง ?tn=เลขTracking
- * Version: 1.0.1
+ * Description: ฟอร์มติดตามพัสดุ (UPS / DHL) จากระบบ MADD — shortcode [madd_tracking] (ภาษาอังกฤษ: [madd_tracking lang="en"]) · ลิงก์ตรง ?tn=เลขTracking
+ * Version: 1.1.0
  * Requires at least: 5.8
  * Requires PHP: 7.4
  * Author: MADD
@@ -19,7 +19,7 @@ if (! defined('ABSPATH')) {
 final class Madd_Tracking
 {
     const OPTION = 'madd_tracking';
-    const VERSION = '1.0.1';
+    const VERSION = '1.1.0';
     const AJAX_ACTION = 'madd_tracking_lookup';
 
     public static function init()
@@ -220,9 +220,52 @@ final class Madd_Tracking
 
     // ------------------------------------------------------------------ Front end
 
+    /** Visitor-facing text. `lang` = shortcode attribute, else the site language (Polylang / WPML / locale). */
+    const TEXT = [
+        'th' => [
+            'label' => 'เลข Tracking (UPS / DHL)',
+            'placeholder' => 'เช่น 5084355500',
+            'button' => 'ติดตาม',
+            'expired' => 'หน้าเว็บหมดอายุ กรุณารีเฟรชแล้วลองใหม่',
+            'bot' => 'ยืนยันว่าไม่ใช่บอทไม่สำเร็จ กรุณาลองใหม่',
+            'invalid' => 'กรุณากรอกเลข Tracking ให้ถูกต้อง',
+            'not_found' => 'ไม่พบเลข Tracking นี้ในระบบ กรุณาตรวจสอบเลขอีกครั้ง',
+            'rate_limited' => 'ค้นหาบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่',
+            'unavailable' => 'ระบบติดตามพัสดุไม่พร้อมใช้งานชั่วคราว กรุณาลองใหม่ภายหลัง',
+        ],
+        'en' => [
+            'label' => 'Tracking number (UPS / DHL)',
+            'placeholder' => 'e.g. 5084355500',
+            'button' => 'Track',
+            'expired' => 'This page has expired. Please refresh and try again.',
+            'bot' => 'Verification failed. Please try again.',
+            'invalid' => 'Please enter a valid tracking number.',
+            'not_found' => "We couldn't find this tracking number. Please check it and try again.",
+            'rate_limited' => 'Too many searches. Please wait a moment and try again.',
+            'unavailable' => 'Tracking is temporarily unavailable. Please try again later.',
+        ],
+    ];
+
+    private static function lang($requested = '')
+    {
+        $requested = strtolower((string) $requested);
+        if (isset(self::TEXT[$requested])) {
+            return $requested;
+        }
+        $site = function_exists('pll_current_language') ? pll_current_language('slug') : (defined('ICL_LANGUAGE_CODE') ? ICL_LANGUAGE_CODE : get_locale());
+
+        return strpos(strtolower((string) $site), 'th') === 0 ? 'th' : 'en';
+    }
+
+    private static function t($lang, $key)
+    {
+        return self::TEXT[$lang][$key] ?? self::TEXT['en'][$key];
+    }
+
     public static function shortcode($atts = [])
     {
-        $atts = shortcode_atts(['title' => ''], $atts, 'madd_tracking');
+        $atts = shortcode_atts(['title' => '', 'lang' => ''], $atts, 'madd_tracking');
+        $lang = self::lang($atts['lang']);
         $s = self::settings();
         $base = plugin_dir_url(__FILE__);
         wp_enqueue_style('madd-tracking', $base.'assets/madd-tracking.css', [], self::VERSION);
@@ -241,18 +284,18 @@ final class Madd_Tracking
         $input_id = 'madd-tn-'.wp_unique_id();
 
         ob_start(); ?>
-        <div class="madd-tracking">
+        <div class="madd-tracking" data-lang="<?php echo esc_attr($lang); ?>">
             <?php if ($atts['title']) : ?>
                 <h3 class="madd-tracking__heading"><?php echo esc_html($atts['title']); ?></h3>
             <?php endif; ?>
             <form class="madd-tracking__form" novalidate>
-                <label class="madd-tracking__label" for="<?php echo esc_attr($input_id); ?>">เลข Tracking (UPS / DHL)</label>
+                <label class="madd-tracking__label" for="<?php echo esc_attr($input_id); ?>"><?php echo esc_html(self::t($lang, 'label')); ?></label>
                 <div class="madd-tracking__bar">
-                    <input id="<?php echo esc_attr($input_id); ?>" name="tracking_number" type="text" maxlength="40" value="<?php echo esc_attr($prefill); ?>" placeholder="เช่น 5084355500" autocomplete="off" inputmode="text" required>
-                    <button type="submit" class="madd-tracking__submit">ติดตาม</button>
+                    <input id="<?php echo esc_attr($input_id); ?>" name="tracking_number" type="text" maxlength="40" value="<?php echo esc_attr($prefill); ?>" placeholder="<?php echo esc_attr(self::t($lang, 'placeholder')); ?>" autocomplete="off" inputmode="text" required>
+                    <button type="submit" class="madd-tracking__submit"><?php echo esc_html(self::t($lang, 'button')); ?></button>
                 </div>
                 <?php if ($s['turnstile_site_key']) : ?>
-                    <div class="cf-turnstile" data-sitekey="<?php echo esc_attr($s['turnstile_site_key']); ?>"></div>
+                    <div class="cf-turnstile" data-sitekey="<?php echo esc_attr($s['turnstile_site_key']); ?>" data-language="<?php echo esc_attr($lang); ?>"></div>
                 <?php endif; ?>
                 <p class="madd-tracking__error" role="alert" hidden></p>
             </form>
@@ -264,8 +307,9 @@ final class Madd_Tracking
 
     public static function ajax_lookup()
     {
+        $lang = self::lang(sanitize_key(wp_unslash($_POST['lang'] ?? '')));
         if (! check_ajax_referer(self::AJAX_ACTION, 'nonce', false)) {
-            wp_send_json_error(['message' => 'หน้าเว็บหมดอายุ กรุณารีเฟรชแล้วลองใหม่'], 403);
+            wp_send_json_error(['message' => self::t($lang, 'expired')], 403);
         }
 
         $s = self::settings();
@@ -276,26 +320,27 @@ final class Madd_Tracking
                 'remoteip' => self::visitor_ip(),
             ]]);
             if (is_wp_error($verify) || empty(json_decode(wp_remote_retrieve_body($verify), true)['success'])) {
-                wp_send_json_error(['message' => 'ยืนยันว่าไม่ใช่บอทไม่สำเร็จ กรุณาลองใหม่'], 400);
+                wp_send_json_error(['message' => self::t($lang, 'bot')], 400);
             }
         }
 
         $number = self::clean_number(wp_unslash($_POST['tracking_number'] ?? ''));
         if (strlen($number) < 8 || strlen($number) > 40) {
-            wp_send_json_error(['message' => 'กรุณากรอกเลข Tracking ให้ถูกต้อง'], 422);
+            wp_send_json_error(['message' => self::t($lang, 'invalid')], 422);
         }
 
         $result = self::api('/public/v1/tracking/'.rawurlencode($number));
         if (is_wp_error($result)) {
             $status = (int) ($result->get_error_data()['status'] ?? 0);
-            if ($status === 404 || $status === 422 || $status === 429) {
-                wp_send_json_error(['message' => $result->get_error_message()], $status);
+            $visitor = [404 => 'not_found', 422 => 'invalid', 429 => 'rate_limited'];
+            if (isset($visitor[$status])) {
+                wp_send_json_error(['message' => self::t($lang, $visitor[$status])], $status);
             }
             // Configuration / connectivity problems are for the site admin, not the visitor.
             if (current_user_can('manage_options')) {
                 wp_send_json_error(['message' => '[Admin] '.$result->get_error_message()], 502);
             }
-            wp_send_json_error(['message' => 'ระบบติดตามพัสดุไม่พร้อมใช้งานชั่วคราว กรุณาลองใหม่ภายหลัง'], 502);
+            wp_send_json_error(['message' => self::t($lang, 'unavailable')], 502);
         }
 
         wp_send_json_success($result);
