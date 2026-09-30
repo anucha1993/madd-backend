@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\Auditable;
 use App\Models\Concerns\HidesRestrictedFields;
 use App\Models\Concerns\ScopedByAccess;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -20,7 +21,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 ])]
 class Receipt extends Model
 {
-    use HidesRestrictedFields, ScopedByAccess;
+    use Auditable, HidesRestrictedFields, ScopedByAccess;
 
     protected static string $accessModule = 'receipt';
 

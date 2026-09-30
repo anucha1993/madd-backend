@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\Auditable;
 use App\Models\Concerns\ScopedByAccess;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Support\Carbon;
@@ -16,7 +17,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 ])]
 class Pickup extends Model
 {
-    use ScopedByAccess;
+    use Auditable, ScopedByAccess;
+
+    protected array $auditExclude = ['raw_response'];
 
     protected static string $accessModule = 'pickup';
 

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Role;
 use App\Models\User;
+use App\Services\AuditLogger;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 
@@ -34,10 +35,10 @@ class UserController extends Controller
         $this->assertCanAssignRoles($request, $roleIds, null);
 
         $user = User::create($data);
-        $user->roles()->sync($roleIds);
+        $this->syncAudited($user, 'roles', $roleIds);
 
         if (! $user->can_access_all_branches) {
-            $user->branches()->sync($branchIds);
+            $this->syncAudited($user, 'branches', $branchIds);
         }
 
         return response()->json($user->load('branches:id,name,code', 'roles:id,key,name,is_super_admin'), 201);
@@ -77,13 +78,13 @@ class UserController extends Controller
         $user->update($data);
 
         if ($roleIds !== null) {
-            $user->roles()->sync($roleIds);
+            $this->syncAudited($user, 'roles', $roleIds);
         }
 
         if ($branchIds !== null) {
-            $user->branches()->sync($user->can_access_all_branches ? [] : $branchIds);
+            $this->syncAudited($user, 'branches', $user->can_access_all_branches ? [] : $branchIds);
         } elseif ($user->can_access_all_branches) {
-            $user->branches()->sync([]);
+            $this->syncAudited($user, 'branches', []);
         }
 
         return $user->load('branches:id,name,code', 'roles:id,key,name,is_super_admin');
@@ -122,6 +123,22 @@ class UserController extends Controller
         if ($hadSuper && ! $grantsSuper
             && User::whereKeyNot($target->id)->whereHas('roles', fn ($q) => $q->where('is_super_admin', true))->doesntExist()) {
             throw ValidationException::withMessages(['role_ids' => 'ต้องมีผู้ใช้ Super Admin เหลืออย่างน้อย 1 คน']);
+        }
+    }
+
+    /**
+     * Pivot syncs fire no model events, so role/branch assignment changes (the ones that
+     * actually change what a user can do) are written to the audit log here, by name.
+     */
+    private function syncAudited(User $user, string $relation, array $ids): void
+    {
+        $nameColumn = $relation === 'roles' ? 'roles.name' : 'branches.code';
+        $before = $user->{$relation}()->pluck($nameColumn)->sort()->values()->all();
+        $user->{$relation}()->sync($ids);
+        $after = $user->{$relation}()->pluck($nameColumn)->sort()->values()->all();
+
+        if ($before !== $after) {
+            app(AuditLogger::class)->record("{$relation}_changed", $user, [$relation => ['old' => $before, 'new' => $after]], $user->username);
         }
     }
 

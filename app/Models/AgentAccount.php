@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\Auditable;
 use App\Casts\CarrierSecret;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -19,7 +20,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[Hidden(['client_secret', 'basic_auth_password'])]
 class AgentAccount extends Model
 {
-    use HasFactory;
+    use Auditable, HasFactory;
 
     protected $appends = ['has_client_secret', 'has_basic_auth_password'];
 

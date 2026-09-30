@@ -231,7 +231,8 @@ return [
         'user' => [
             'label' => 'ผู้ใช้งานและสิทธิ์',
             'category' => 'admin',
-            'actions' => ['manage' => 'ผู้ใช้งาน', 'roles' => 'Role & สิทธิ์'],
+            'actions' => ['manage' => 'ผู้ใช้งาน', 'roles' => 'Role & สิทธิ์', 'audit' => 'Audit Log'],
+            'action_hints' => ['audit' => 'ดูประวัติว่าใครแก้ไขอะไร เมื่อไร (Role, ผู้ใช้, ราคา, Shipment, ใบเสร็จ)'],
         ],
     ],
 

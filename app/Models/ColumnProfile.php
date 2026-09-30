@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 
@@ -9,6 +10,8 @@ use Illuminate\Database\Eloquent\Model;
 #[Fillable(['page_key', 'name', 'columns', 'group_of', 'role_ids', 'sort_order'])]
 class ColumnProfile extends Model
 {
+    use Auditable;
+
     protected function casts(): array
     {
         return [

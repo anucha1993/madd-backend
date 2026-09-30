@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\Auditable;
 use App\Models\Concerns\HidesRestrictedFields;
 use App\Models\Concerns\ScopedByAccess;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -25,7 +26,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 ])]
 class Shipment extends Model
 {
-    use HidesRestrictedFields, ScopedByAccess;
+    use Auditable, HidesRestrictedFields, ScopedByAccess;
+
+    protected array $auditExclude = ['raw_response', 'raw_request', 'rate_quote', 'packages', 'origin', 'destination', 'invoice_lines', 'addon_lines', 'pieces', 'tracking_raw_status', 'tracking_synced_at'];
 
     protected static string $accessModule = 'shipment';
 

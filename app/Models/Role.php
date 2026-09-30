@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -13,6 +14,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 #[Fillable(['key', 'name', 'description', 'is_super_admin', 'permissions', 'field_access', 'data_scopes'])]
 class Role extends Model
 {
+    use Auditable;
+
     protected function casts(): array
     {
         return [

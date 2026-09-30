@@ -6,6 +6,7 @@ use App\Http\Controllers\AddonItemController;
 use App\Http\Controllers\AgentAccountController;
 use App\Http\Controllers\AgentController;
 use App\Http\Controllers\AiController;
+use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\BillingCustomerController;
 use App\Http\Controllers\BranchCarrierAccountController;
 use App\Http\Controllers\BranchController;
@@ -64,6 +65,7 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
         Route::delete('roles/{role}', [RoleController::class, 'destroy']);
     });
     Route::apiResource('users', UserController::class)->middleware('perm:user.manage');
+    Route::get('audit-logs', [AuditLogController::class, 'index'])->middleware('perm:user.audit');
 
     // ---- Column Profiles (index returns only the caller's available profiles) ----
     Route::get('column-profiles', [ColumnProfileController::class, 'index']);
