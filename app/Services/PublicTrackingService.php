@@ -95,7 +95,10 @@ class PublicTrackingService
         $account = $carrier ? AgentAccount::whereHas('agent', fn ($q) => $q->where('agent_code', $carrier))
             ->where('status', true)->where('is_api_enabled', true)->where('mode', 'production')
             ->get()
-            ->first(fn (AgentAccount $a) => $carrier === 'UPS' ? ($a->client_id && $a->client_secret) : ($a->basic_auth_username && $a->basic_auth_password)) : null;
+            ->filter(fn (AgentAccount $a) => $carrier === 'UPS' ? ($a->client_id && $a->client_secret) : ($a->basic_auth_username && $a->basic_auth_password))
+            // A UPS number embeds the shipper account ("1Z" + 6 chars) — prefer that account.
+            ->sortByDesc(fn (AgentAccount $a) => $carrier === 'UPS' && strcasecmp((string) $a->username_acc, substr($trackingNumber, 2, 6)) === 0)
+            ->first() : null;
         if (! $account) {
             return null;
         }
