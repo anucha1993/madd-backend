@@ -8,6 +8,7 @@ use App\Http\Controllers\AgentController;
 use App\Http\Controllers\AiController;
 use App\Http\Controllers\ApiClientController;
 use App\Http\Controllers\PublicApi\RateController as PublicRateController;
+use App\Http\Controllers\PublicApi\TrackingController as PublicTrackingController;
 use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\SystemAlertController;
 use App\Http\Controllers\TimelineController;
@@ -53,6 +54,7 @@ Route::post('/login', [AuthController::class, 'login']);
 Route::prefix('public/v1')->middleware('api.client')->group(function () {
     Route::post('rates', [PublicRateController::class, 'rates']);
     Route::get('countries', [PublicRateController::class, 'countries']);
+    Route::get('tracking/{trackingNumber}', [PublicTrackingController::class, 'show']);
 });
 
 // Every authenticated route also passes through `record.scope` (a Shipment/Receipt/Pickup bound

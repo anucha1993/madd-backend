@@ -29,7 +29,12 @@ class RateController extends Controller
         $startedAt = microtime(true);
         /** @var ApiClient $client */
         $client = $request->attributes->get('api_client');
-        $log = ['api_client_id' => $client->id, 'ip' => $request->ip(), 'end_user_ip' => $request->attributes->get('end_user_ip')];
+        $log = ['api_client_id' => $client->id, 'endpoint' => 'rates', 'ip' => $request->ip(), 'end_user_ip' => $request->attributes->get('end_user_ip')];
+        if (! $client->allow_rates) {
+            $this->log($log + ['status_code' => 403, 'error' => 'endpoint_not_allowed'], $startedAt);
+
+            return response()->json(['error' => ['code' => 'endpoint_not_allowed', 'message' => 'API key นี้ไม่ได้เปิดใช้การเช็คราคา']], 403);
+        }
 
         try {
             $input = $request->validate([

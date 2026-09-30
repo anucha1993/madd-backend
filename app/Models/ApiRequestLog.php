@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /** One Public Rate API call (see AuthenticateApiClient / PublicRateController). */
-#[Fillable(['api_client_id', 'ip', 'end_user_ip', 'destination_country', 'total_weight', 'pieces', 'result_count', 'lowest_price', 'cached', 'status_code', 'duration_ms', 'error', 'created_at'])]
+#[Fillable(['api_client_id', 'endpoint', 'reference', 'ip', 'end_user_ip', 'destination_country', 'total_weight', 'pieces', 'result_count', 'lowest_price', 'cached', 'status_code', 'duration_ms', 'error', 'created_at'])]
 class ApiRequestLog extends Model
 {
     use MassPrunable;

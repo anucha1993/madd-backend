@@ -57,10 +57,12 @@ class ApiClientController extends Controller
 
     public function logs(Request $request)
     {
-        $data = $request->validate(['api_client_id' => ['nullable', 'integer'], 'status' => ['nullable', 'in:ok,failed']]);
+        $data = $request->validate(['api_client_id' => ['nullable', 'integer'], 'status' => ['nullable', 'in:ok,failed'], 'endpoint' => ['nullable', 'in:rates,tracking']]);
         $query = ApiRequestLog::with('apiClient:id,name')->latest('created_at')->latest('id');
-        if (! empty($data['api_client_id'])) {
-            $query->where('api_client_id', $data['api_client_id']);
+        foreach (['api_client_id', 'endpoint'] as $field) {
+            if (! empty($data[$field])) {
+                $query->where($field, $data[$field]);
+            }
         }
         if (($data['status'] ?? null) === 'ok') {
             $query->where('status_code', 200);
@@ -110,6 +112,8 @@ class ApiClientController extends Controller
                     $fail("{$value} ไม่ใช่ IP / CIDR ที่ถูกต้อง");
                 }
             }],
+            'allow_rates' => ['boolean'],
+            'allow_tracking' => ['boolean'],
             'status' => ['boolean'],
         ]);
         $data['carriers'] = $data['carriers'] ?? null ?: null;

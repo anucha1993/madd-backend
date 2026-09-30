@@ -13,7 +13,7 @@ use Illuminate\Support\Str;
  * An external site allowed to call the Public Rate API (see the create_api_clients_tables
  * migration). The plain API key exists only in the return value of issueKey().
  */
-#[Fillable(['name', 'branch_id', 'origin_city', 'origin_postcode', 'carriers', 'max_results', 'price_rounding', 'rate_limit_per_minute', 'end_user_limit_per_minute', 'allowed_ips', 'status', 'created_by'])]
+#[Fillable(['name', 'branch_id', 'origin_city', 'origin_postcode', 'carriers', 'max_results', 'price_rounding', 'rate_limit_per_minute', 'end_user_limit_per_minute', 'allowed_ips', 'allow_rates', 'allow_tracking', 'status', 'created_by'])]
 class ApiClient extends Model
 {
     use Auditable;
@@ -30,6 +30,8 @@ class ApiClient extends Model
             'carriers' => 'array',
             'allowed_ips' => 'array',
             'status' => 'boolean',
+            'allow_rates' => 'boolean',
+            'allow_tracking' => 'boolean',
             'max_results' => 'integer',
             'price_rounding' => 'integer',
             'rate_limit_per_minute' => 'integer',
