@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\ApiClient;
+use App\Models\Country;
 use App\Models\SystemAlert;
 
 /**
@@ -27,7 +28,15 @@ class PublicRateService
     public function quote(ApiClient $client, array $input): array
     {
         $isDocument = $input['shipment_type'] === 'document';
-        $city = $input['destination']['city'] ?? null ?: $input['destination']['country'];
+        $country = strtoupper($input['destination']['country']);
+        $city = $input['destination']['city'] ?? null;
+        $postcode = $input['destination']['postcode'] ?? null;
+        // Country only: quote to its main hub — DHL rejects a destination without a real city /
+        // postal code (see config/destination_defaults.php).
+        if (! $city && ! $postcode) {
+            [$city, $postcode] = config("destination_defaults.{$country}") ?? [Country::where('iso2', $country)->value('name') ?? $country, null];
+        }
+        $city = $city ?: (config("destination_defaults.{$country}.0") ?? $country);
         $shipment = [
             'from' => [
                 'country' => 'TH',
@@ -36,9 +45,9 @@ class PublicRateService
                 'address' => $input['origin']['city'] ?? null ?: $client->origin_city,
             ],
             'to' => [
-                'country' => strtoupper($input['destination']['country']),
+                'country' => $country,
                 'city' => $city,
-                'postcode' => $input['destination']['postcode'] ?? '',
+                'postcode' => $postcode ?? '',
                 'address' => $city, // DHL rejects an empty addressLine1
             ],
             'packages' => array_map(fn ($p) => [
