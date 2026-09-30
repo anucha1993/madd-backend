@@ -23,6 +23,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'perm' => \App\Http\Middleware\RequirePermission::class,
             'record.scope' => \App\Http\Middleware\EnsureRecordInScope::class,
+            'api.client' => \App\Http\Middleware\AuthenticateApiClient::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

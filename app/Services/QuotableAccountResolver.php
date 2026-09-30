@@ -26,11 +26,19 @@ class QuotableAccountResolver
      */
     public function forUser(?User $user): array
     {
+        return $this->forBranches($user && ! $user->can_access_all_branches ? $user->branches()->pluck('branches.id')->all() : null);
+    }
+
+    /**
+     * @param  array<int, int>|null  $branchIds  null = no branch restriction
+     * @return array{query: Builder, allowedServiceCodes: array<int, array<int,string>|null>}
+     */
+    public function forBranches(?array $branchIds): array
+    {
         $query = AgentAccount::with('agent')->where('status', true)->where('is_api_enabled', true);
         $allowedServiceCodes = [];
 
-        if ($user && ! $user->can_access_all_branches) {
-            $branchIds = $user->branches()->pluck('branches.id');
+        if ($branchIds !== null) {
             $assignments = BranchCarrierAccount::whereIn('branch_id', $branchIds)->get();
             $allowedAccountIds = $assignments->pluck('agent_account_id')->unique();
 

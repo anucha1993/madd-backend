@@ -6,6 +6,8 @@ use App\Http\Controllers\AddonItemController;
 use App\Http\Controllers\AgentAccountController;
 use App\Http\Controllers\AgentController;
 use App\Http\Controllers\AiController;
+use App\Http\Controllers\ApiClientController;
+use App\Http\Controllers\PublicApi\RateController as PublicRateController;
 use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\SystemAlertController;
 use App\Http\Controllers\TimelineController;
@@ -47,6 +49,12 @@ use Illuminate\Support\Facades\Route;
 
 Route::post('/login', [AuthController::class, 'login']);
 
+// ---- Public Rate API for external sites (API key, not a user session) ----
+Route::prefix('public/v1')->middleware('api.client')->group(function () {
+    Route::post('rates', [PublicRateController::class, 'rates']);
+    Route::get('countries', [PublicRateController::class, 'countries']);
+});
+
 // Every authenticated route also passes through `record.scope` (a Shipment/Receipt/Pickup bound
 // from the URL outside the user's data scope 404s). `perm:` keys come from
 // config/permissions.php. GET endpoints for reference data (countries, add-ons, branches...)
@@ -75,6 +83,15 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
     Route::get('shipments/{shipment}/timeline', [TimelineController::class, 'shipment'])->middleware('perm:shipment.timeline');
     Route::get('receipts/{receipt}/timeline', [TimelineController::class, 'receipt'])->middleware('perm:receipt.timeline');
     Route::get('pickups/{pickup}/timeline', [TimelineController::class, 'pickup'])->middleware('perm:pickup.timeline');
+    Route::middleware('perm:config.api_clients')->group(function () {
+        Route::get('api-clients', [ApiClientController::class, 'index']);
+        Route::post('api-clients', [ApiClientController::class, 'store']);
+        Route::get('api-clients/logs', [ApiClientController::class, 'logs']);
+        Route::put('api-clients/{apiClient}', [ApiClientController::class, 'update']);
+        Route::delete('api-clients/{apiClient}', [ApiClientController::class, 'destroy']);
+        Route::post('api-clients/{apiClient}/regenerate', [ApiClientController::class, 'regenerate']);
+        Route::post('api-clients/{apiClient}/test', [ApiClientController::class, 'test']);
+    });
     Route::middleware('perm:config.system_alerts')->group(function () {
         Route::get('system-alerts', [SystemAlertController::class, 'index']);
         Route::get('system-alerts/summary', [SystemAlertController::class, 'summary']);
