@@ -2,11 +2,11 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\AgentAccount;
 use App\Services\AccessService;
 use App\Services\ChargeMarkupService;
 use App\Services\DhlRateService;
 use App\Services\OpenAiService;
+use App\Services\QuotableAccountResolver;
 use App\Services\UpsRateService;
 use Illuminate\Http\Request;
 
@@ -18,6 +18,7 @@ class AiController extends Controller
         private DhlRateService $dhlRateService,
         private ChargeMarkupService $chargeMarkupService,
         private AccessService $access,
+        private QuotableAccountResolver $quotableAccounts,
     ) {
     }
 
@@ -180,7 +181,10 @@ class AiController extends Controller
             'packages' => [$package],
         ];
 
-        $accounts = AgentAccount::with('agent')->where('status', true)->get();
+        // Same accounts/services the user could really book with (their branches' assignments),
+        // not every account in the system.
+        ['query' => $accountsQuery, 'allowedServiceCodes' => $allowedServiceCodes] = $this->quotableAccounts->forUser($request->user());
+        $accounts = $accountsQuery->get();
         $upsAccounts = $accounts->filter(fn ($a) => $a->agent?->agent_code === 'UPS' && $a->client_id && $a->client_secret);
         $dhlAccounts = $accounts->filter(fn ($a) => $a->agent?->agent_code === 'DHL' && $a->basic_auth_username && $a->basic_auth_password);
 
@@ -193,6 +197,7 @@ class AiController extends Controller
                 'client_id' => $a->client_id,
                 'client_secret' => $a->client_secret,
                 'mode' => $a->mode,
+                'allowed_service_codes' => $allowedServiceCodes[$a->id] ?? null,
             ])->values()->all(),
             $shipment,
             $serviceCodes,
@@ -205,6 +210,7 @@ class AiController extends Controller
                 'basic_auth_username' => $a->basic_auth_username,
                 'basic_auth_password' => $a->basic_auth_password,
                 'mode' => $a->mode,
+                'allowed_service_codes' => $allowedServiceCodes[$a->id] ?? null,
             ])->values()->all(),
             $shipment,
         );

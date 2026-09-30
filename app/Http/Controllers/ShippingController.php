@@ -2,11 +2,10 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\AgentAccount;
-use App\Models\BranchCarrierAccount;
 use App\Services\AccessService;
 use App\Services\ChargeMarkupService;
 use App\Services\DhlRateService;
+use App\Services\QuotableAccountResolver;
 use App\Services\RateQuoteVault;
 use App\Services\UpsRateService;
 use Illuminate\Http\Request;
@@ -19,6 +18,7 @@ class ShippingController extends Controller
         private ChargeMarkupService $chargeMarkupService,
         private AccessService $access,
         private RateQuoteVault $quoteVault,
+        private QuotableAccountResolver $quotableAccounts,
     ) {
     }
 
@@ -98,35 +98,10 @@ class ShippingController extends Controller
             'upsOptionalServiceCodes' => $data['ups_optional_services'] ?? [],
         ];
 
-        // is_api_enabled=false accounts (e.g. Kerry/Flash \u2014 other couriers with no real API
-        // integration, see 2026-09-25) are only ever selectable when issuing a Receipt manually,
-        // never quotable/bookable here.
-        $accountsQuery = AgentAccount::with('agent')->where('status', true)->where('is_api_enabled', true);
-
-        // Branches without "access all" restrict quoting to their assigned accounts
-        // (branches with no assignments configured yet fall back to every active account).
-        // Each assignment may also restrict which service/product codes are allowed for that
-        // account (BranchCarrierAccount.allowed_service_codes) — collected here so it can be
-        // applied per-account below. If the same account is assigned to multiple of the user's
-        // branches, any branch with no restriction (null) wins (i.e. stays unrestricted).
+        // Active API accounts limited to the user's branches + per-branch service restrictions
+        // (see QuotableAccountResolver, shared with the AI rate chat).
         $user = $request->user();
-        $allowedServiceCodesByAccountId = [];
-        if ($user && ! $user->can_access_all_branches) {
-            $branchIds = $user->branches()->pluck('branches.id');
-            $branchCarrierAccounts = BranchCarrierAccount::whereIn('branch_id', $branchIds)->get();
-            $allowedAccountIds = $branchCarrierAccounts->pluck('agent_account_id')->unique();
-
-            if ($allowedAccountIds->isNotEmpty()) {
-                $accountsQuery->whereIn('id', $allowedAccountIds);
-            }
-
-            foreach ($branchCarrierAccounts->groupBy('agent_account_id') as $accountId => $rows) {
-                $unrestricted = $rows->contains(fn ($r) => empty($r->allowed_service_codes));
-                $allowedServiceCodesByAccountId[$accountId] = $unrestricted
-                    ? null
-                    : $rows->flatMap(fn ($r) => $r->allowed_service_codes)->unique()->values()->all();
-            }
-        }
+        ['query' => $accountsQuery, 'allowedServiceCodes' => $allowedServiceCodesByAccountId] = $this->quotableAccounts->forUser($user);
 
         if (! empty($data['agent_account_ids'])) {
             $accountsQuery->whereIn('id', $data['agent_account_ids']);
