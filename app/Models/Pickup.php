@@ -5,15 +5,16 @@ namespace App\Models;
 use App\Models\Concerns\Auditable;
 use App\Models\Concerns\ScopedByAccess;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
-use Illuminate\Support\Carbon;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 #[Fillable([
     'agent_account_id', 'created_by', 'carrier', 'status', 'pickup_date', 'ready_time', 'close_time',
     'address', 'total_weight', 'total_pieces', 'carrier_reference', 'raw_response', 'error_message',
-    'cancelled_at',
+    'cancelled_at', 'overdue_notified_at',
 ])]
 class Pickup extends Model
 {
@@ -33,7 +34,22 @@ class Pickup extends Model
             'pickup_date' => 'date',
             'total_weight' => 'decimal:2',
             'cancelled_at' => 'datetime',
+            'overdue_notified_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Requested pickups whose close time (Thai time) has passed while at least one attached
+     * shipment still hasn't been collected — same rule as the 'overdue' collection state.
+     */
+    public function scopeOverdue(Builder $query): Builder
+    {
+        $now = now('Asia/Bangkok');
+
+        return $query->where('status', 'requested')
+            ->where(fn ($q) => $q->whereDate('pickup_date', '<', $now->toDateString())
+                ->orWhere(fn ($q) => $q->whereDate('pickup_date', $now->toDateString())->where('close_time', '<', $now->format('H:i'))))
+            ->whereHas('shipments', fn ($s) => $s->whereNull('picked_up_at'));
     }
 
     public function agentAccount(): BelongsTo

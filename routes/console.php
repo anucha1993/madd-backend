@@ -14,3 +14,7 @@ Schedule::command('shipments:sync-tracking')->everyMinute();
 
 // Runs every minute but self-gates per-schedule on its own day/time (see SendScheduledReports).
 Schedule::command('reports:send-scheduled')->everyMinute();
+
+// Emails once per pickup whose close time passed with shipments still uncollected (see
+// NotifyOverduePickups) — the only warning that a courier never showed up for an on-call pickup.
+Schedule::command('pickups:notify-overdue')->everyFifteenMinutes();

@@ -54,6 +54,9 @@ class PickupController extends Controller
         if ($status = $request->query('status')) {
             $query->where('status', $status);
         }
+        if ($request->boolean('overdue')) {
+            $query->overdue();
+        }
 
         return response()->json($query->paginate(20));
     }

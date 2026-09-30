@@ -2,7 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Console\Commands\NotifyOverduePickups;
+use App\Mail\ScheduledReportMail;
 use App\Models\Branch;
+use App\Models\IntegrationSetting;
+use App\Services\SmtpSettingService;
+use Illuminate\Support\Facades\Mail;
 use App\Models\Pickup;
 use App\Models\Role;
 use App\Models\Shipment;
@@ -123,6 +128,32 @@ class PickupCollectionTest extends TestCase
         Sanctum::actingAs($this->staff());
 
         $this->getJson('/api/pickups')->assertJsonPath('data.0.collection.state', 'overdue');
+    }
+
+    public function test_overdue_pickups_are_emailed_once_and_filterable(): void
+    {
+        Mail::fake();
+        $smtp = $this->createMock(SmtpSettingService::class);
+        $smtp->method('isConfigured')->willReturn(true);
+        $smtp->method('isEnabled')->willReturn(true);
+        $this->app->instance(SmtpSettingService::class, $smtp);
+        IntegrationSetting::set(NotifyOverduePickups::RECIPIENTS_KEY, 'ops@madd.test');
+
+        $creator = $this->staff();
+        $overdue = $this->pickup([$this->shipment()], ['pickup_date' => now('Asia/Bangkok')->subDay()->toDateString(), 'created_by' => $creator->id]);
+        $this->pickup([$this->shipment(['picked_up_at' => now()])], ['pickup_date' => now('Asia/Bangkok')->subDay()->toDateString()]); // collected
+        $this->pickup([$this->shipment()]); // tomorrow
+
+        $this->artisan('pickups:notify-overdue')->assertSuccessful();
+        Mail::assertSent(ScheduledReportMail::class, fn ($mail) => $mail->hasTo('ops@madd.test') && $mail->hasTo($creator->email));
+        Mail::assertSentCount(1);
+        $this->assertNotNull($overdue->fresh()->overdue_notified_at);
+
+        $this->artisan('pickups:notify-overdue')->assertSuccessful();
+        Mail::assertSentCount(1); // not re-sent
+
+        Sanctum::actingAs($creator);
+        $this->assertSame([$overdue->id], collect($this->getJson('/api/pickups?overdue=1')->json('data'))->pluck('id')->all());
     }
 
     public function test_tracking_filter_groups(): void
