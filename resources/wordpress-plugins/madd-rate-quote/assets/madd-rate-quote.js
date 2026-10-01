@@ -63,6 +63,18 @@
       disclaimer: "Estimated price from a standard Bangkok pick-up. The final price depends on the actual pick-up address, weight and dimensions.",
       book: "Book this shipment",
       vat: "",
+      aiTitle: "Describe your shipment",
+      aiBadge: "AI",
+      aiPlaceholder: "e.g. 3 pairs of shoes and 2 T-shirts to Los Angeles",
+      aiButton: "Fill in for me",
+      aiThinking: "Reading your request…",
+      aiTry: "Try:",
+      aiExamples: ["2 boxes of clothes, 5 kg each, to Tokyo", "iPhone + charger to Sydney", "Contract documents to London"],
+      aiNotUnderstood: "Sorry, we couldn't understand that. Please describe what you're sending and where, or fill in the form below.",
+      aiNeedCountry: "Please also choose the destination country below.",
+      aiFailed: "The assistant is busy right now — please fill in the form below.",
+      aiEstimated: "AI estimate",
+      aiCheck: "Please check the estimate below before booking.",
     },
     th: {
       locale: "th-TH",
@@ -109,6 +121,18 @@
       disclaimer: "ราคาประมาณการจากการรับพัสดุในกรุงเทพฯ ราคาจริงขึ้นอยู่กับที่อยู่รับของ น้ำหนักและขนาดจริง",
       book: "จองส่งพัสดุ",
       vat: "",
+      aiTitle: "เล่าสั้นๆ ว่าจะส่งอะไร ไปที่ไหน",
+      aiBadge: "AI",
+      aiPlaceholder: "เช่น ส่งรองเท้า 3 คู่ กับเสื้อ 2 ตัว ไปลอสแองเจลิส",
+      aiButton: "กรอกให้อัตโนมัติ",
+      aiThinking: "กำลังอ่านข้อความ…",
+      aiTry: "ลองพิมพ์:",
+      aiExamples: ["เสื้อผ้า 2 กล่อง กล่องละ 5 กิโล ไปโตเกียว", "iPhone + ที่ชาร์จ ไปซิดนีย์", "เอกสารสัญญา ไปลอนดอน"],
+      aiNotUnderstood: "ขออภัย ยังไม่เข้าใจข้อความ ลองบอกว่าส่งอะไร ไปประเทศไหน หรือกรอกฟอร์มด้านล่างได้เลย",
+      aiNeedCountry: "กรุณาเลือกประเทศปลายทางด้านล่างด้วย",
+      aiFailed: "ผู้ช่วยไม่ว่างในขณะนี้ กรุณากรอกฟอร์มด้านล่าง",
+      aiEstimated: "AI ประมาณ",
+      aiCheck: "กรุณาตรวจสอบค่าที่ประมาณไว้ด้านล่างก่อนจอง",
     },
   };
 
@@ -133,6 +157,7 @@
     clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
     cal: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg>',
     arrow: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
+    sparkle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>',
   };
 
   function icon(name, cls) {
@@ -209,8 +234,8 @@
       return el("input", { name: name, type: "number", inputmode: "decimal", step: step || "0.1", min: min || "0.1", placeholder: placeholder || "" });
     }
 
-    function packageRow() {
-      var row = el("div", { class: "madd-quote__package" });
+    function packageRow(values) {
+      var row = el("div", { class: "madd-quote__package" + (values && values.estimated ? " is-ai" : "") });
       var remove = el("button", { type: "button", class: "madd-quote__remove", title: t.remove, "aria-label": t.remove }, [icon("trash")]);
       remove.addEventListener("click", function () {
         row.remove();
@@ -223,7 +248,18 @@
       row.appendChild(field(t.height, num("height", "—", "1", "1"), t.cm, "is-dim"));
       row.appendChild(field(t.qty, num("quantity", "1", "1", "1"), "", "is-qty"));
       row.appendChild(remove);
-      row.addEventListener("input", refresh);
+      if (values && values.estimated) row.appendChild(el("span", { class: "madd-quote__ai-tag", title: values.item || "" }, [icon("sparkle"), el("span", { text: t.aiEstimated })]));
+      if (values) {
+        ["weight", "length", "width", "height", "quantity"].forEach(function (k) {
+          if (values[k] != null) row.querySelector('[name="' + k + '"]').value = values[k];
+        });
+      }
+      row.addEventListener("input", function () {
+        row.classList.remove("is-ai");
+        var tag = row.querySelector(".madd-quote__ai-tag");
+        if (tag) tag.remove();
+        refresh();
+      });
       return row;
     }
 
@@ -264,6 +300,105 @@
       return el("label", { class: "madd-quote__type" }, [input, el("span", { class: "madd-quote__type-body" }, [icon(iconName), el("span", {}, [el("b", { text: label }), el("small", { text: hint })])])]);
     }
 
+    // ---------- AI assistant: sentence → form ----------
+    var aiEnabled = root.getAttribute("data-ai") !== "off" && !!config.apiUrl;
+    var aiInput = el("textarea", { class: "madd-quote__ai-input", rows: "2", maxlength: "500", placeholder: t.aiPlaceholder });
+    var aiButton = el("button", { type: "button", class: "madd-quote__ai-button" }, [icon("sparkle"), el("span", { text: t.aiButton })]);
+    var aiNote = el("p", { class: "madd-quote__ai-note", hidden: true });
+    var aiBox = el("div", { class: "madd-quote__ai" }, [
+      el("div", { class: "madd-quote__ai-head" }, [el("span", { class: "madd-quote__ai-badge" }, [icon("sparkle"), el("span", { text: t.aiBadge })]), el("b", { text: t.aiTitle })]),
+      el("div", { class: "madd-quote__ai-row" }, [aiInput, aiButton]),
+      el(
+        "div",
+        { class: "madd-quote__ai-examples" },
+        [el("span", { text: t.aiTry })].concat(
+          t.aiExamples.map(function (ex) {
+            var chip = el("button", { type: "button", class: "madd-quote__ai-chip", text: ex });
+            chip.addEventListener("click", function () {
+              aiInput.value = ex;
+              askAi();
+            });
+            return chip;
+          })
+        )
+      ),
+      aiNote,
+    ]);
+
+    function aiMessage(text, kind) {
+      aiNote.textContent = text || "";
+      aiNote.className = "madd-quote__ai-note" + (kind ? " is-" + kind : "");
+      aiNote.hidden = !text;
+    }
+
+    function applyAi(data) {
+      if (!data || !data.understood || !data.packages || !data.packages.length) {
+        aiMessage(t.aiNotUnderstood, "warn");
+        return;
+      }
+      (data.shipment_type === "document" ? typeDoc : typeParcel).checked = true;
+      city.value = (data.destination && data.destination.city) || "";
+      postcode.value = (data.destination && data.destination.postcode) || "";
+      packages.innerHTML = "";
+      data.packages.forEach(function (p) {
+        packages.appendChild(packageRow(p));
+      });
+      refresh();
+      var estimated = data.packages.some(function (p) {
+        return p.estimated;
+      });
+      countriesReady.then(function () {
+        var code = data.destination && data.destination.country;
+        var hasOption = code && select.querySelector('option[value="' + code + '"]');
+        if (hasOption) select.value = code;
+        aiMessage([data.note, estimated ? t.aiCheck : "", hasOption ? "" : t.aiNeedCountry].filter(Boolean).join(" "), hasOption ? "ok" : "warn");
+        if (hasOption) {
+          if (form.requestSubmit) form.requestSubmit();
+          else submit.click();
+        } else {
+          select.focus();
+        }
+      });
+    }
+
+    function askAi() {
+      var text = aiInput.value.trim();
+      if (text.length < 3) return aiInput.focus();
+      aiButton.disabled = true;
+      aiBox.classList.add("is-busy");
+      aiMessage(t.aiThinking, "busy");
+      fetch(config.apiUrl + "/public/v1/web/ai-parse", { method: "POST", body: new URLSearchParams({ text: text, lang: lang }), credentials: "omit" })
+        .then(function (res) {
+          return res.json().then(function (json) {
+            return { ok: res.ok, status: res.status, data: json };
+          });
+        })
+        .then(function (res) {
+          if (res.ok) return applyAi(res.data);
+          if (res.status === 503) {
+            aiBox.hidden = true; // AI switched off in MADD
+            return;
+          }
+          aiMessage(res.status === 429 ? t.errRate : t.aiFailed, "warn");
+        })
+        .catch(function () {
+          aiMessage(t.aiFailed, "warn");
+        })
+        .finally(function () {
+          aiButton.disabled = false;
+          aiBox.classList.remove("is-busy");
+        });
+    }
+
+    aiButton.addEventListener("click", askAi);
+    aiInput.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        askAi();
+      }
+    });
+    if (aiEnabled) form.appendChild(aiBox);
+
     form.appendChild(
       el("div", { class: "madd-quote__section" }, [
         el("div", { class: "madd-quote__section-title", text: t.destination }),
@@ -295,7 +430,7 @@
     typeDoc.addEventListener("change", refresh);
 
     // ---------- countries ----------
-    request("/public/v1/web/countries", null, "madd_quote_countries").then(function (res) {
+    var countriesReady = request("/public/v1/web/countries", null, "madd_quote_countries").then(function (res) {
       var list = (res.ok && res.data && res.data.countries) || [];
       var named = list.map(function (c) {
         return { code: c.iso2, name: countryName(c.iso2, c.name) };

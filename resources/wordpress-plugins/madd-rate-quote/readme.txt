@@ -1,7 +1,7 @@
 === MADD Rate Quote ===
 Requires at least: 5.8
 Requires PHP: 7.4
-Stable tag: 1.1.0
+Stable tag: 1.2.0
 
 ฟอร์มเช็คราคาค่าส่งระหว่างประเทศ (UPS / DHL) — ราคาขายเดียวกับหน้าร้าน จากระบบ MADD
 
@@ -14,6 +14,12 @@ Stable tag: 1.1.0
 4. ใส่ shortcode ในหน้าที่ต้องการ
      [madd_rate_quote lang="en"]   ภาษาอังกฤษ
      [madd_rate_quote lang="th"]   ภาษาไทย (ไม่ใส่ lang = ตามภาษาของหน้า Polylang/WPML)
+
+== ผู้ช่วย AI ==
+- ช่อง "เล่าสั้นๆ ว่าจะส่งอะไร" ด้านบนฟอร์ม: ลูกค้าพิมพ์เป็นประโยค → AI กรอกปลายทาง / ประเภท / กล่อง ให้ แล้วเช็คราคาทันที
+- ไม่บอกน้ำหนัก/ขนาด → AI ประมาณจากสินค้า (มีป้าย "AI estimate" ให้ลูกค้าตรวจ)
+- AI ไม่เคยกำหนดราคา — ราคามาจาก UPS/DHL + Mark-up ของ MADD เท่านั้น
+- ปิดช่องนี้: [madd_rate_quote lang=en ai=off] · ปิดทั้งระบบได้ที่ MADD › API Integrations (AI)
 
 == การทำงาน ==
 - Browser ของลูกค้าเรียก MADD โดยตรง (ไม่ผ่าน Server เว็บ) — ถ้ายังไม่ได้ลงทะเบียนเว็บไซต์ จะใช้ทางสำรองผ่าน Server + API Key

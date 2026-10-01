@@ -179,3 +179,53 @@
   .madd-quote__types { grid-template-columns: 1fr; }
   .madd-quote__grid { grid-template-columns: 1fr; }
 }
+
+/* ---------- AI assistant ---------- */
+.madd-quote__ai {
+  position: relative; margin-bottom: 28px; padding: 18px; border-radius: 18px;
+  background: linear-gradient(135deg, #fffaf0 0%, #f4f8fb 100%); border: 1px solid #f3e3b5;
+}
+.madd-quote__ai[hidden] { display: none !important; }
+.madd-quote__ai-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-size: 15px; color: var(--mq-ink); }
+.madd-quote__ai-badge {
+  display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 999px;
+  background: linear-gradient(135deg, #f5b400, #ff8a00); color: #fff; font-size: 11.5px; font-weight: 800; letter-spacing: .04em;
+}
+.madd-quote__ai-badge .madd-quote__icon { width: 13px; height: 13px; }
+.madd-quote__ai-row { display: flex; gap: 10px; align-items: stretch; }
+.madd-quote textarea.madd-quote__ai-input {
+  flex: 1; min-width: 0; min-height: 56px; margin: 0 !important; padding: 15px 16px !important; resize: none;
+  border: 1px solid #ecdcae !important; border-radius: 14px !important; background: #fff !important; box-shadow: none !important;
+  font: inherit; font-size: 15.5px !important; line-height: 1.5; color: var(--mq-ink) !important;
+}
+.madd-quote textarea.madd-quote__ai-input:focus { outline: 0 !important; border-color: var(--mq-gold) !important; box-shadow: 0 0 0 4px rgba(245, 180, 0, .15) !important; }
+.madd-quote__ai-button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; flex: 0 0 auto; min-height: 56px; margin: 0 !important; padding: 0 20px !important;
+  border: 0 !important; border-radius: 14px !important; background: linear-gradient(135deg, #f5b400 0%, #ff9d00 100%) !important;
+  color: #3b2600 !important; font: inherit; font-weight: 800 !important; font-size: 15px !important; text-transform: none !important; cursor: pointer;
+  box-shadow: 0 10px 22px -12px rgba(200, 120, 0, .8) !important; line-height: 1.2 !important;
+}
+.madd-quote__ai-button:disabled { opacity: .7; cursor: wait; }
+.madd-quote__ai.is-busy .madd-quote__ai-button .madd-quote__icon { animation: mq-spin 1s linear infinite; }
+.madd-quote__ai-examples { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 10px; font-size: 12.5px; color: var(--mq-muted); }
+.madd-quote__ai-chip {
+  margin: 0 !important; padding: 5px 11px !important; border: 1px solid #e6dcc2 !important; border-radius: 999px !important;
+  background: rgba(255, 255, 255, .8) !important; color: var(--mq-ink) !important; font: inherit; font-size: 12.5px !important;
+  text-transform: none !important; cursor: pointer; box-shadow: none !important; min-height: 0 !important; line-height: 1.3 !important;
+}
+.madd-quote__ai-chip:hover { border-color: var(--mq-gold) !important; background: #fff !important; }
+.madd-quote__ai-note { margin: 12px 0 0 !important; padding: 10px 12px; border-radius: 12px; font-size: 13.5px; background: #fff; color: var(--mq-ink); }
+.madd-quote__ai-note.is-ok { background: #ecfbf2; color: #0c6b37; }
+.madd-quote__ai-note.is-warn { background: #fff4e0; color: #8a5a00; }
+.madd-quote__ai-note.is-busy { color: var(--mq-muted); }
+.madd-quote__package.is-ai { border-color: #f3dc9b; background: #fffcf3; position: relative; }
+.madd-quote__ai-tag {
+  position: absolute; top: -10px; right: 14px; display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border-radius: 999px;
+  background: #f5b400; color: #3b2600; font-size: 11px; font-weight: 800;
+}
+.madd-quote__ai-tag .madd-quote__icon { width: 12px; height: 12px; }
+@media (max-width: 760px) {
+  .madd-quote__ai { padding: 14px; }
+  .madd-quote__ai-row { flex-direction: column; }
+  .madd-quote__ai-button { min-height: 50px; }
+}

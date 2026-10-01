@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MADD Rate Quote
  * Description: ฟอร์มเช็คราคาค่าส่งระหว่างประเทศ (UPS / DHL) ราคาเดียวกับหน้าร้าน จากระบบ MADD — shortcode [madd_rate_quote] (ภาษาอังกฤษ: [madd_rate_quote lang="en"])
- * Version: 1.1.0
+ * Version: 1.2.0
  * Requires at least: 5.8
  * Requires PHP: 7.4
  * Author: MADD
@@ -20,7 +20,7 @@ if (! defined('ABSPATH')) {
 final class Madd_Rate_Quote
 {
     const OPTION = 'madd_rate_quote';
-    const VERSION = '1.1.0';
+    const VERSION = '1.2.0';
     const NONCE = 'madd_rate_quote';
     const COUNTRIES_CACHE = 'madd_rate_quote_countries';
 
@@ -266,7 +266,7 @@ final class Madd_Rate_Quote
 
     public static function shortcode($atts = [])
     {
-        $atts = shortcode_atts(['lang' => '', 'title' => ''], $atts, 'madd_rate_quote');
+        $atts = shortcode_atts(['lang' => '', 'title' => '', 'ai' => 'on'], $atts, 'madd_rate_quote');
         // Letters only — tolerates lang=”en” when an editor turned the quotes into curly ones.
         $lang = strtolower(preg_replace('/[^a-z]/i', '', (string) $atts['lang']));
         if (! in_array($lang, ['th', 'en'], true)) {
@@ -287,7 +287,7 @@ final class Madd_Rate_Quote
         ]);
 
         ob_start(); ?>
-        <div class="madd-quote" data-lang="<?php echo esc_attr($lang); ?>">
+        <div class="madd-quote" data-lang="<?php echo esc_attr($lang); ?>" data-ai="<?php echo preg_replace('/[^a-z]/i', '', strtolower((string) $atts['ai'])) === 'off' ? 'off' : 'on'; ?>">
             <?php if ($atts['title']) : ?><h3 class="madd-quote__heading"><?php echo esc_html($atts['title']); ?></h3><?php endif; ?>
             <form class="madd-quote__form" novalidate></form>
             <div class="madd-quote__result" aria-live="polite"></div>
