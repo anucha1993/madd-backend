@@ -16,6 +16,9 @@ class ApiRequestLog extends Model
 
     public const UPDATED_AT = null;
 
+    /** Kept for a year of usage stats (rows hold visitor IPs, so not forever). */
+    public const RETENTION_DAYS = 365;
+
     protected function casts(): array
     {
         return [
@@ -33,6 +36,6 @@ class ApiRequestLog extends Model
 
     public function prunable(): Builder
     {
-        return static::where('created_at', '<', now()->subDays(180));
+        return static::where('created_at', '<', now()->subDays(self::RETENTION_DAYS));
     }
 }

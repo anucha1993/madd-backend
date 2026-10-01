@@ -19,5 +19,5 @@ Schedule::command('reports:send-scheduled')->everyMinute();
 // NotifyOverduePickups) — the only warning that a courier never showed up for an on-call pickup.
 Schedule::command('pickups:notify-overdue')->everyFifteenMinutes();
 
-// Drops Public Rate API request logs older than 180 days (ApiRequestLog::prunable).
+// Drops Public Rate API request logs older than ApiRequestLog::RETENTION_DAYS (365) days.
 Schedule::command('model:prune', ['--model' => [\App\Models\ApiRequestLog::class]])->daily();
