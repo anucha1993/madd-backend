@@ -180,6 +180,7 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
     Route::middleware('perm:shipment.view')->group(function () {
         Route::get('shipments', [ShipmentController::class, 'index']);
         Route::get('shipments/stats', [ShipmentController::class, 'stats']);
+        Route::put('shipments/{shipment}/branch', [ShipmentController::class, 'assignBranch'])->middleware('perm:shipment.create');
         Route::get('shipments/{shipment}/label', [ShipmentController::class, 'label']);
         Route::get('shipments/{shipment}/labels/all', [ShipmentController::class, 'allLabels']);
         Route::get('shipments/{shipment}/waybill', [ShipmentController::class, 'waybill']);
@@ -280,9 +281,13 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
         Route::apiResource('insurance-country-caps', InsuranceCountryCapController::class)->only(['store', 'update', 'destroy']);
     });
 
-    Route::get('charge-codes', [ChargeCodeController::class, 'index']);
-    Route::get('markup-rules', [MarkupRuleController::class, 'index']);
-    Route::get('charge-fixed-overrides', [ChargeFixedOverrideController::class, 'index']);
+    // Markup values let anyone who sees the sell price work out the carrier cost — only the
+    // Mark-up / Agent Accounts settings screens (their only users) may read them.
+    Route::middleware('perm:config.markup,config.agent_accounts')->group(function () {
+        Route::get('charge-codes', [ChargeCodeController::class, 'index']);
+        Route::get('markup-rules', [MarkupRuleController::class, 'index']);
+        Route::get('charge-fixed-overrides', [ChargeFixedOverrideController::class, 'index']);
+    });
     Route::middleware('perm:config.markup')->group(function () {
         Route::apiResource('charge-codes', ChargeCodeController::class)->only(['store', 'update', 'destroy']);
         Route::post('charge-formula/preview', [ChargeFormulaController::class, 'preview']);

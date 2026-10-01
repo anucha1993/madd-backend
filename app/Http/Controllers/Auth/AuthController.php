@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\AccessService;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
@@ -22,15 +23,25 @@ class AuthController extends Controller
             'password' => ['required', 'string'],
         ]);
 
+        // 5 failed attempts per username + IP per minute.
+        $throttleKey = 'login:'.mb_strtolower($credentials['username']).'|'.$request->ip();
+        if (RateLimiter::tooManyAttempts($throttleKey, 5)) {
+            throw ValidationException::withMessages([
+                'username' => ['เข้าสู่ระบบผิดหลายครั้งเกินไป กรุณารอ '.RateLimiter::availableIn($throttleKey).' วินาทีแล้วลองใหม่'],
+            ])->status(429);
+        }
+
         $user = User::where('username', $credentials['username'])->first();
 
         if (! $user || ! Hash::check($credentials['password'], $user->password)) {
+            RateLimiter::hit($throttleKey, 60);
             app(\App\Services\AuditLogger::class)->record('login_failed', 'User', ['username' => ['old' => null, 'new' => $credentials['username']]], $credentials['username'], $user?->id, false);
             throw ValidationException::withMessages([
                 'username' => ['ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง'],
             ]);
         }
 
+        RateLimiter::clear($throttleKey);
         $token = $user->createToken('madd-frontend')->plainTextToken;
         app(\App\Services\AuditLogger::class)->record('login', $user, [], $user->username, null, $user);
 

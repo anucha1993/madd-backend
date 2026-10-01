@@ -10,6 +10,7 @@ use App\Services\DhlTrackingService;
 use App\Services\TrackingStatusClassifier;
 use App\Services\UpsTrackingService;
 use Illuminate\Console\Command;
+use Illuminate\Support\Carbon;
 
 /**
  * Periodically syncs the carrier's REAL delivery progress into `shipments.tracking_status`
@@ -45,7 +46,9 @@ class SyncShipmentTracking extends Command
 
             $intervalMinutes = (int) (IntegrationSetting::get(self::INTERVAL_KEY) ?: 15);
             $lastRunAt = IntegrationSetting::get(self::LAST_RUN_KEY);
-            if ($lastRunAt && now()->diffInMinutes($lastRunAt) < $intervalMinutes) {
+            // Carbon 3 diffs are signed: now()->diffInMinutes($past) is NEGATIVE, which made this
+            // check always true and silently stopped every scheduled run after the first.
+            if ($lastRunAt && Carbon::parse($lastRunAt)->diffInMinutes(now(), absolute: true) < $intervalMinutes) {
                 return self::SUCCESS;
             }
         }

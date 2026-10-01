@@ -10,6 +10,7 @@ use App\Models\BranchCarrierAccount;
 use App\Models\Shipment;
 use App\Models\Supply;
 use App\Models\SystemAlert;
+use App\Models\User;
 use App\Services\AccessService;
 use App\Services\DhlShipmentService;
 use App\Services\PickupCanceller;
@@ -18,6 +19,9 @@ use App\Services\RateQuoteVault;
 use App\Services\SupplyStockService;
 use App\Services\UpsShipmentService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
+use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Facades\Cache;
 use Mpdf\Mpdf;
 
 class ShipmentController extends Controller
@@ -55,26 +59,45 @@ class ShipmentController extends Controller
     ];
 
     /**
-     * Which Branch "booked" this shipment — drives the header info on any Receipt/Tax Invoice
-     * issued for it later. Prefers a branch that's actually configured to use the chosen agent
-     * account (see BranchCarrierAccount) when the staff member belongs to more than one branch,
-     * else falls back to their first branch. Null if the user has no branch at all.
+     * Branches this user may book for: every active branch for "access all branches" users,
+     * otherwise their own branches.
+     *
+     * @return \Illuminate\Support\Collection<int, int>
      */
-    private function resolveBranchId(Request $request, int $agentAccountId): ?int
+    public static function bookingBranchIds(?User $user): \Illuminate\Support\Collection
     {
-        $userBranchIds = $request->user()?->branches()->pluck('branches.id') ?? collect();
-        if ($userBranchIds->isEmpty()) {
-            // No branch assigned to this user at all — if the whole system only has ONE branch
-            // configured, default to it rather than leaving branch_id null (which silently makes
-            // the shipment permanently ineligible for Receipt/Tax Invoice issuance later).
-            return Branch::count() === 1 ? Branch::value('id') : null;
+        if (! $user) {
+            return collect();
         }
 
-        $matching = BranchCarrierAccount::where('agent_account_id', $agentAccountId)
-            ->whereIn('branch_id', $userBranchIds)
-            ->value('branch_id');
+        return $user->can_access_all_branches
+            ? Branch::where('status', true)->orderBy('id')->pluck('id')
+            : $user->branches()->pluck('branches.id');
+    }
 
-        return $matching ?? $userBranchIds->first();
+    /**
+     * Which Branch "booked" this shipment — drives the Receipt/Tax Invoice header, document
+     * numbering and stock. A user with exactly one branch is always bound to it; a user who
+     * can book for several (or all) must pick one (`branch_id`) — previously the branch was
+     * guessed and "all branches" users got none at all, which blocked billing.
+     */
+    private function resolveBranchId(Request $request, ?int $chosen): int
+    {
+        $allowed = self::bookingBranchIds($request->user());
+        if ($allowed->count() === 1) {
+            return (int) $allowed->first();
+        }
+        if ($allowed->isEmpty()) {
+            if (Branch::count() === 1) {
+                return (int) Branch::value('id');
+            }
+            throw ValidationException::withMessages(['branch_id' => 'บัญชีผู้ใช้นี้ยังไม่ได้ผูกกับสาขา กรุณาติดต่อผู้ดูแลระบบ']);
+        }
+        if (! $chosen || ! $allowed->contains($chosen)) {
+            throw ValidationException::withMessages(['branch_id' => 'กรุณาเลือกสาขาที่จอง Shipment นี้']);
+        }
+
+        return $chosen;
     }
 
     /**
@@ -130,16 +153,18 @@ class ShipmentController extends Controller
         if ($customerType = $request->query('customer_type')) {
             $query->where('customer_type', $customerType);
         }
+        // Dates picked in the UI are Thai calendar days; created_at is stored in UTC.
         if ($dateFrom = $request->query('date_from')) {
-            $query->whereDate('created_at', '>=', $dateFrom);
+            $query->where('created_at', '>=', Carbon::parse($dateFrom, 'Asia/Bangkok')->startOfDay()->utc());
         }
         if ($dateTo = $request->query('date_to')) {
-            $query->whereDate('created_at', '<=', $dateTo);
+            $query->where('created_at', '<=', Carbon::parse($dateTo, 'Asia/Bangkok')->endOfDay()->utc());
         }
         // For the Issue Receipt/Tax Invoice picker — only shipments never attached to any
         // Receipt yet (see receipt_shipment's global unique-per-shipment lock).
         if ($request->boolean('unbilled')) {
-            $query->whereDoesntHave('receipts');
+            // Voided / failed shipments can't be billed (see ReceiptController::assertShipmentsBillable).
+            $query->where('status', 'booked')->whereDoesntHave('receipts');
         }
 
         return response()->json($query->paginate(20));
@@ -153,9 +178,10 @@ class ShipmentController extends Controller
      */
     public function stats(Request $request)
     {
-        $today = now()->startOfDay();
-        $monthStart = now()->startOfMonth();
-        $monthEnd = now()->endOfMonth();
+        // Thai business day/month, converted to the UTC the timestamps are stored in.
+        $today = now('Asia/Bangkok')->startOfDay()->utc();
+        $monthStart = now('Asia/Bangkok')->startOfMonth()->utc();
+        $monthEnd = now('Asia/Bangkok')->endOfMonth()->utc();
         // Same data scope as index() — the KPIs must only ever count what the list can show.
         $scoped = fn () => Shipment::visibleTo($request->user());
         $user = $request->user();
@@ -168,7 +194,9 @@ class ShipmentController extends Controller
             'today_count' => $card('today', fn () => $scoped()->where('status', 'booked')->where('created_at', '>=', $today)->count()),
             'month_count' => $card('month', fn () => $scoped()->where('status', 'booked')->whereBetween('created_at', [$monthStart, $monthEnd])->count()),
             'month_revenue' => $canSeePricing ? $card('revenue', fn () => (float) $scoped()->where('status', 'booked')->whereBetween('created_at', [$monthStart, $monthEnd])->sum('order_total')) : null,
-            'in_transit_count' => $card('in_transit', fn () => $scoped()->where('status', 'booked')->count()),
+            // Same rule as the list's "In transit" filter: collected, not yet delivered.
+            'in_transit_count' => $card('in_transit', fn () => $scoped()->where('status', 'booked')->whereNotNull('picked_up_at')
+                ->where(fn ($q) => $q->whereNull('tracking_status')->orWhere('tracking_status', '!=', 'delivered'))->count()),
             'cancelled_count' => $card('cancelled', fn () => $scoped()->whereIn('status', ['voided', 'failed'])->whereBetween('created_at', [$monthStart, $monthEnd])->count()),
         ]);
     }
@@ -186,6 +214,7 @@ class ShipmentController extends Controller
 
         $data = $request->validate([
             'agent_account_id' => ['required', 'integer'],
+            'branch_id' => ['nullable', 'integer'],
             'carrier' => ['required', 'string', 'in:UPS,DHL'],
             'service_code' => ['required', 'string'],
             'service_label' => ['nullable', 'string'],
@@ -415,10 +444,11 @@ class ShipmentController extends Controller
         if ($priceError = $this->checkSellTotals($data, $fullQuote ?? null)) {
             return response()->json(['error' => $priceError], 422);
         }
+        $branchId = $this->resolveBranchId($request, isset($data['branch_id']) ? (int) $data['branch_id'] : null);
 
         $recordAttributes = [
             'agent_account_id' => $account->id,
-            'branch_id' => $this->resolveBranchId($request, $account->id),
+            'branch_id' => $branchId,
             'created_by' => $request->user()?->id,
             'carrier' => $data['carrier'],
             'service_code' => $data['service_code'],
@@ -457,6 +487,22 @@ class ShipmentController extends Controller
             'rate_quote' => $rateQuote,
         ];
 
+        // Idempotency: a double click or a retried request must not create a second REAL waybill
+        // (DHL can't be cancelled by API). Keyed by the client's Idempotency-Key, else the quote.
+        $idempotencyKey = $request->header('Idempotency-Key') ?: ($data['rate_quote']['quoteId'] ?? null);
+        $bookingLock = null;
+        $doneKey = null;
+        if ($idempotencyKey) {
+            $doneKey = 'booking-done:'.sha1($idempotencyKey);
+            if ($existingId = Cache::get($doneKey)) {
+                return response()->json(Shipment::find($existingId));
+            }
+            $bookingLock = Cache::lock('booking:'.sha1($idempotencyKey), 180);
+            if (! $bookingLock->get()) {
+                return response()->json(['error' => 'กำลังจอง Shipment นี้อยู่ กรุณารอสักครู่ (ไม่ต้องกดจองซ้ำ)'], 409);
+            }
+        }
+
         try {
             if ($data['carrier'] === 'DHL') {
                 $result = $this->dhlShipmentService->createShipment([
@@ -476,6 +522,7 @@ class ShipmentController extends Controller
             // A failed carrier request never actually created a real shipment with the carrier —
             // don't persist a "failed" Shipment row for it (previously did, cluttering the list
             // with duplicate-looking attempts every time staff retried after a rejection).
+            $bookingLock?->release();
             return response()->json(['error' => $e->getMessage()], 422);
         }
 
@@ -500,24 +547,44 @@ class ShipmentController extends Controller
             );
         }
 
-        $record = Shipment::create($recordAttributes + [
-            'status' => 'booked',
-            'tracking_number' => $result['trackingNumber'],
-            'pieces' => $pieceRecords,
-            'label_storage_key' => $labelStorageKey,
-            'waybill_storage_key' => $this->uploadShipmentDocument('waybill', $result['trackingNumber'], $result['waybillBase64'] ?? null, $result['waybillFormat'] ?? null),
-            // Page 1 = the carrier's own invoice (from the Shipment API response), page 2+ = the
-            // staff-uploaded invoice file, if any — merged into one PDF for both UPS and DHL.
-            'commercial_invoice_storage_key' => $this->buildCombinedCommercialInvoiceStorageKey(
-                $result['trackingNumber'],
-                $result['commercialInvoiceBase64'] ?? null,
-                $result['commercialInvoiceFormat'] ?? null,
-                $shipment['uploadedInvoice'] ?? null,
-            ),
-            'raw_response' => $result['raw'],
-            'raw_request' => $result['rawRequest'] ?? null,
-            'carrier_http_status' => $result['httpStatus'] ?? null,
-        ]);
+        try {
+            $record = Shipment::create($recordAttributes + [
+                'status' => 'booked',
+                'tracking_number' => $result['trackingNumber'],
+                'pieces' => $pieceRecords,
+                'label_storage_key' => $labelStorageKey,
+                'waybill_storage_key' => $this->uploadShipmentDocument('waybill', $result['trackingNumber'], $result['waybillBase64'] ?? null, $result['waybillFormat'] ?? null),
+                // Page 1 = the carrier's own invoice (from the Shipment API response), page 2+ = the
+                // staff-uploaded invoice file, if any — merged into one PDF for both UPS and DHL.
+                'commercial_invoice_storage_key' => $this->buildCombinedCommercialInvoiceStorageKey(
+                    $result['trackingNumber'],
+                    $result['commercialInvoiceBase64'] ?? null,
+                    $result['commercialInvoiceFormat'] ?? null,
+                    $shipment['uploadedInvoice'] ?? null,
+                ),
+                'raw_response' => $result['raw'],
+                'raw_request' => $result['rawRequest'] ?? null,
+                'carrier_http_status' => $result['httpStatus'] ?? null,
+            ]);
+        } catch (\Throwable $e) {
+            // The carrier HAS issued this waybill — record it so it can be recovered / cancelled
+            // instead of silently vanishing (and staff booking it again).
+            report($e);
+            SystemAlert::record('booking_persist', "จองกับ {$data['carrier']} สำเร็จแต่บันทึกลงระบบไม่สำเร็จ: {$result['trackingNumber']}", [
+                'tracking_number' => $result['trackingNumber'],
+                'carrier' => $data['carrier'],
+                'agent_account_id' => $account->id,
+                'user_id' => $request->user()?->id,
+                'error' => mb_substr($e->getMessage(), 0, 300),
+            ]);
+            $bookingLock?->release();
+
+            return response()->json(['error' => "จองกับ Carrier สำเร็จแล้ว (เลข {$result['trackingNumber']}) แต่บันทึกลงระบบไม่สำเร็จ — ห้ามจองซ้ำ กรุณาแจ้งผู้ดูแลระบบ"], 500);
+        }
+        if ($doneKey) {
+            Cache::put($doneKey, $record->id, now()->addDay());
+        }
+        $bookingLock?->release();
         // The carrier booking already succeeded — a stock error must never fail the response.
         try {
             $this->supplyStock->syncShipment($record, true, $request->user());
@@ -781,6 +848,30 @@ class ShipmentController extends Controller
         } catch (\Throwable $e) {
             report($e);
         }
+    }
+
+    /**
+     * Sets the booking branch of a shipment that has none (bookings made before the branch
+     * became mandatory) — needed before a Receipt can be issued for it. Only to a branch the
+     * user may book for; never changes an existing branch.
+     */
+    public function assignBranch(Request $request, Shipment $shipment)
+    {
+        $data = $request->validate(['branch_id' => ['required', 'integer']]);
+        if ($shipment->branch_id) {
+            return response()->json(['error' => 'Shipment นี้มีสาขาแล้ว'], 422);
+        }
+        if (! self::bookingBranchIds($request->user())->contains((int) $data['branch_id'])) {
+            return response()->json(['error' => 'คุณไม่มีสิทธิ์กำหนด Shipment ให้สาขานี้'], 403);
+        }
+        $shipment->update(['branch_id' => (int) $data['branch_id']]);
+        try {
+            $this->supplyStock->syncShipment($shipment->fresh(), $shipment->status === 'booked', $request->user());
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
+        return $shipment->fresh()->load('agentAccount.agent', 'branch');
     }
 
     /** Staff saw the courier collect this one shipment (see Shipment::markPickedUpManually). */

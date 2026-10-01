@@ -69,7 +69,8 @@ class DocumentNumberService
 
     private function render(string $pattern, int $number): string
     {
-        $now = now();
+        // {YYYY}/{MM}/{DD} follow the Thai business date, like the document's issued_date.
+        $now = now('Asia/Bangkok');
         $rendered = str_replace(
             ['{YYYY}', '{YYY}', '{YY}', '{MM}', '{DD}'],
             [$now->format('Y'), substr($now->format('Y'), -3), $now->format('y'), $now->format('m'), $now->format('d')],

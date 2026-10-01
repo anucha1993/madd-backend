@@ -39,7 +39,9 @@ class AuthenticateWebOrigin
             }
         }
 
-        $client->forceFill(['last_used_at' => now()])->saveQuietly();
+        // Plain update: saving the model would bump updated_at, which is part of the public
+        // rate cache key — every request would then miss the cache.
+        ApiClient::whereKey($client->id)->toBase()->update(['last_used_at' => now()]);
         $request->attributes->set('api_client', $client);
         $request->attributes->set('end_user_ip', $ip);
 

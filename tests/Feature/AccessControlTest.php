@@ -82,6 +82,9 @@ class AccessControlTest extends TestCase
     {
         $inA = $this->shipment($this->branchA);
         $inB = $this->shipment($this->branchB);
+        // In Transit counts collected, not-yet-delivered shipments.
+        $inA->forceFill(['picked_up_at' => now()])->save();
+        $inB->forceFill(['picked_up_at' => now()])->save();
         Sanctum::actingAs($this->userWithRole('staff', [$this->branchA->id]));
 
         $ids = collect($this->getJson('/api/shipments')->assertOk()->json('data'))->pluck('id')->all();

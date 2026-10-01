@@ -61,7 +61,9 @@ class ReceiptController extends Controller
             $query->where('grand_total', '<=', $request->query('max_total'));
         }
 
-        return response()->json($query->paginate(20));
+        // Newest first; a Cash Receipt / Tax Invoice pair is created together, so the pair stays
+        // adjacent in this order.
+        return response()->json($query->paginate(min(100, max(10, (int) $request->query('per_page', 20)))));
     }
 
     public function show(Receipt $receipt)
@@ -240,7 +242,9 @@ class ReceiptController extends Controller
                 $commonFields = [
                     'receipt_group_id' => $groupId,
                     'branch_id' => $branchId,
-                    'issued_date' => now()->toDateString(),
+                    // Business date in Thailand — the app clock is UTC, so 00:00–06:59 Bangkok
+                    // would otherwise be dated the previous day (and month, on the 1st).
+                    'issued_date' => now('Asia/Bangkok')->toDateString(),
                     'shipment_total_snapshot' => $targetTotal,
                     'manual_shipment_refs' => ! empty($manualRefs) ? $manualRefs : null,
                     'billing_customer_id' => $data['billing_customer_id'] ?? null,
@@ -536,6 +540,15 @@ class ReceiptController extends Controller
     {
         if ($shipments->count() === 0) {
             throw ValidationException::withMessages(['shipment_ids' => 'ไม่พบ Shipment ที่เลือก']);
+        }
+
+        // A voided / failed shipment was never delivered as a service — it must not be billed.
+        $inactive = $shipments->filter(fn ($s) => $s->status !== 'booked');
+        if ($inactive->isNotEmpty()) {
+            $numbers = $inactive->map(fn ($s) => $s->tracking_number ?: '#'.$s->id)->implode(', ');
+            throw ValidationException::withMessages([
+                'shipment_ids' => "ออกเอกสารไม่ได้ เพราะ Shipment ต่อไปนี้ถูก Void / ไม่สำเร็จ: {$numbers}",
+            ]);
         }
 
         $alreadyBilled = $shipments->filter(fn ($s) => $s->receipts()->exists());
