@@ -41,6 +41,7 @@ use App\Http\Controllers\ReportScheduleController;
 use App\Http\Controllers\RoleController;
 use App\Http\Controllers\ShippingController;
 use App\Http\Controllers\ShipmentController;
+use App\Http\Controllers\ShipmentAnalyticsController;
 use App\Http\Controllers\ShipmentDraftController;
 use App\Http\Controllers\SmtpSettingController;
 use App\Http\Controllers\SupplyController;
@@ -303,6 +304,10 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
     Route::middleware('perm:report.manifest')->group(function () {
         Route::get('manifest-report', [ManifestReportController::class, 'index']);
         Route::get('manifest-report/export', [ManifestReportController::class, 'export']);
+    });
+    Route::middleware('perm:report.summary')->group(function () {
+        Route::get('reports/shipment-analytics', [ShipmentAnalyticsController::class, 'index']);
+        Route::get('reports/shipment-analytics/export', [ShipmentAnalyticsController::class, 'export']);
     });
     Route::middleware('perm:config.report_schedules')->group(function () {
         Route::apiResource('report-schedules', ReportScheduleController::class)->only(['index', 'store', 'update', 'destroy']);

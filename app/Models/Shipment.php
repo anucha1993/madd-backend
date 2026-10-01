@@ -97,6 +97,11 @@ class Shipment extends Model
         return $this->belongsTo(AgentAccount::class);
     }
 
+    public function creator(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'created_by');
+    }
+
     public function branch(): BelongsTo
     {
         return $this->belongsTo(Branch::class);
