@@ -147,6 +147,21 @@ return [
             'action_hints' => ['confirm' => 'กดยืนยันว่า Courier มารับของแล้ว ก่อน Tracking scan จะเข้ามา', 'timeline' => 'ประวัติการนัด / ยกเลิก / ยืนยันรับของของ Pickup'],
             'scope' => true,
         ],
+        'shipment_kpi' => [
+            'label' => 'การ์ดสรุปหน้า Shipments',
+            'category' => 'reports',
+            'actions' => [
+                'today' => 'Shipments Today',
+                'in_transit' => 'In Transit',
+                'month' => 'Booked This Month',
+                'revenue' => 'Revenue This Month',
+                'cancelled' => 'Cancelled/Failed This Month',
+            ],
+            'action_hints' => [
+                'revenue' => 'ยอดขายเดือนนี้ — ต้องเห็นช่อง "ราคาขาย" ของ Shipment ด้วย',
+                'in_transit' => 'Shipment ที่ยังไม่ส่งถึง (ตามขอบเขตสาขาของ Role)',
+            ],
+        ],
         'receipt' => [
             'label' => 'ใบเสร็จ / ใบกำกับภาษี',
             'category' => 'operations',

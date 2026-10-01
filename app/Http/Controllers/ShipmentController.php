@@ -158,14 +158,18 @@ class ShipmentController extends Controller
         $monthEnd = now()->endOfMonth();
         // Same data scope as index() — the KPIs must only ever count what the list can show.
         $scoped = fn () => Shipment::visibleTo($request->user());
-        $canSeePricing = $this->access->fieldLevel($request->user(), 'shipment', 'pricing') !== 'hidden';
+        $user = $request->user();
+        $canSeePricing = $this->access->fieldLevel($user, 'shipment', 'pricing') !== 'hidden';
+        // Each card has its own permission (shipment_kpi.*); a card the Role can't see comes back
+        // null and isn't even counted.
+        $card = fn (string $kpi, callable $value) => $this->access->can($user, "shipment_kpi.{$kpi}") ? $value() : null;
 
         return response()->json([
-            'today_count' => $scoped()->where('status', 'booked')->where('created_at', '>=', $today)->count(),
-            'month_count' => $scoped()->where('status', 'booked')->whereBetween('created_at', [$monthStart, $monthEnd])->count(),
-            'month_revenue' => $canSeePricing ? (float) $scoped()->where('status', 'booked')->whereBetween('created_at', [$monthStart, $monthEnd])->sum('order_total') : null,
-            'in_transit_count' => $scoped()->where('status', 'booked')->count(),
-            'cancelled_count' => $scoped()->whereIn('status', ['voided', 'failed'])->whereBetween('created_at', [$monthStart, $monthEnd])->count(),
+            'today_count' => $card('today', fn () => $scoped()->where('status', 'booked')->where('created_at', '>=', $today)->count()),
+            'month_count' => $card('month', fn () => $scoped()->where('status', 'booked')->whereBetween('created_at', [$monthStart, $monthEnd])->count()),
+            'month_revenue' => $canSeePricing ? $card('revenue', fn () => (float) $scoped()->where('status', 'booked')->whereBetween('created_at', [$monthStart, $monthEnd])->sum('order_total')) : null,
+            'in_transit_count' => $card('in_transit', fn () => $scoped()->where('status', 'booked')->count()),
+            'cancelled_count' => $card('cancelled', fn () => $scoped()->whereIn('status', ['voided', 'failed'])->whereBetween('created_at', [$monthStart, $monthEnd])->count()),
         ]);
     }
 
