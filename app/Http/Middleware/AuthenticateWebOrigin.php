@@ -20,8 +20,10 @@ class AuthenticateWebOrigin
     public function handle(Request $request, Closure $next, string $feature = 'tracking'): Response
     {
         $origin = self::normalize((string) $request->headers->get('Origin'));
-        $column = $feature === 'rates' ? 'allow_rates' : 'allow_tracking';
-        $client = $origin ? ApiClient::where('status', true)->where($column, true)->whereNotNull('browser_origins')->get()
+        // 'view' (page-view beacon) only needs the site to be registered for either feature.
+        $client = $origin ? ApiClient::where('status', true)->whereNotNull('browser_origins')
+            ->where(fn ($q) => $feature === 'view' ? $q->where('allow_rates', true)->orWhere('allow_tracking', true) : $q->where($feature === 'rates' ? 'allow_rates' : 'allow_tracking', true))
+            ->get()
             ->first(fn (ApiClient $c) => in_array($origin, array_map([self::class, 'normalize'], $c->browser_origins ?? []), true)) : null;
 
         if (! $client) {
@@ -30,7 +32,7 @@ class AuthenticateWebOrigin
 
         $ip = (string) $request->ip();
         // The country list is static reference data — not worth a visitor's request budget.
-        $limits = $request->is('api/public/v1/web/countries') ? [] : [["web-client:{$client->id}", $client->rate_limit_per_minute], ["web-client:{$client->id}:ip:{$ip}", $client->end_user_limit_per_minute]];
+        $limits = $request->is('api/public/v1/web/countries', 'api/public/v1/web/hit') ? [] : [["web-client:{$client->id}", $client->rate_limit_per_minute], ["web-client:{$client->id}:ip:{$ip}", $client->end_user_limit_per_minute]];
         foreach ($limits as [$bucket, $limit]) {
             if ($limit > 0 && ! RateLimiter::attempt($bucket, $limit, fn () => true, 60)) {
                 return $this->cors(response()->json(['error' => ['code' => 'rate_limited', 'message' => 'เรียกใช้บ่อยเกินไป กรุณาลองใหม่ในอีกสักครู่']], 429, ['Retry-After' => (string) RateLimiter::availableIn($bucket)]), $origin);

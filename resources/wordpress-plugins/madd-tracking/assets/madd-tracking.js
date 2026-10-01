@@ -58,6 +58,17 @@
   };
   var STEP_INDEX = { not_picked_up: 1, in_transit: 2, delivered: 3 };
 
+  // Count the page view for MADD's usage stats (fire-and-forget, once per page).
+  function countView(page) {
+    if (window.__maddViewSent || !config.apiUrl || !navigator.sendBeacon) return;
+    window.__maddViewSent = true;
+    try {
+      navigator.sendBeacon(config.apiUrl + "/public/v1/web/hit", new URLSearchParams({ page: page }));
+    } catch (e) {
+      /* stats only — never break the page */
+    }
+  }
+
   function el(tag, attrs, children) {
     var node = document.createElement(tag);
     Object.keys(attrs || {}).forEach(function (k) {
@@ -256,6 +267,8 @@
   }
 
   document.addEventListener("DOMContentLoaded", function () {
-    Array.prototype.forEach.call(document.querySelectorAll(".madd-tracking"), init);
+    var roots = document.querySelectorAll(".madd-tracking");
+    if (roots.length) countView("tracking");
+    Array.prototype.forEach.call(roots, init);
   });
 })();

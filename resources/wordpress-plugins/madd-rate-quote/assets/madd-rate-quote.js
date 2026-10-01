@@ -6,6 +6,17 @@
   var POPULAR = ["US", "CN", "JP", "SG", "AU", "GB", "KR", "HK", "DE", "FR", "TW", "MY"];
   var MAX_PACKAGES = 20;
 
+  // Count the page view for MADD's usage stats (fire-and-forget, once per page).
+  function countView(page) {
+    if (window.__maddViewSent || !config.apiUrl || !navigator.sendBeacon) return;
+    window.__maddViewSent = true;
+    try {
+      navigator.sendBeacon(config.apiUrl + "/public/v1/web/hit", new URLSearchParams({ page: page }));
+    } catch (e) {
+      /* stats only — never break the page */
+    }
+  }
+
   var I18N = {
     en: {
       locale: "en-GB",
@@ -414,6 +425,8 @@
   }
 
   document.addEventListener("DOMContentLoaded", function () {
-    Array.prototype.forEach.call(document.querySelectorAll(".madd-quote"), init);
+    var roots = document.querySelectorAll(".madd-quote");
+    if (roots.length) countView("rates");
+    Array.prototype.forEach.call(roots, init);
   });
 })();

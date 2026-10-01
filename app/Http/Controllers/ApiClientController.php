@@ -6,7 +6,9 @@ use App\Http\Controllers\PublicApi\RateController;
 use App\Http\Middleware\AuthenticateWebOrigin;
 use App\Models\ApiClient;
 use App\Models\ApiRequestLog;
+use App\Services\PublicApiStatsService;
 use App\Services\PublicRateService;
+use Illuminate\Support\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -56,9 +58,24 @@ class ApiClientController extends Controller
         return response()->noContent();
     }
 
+    /** Usage of the website plugins over a date range (Bangkok days) — see PublicApiStatsService. */
+    public function stats(Request $request, PublicApiStatsService $stats)
+    {
+        $data = $request->validate([
+            'date_from' => ['nullable', 'date'],
+            'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
+            'api_client_id' => ['nullable', 'integer'],
+        ]);
+        $to = Carbon::parse($data['date_to'] ?? now('Asia/Bangkok')->toDateString())->endOfDay();
+        $from = Carbon::parse($data['date_from'] ?? $to->copy()->subDays(29)->toDateString())->startOfDay();
+        abort_if($from->diffInDays($to) > 366, 422, 'ช่วงวันที่ต้องไม่เกิน 1 ปี');
+
+        return response()->json($stats->build($from, $to, $data['api_client_id'] ?? null));
+    }
+
     public function logs(Request $request)
     {
-        $data = $request->validate(['api_client_id' => ['nullable', 'integer'], 'status' => ['nullable', 'in:ok,failed'], 'endpoint' => ['nullable', 'in:rates,tracking,web_tracking,web_rates']]);
+        $data = $request->validate(['api_client_id' => ['nullable', 'integer'], 'status' => ['nullable', 'in:ok,failed'], 'endpoint' => ['nullable', 'in:rates,tracking,web_tracking,web_rates,view_rates,view_tracking']]);
         $query = ApiRequestLog::with('apiClient:id,name')->latest('created_at')->latest('id');
         foreach (['api_client_id', 'endpoint'] as $field) {
             if (! empty($data[$field])) {
