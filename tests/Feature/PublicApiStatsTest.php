@@ -29,6 +29,11 @@ class PublicApiStatsTest extends TestCase
         $log(['endpoint' => 'web_tracking', 'status_code' => 404]);
         $log(['endpoint' => 'tracking', 'status_code' => 200, 'error' => 'external']);
 
+        $this->withHeader('Origin', 'https://madd.co.th')->getJson('/api/public/v1/web/stats')->assertOk()
+            ->assertJson(['quotes' => 1, 'tracked' => 1, 'visitors' => 3, 'views' => 2])
+            ->assertJsonMissingPath('ip');
+        $this->withHeader('Origin', 'https://evil.example')->getJson('/api/public/v1/web/stats')->assertForbidden();
+
         $admin = User::factory()->create();
         $admin->roles()->sync(Role::where('key', 'admin')->pluck('id'));
         Sanctum::actingAs($admin);

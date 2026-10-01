@@ -11,6 +11,7 @@ use App\Http\Controllers\WordPressPluginController;
 use App\Http\Controllers\PublicApi\RateController as PublicRateController;
 use App\Http\Controllers\PublicApi\TrackingController as PublicTrackingController;
 use App\Http\Controllers\PublicApi\PageViewController;
+use App\Http\Controllers\PublicApi\PublicStatsController;
 use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\SystemAlertController;
 use App\Http\Controllers\TimelineController;
@@ -65,6 +66,7 @@ Route::get('public/v1/web/tracking/{trackingNumber}', [PublicTrackingController:
 Route::post('public/v1/web/rates', [PublicRateController::class, 'rates'])->middleware('api.web:rates');
 Route::get('public/v1/web/countries', [PublicRateController::class, 'countries'])->middleware('api.web:rates');
 Route::post('public/v1/web/hit', [PageViewController::class, 'store'])->middleware('api.web:view');
+Route::get('public/v1/web/stats', [PublicStatsController::class, 'show'])->middleware('api.web:view');
 
 // Every authenticated route also passes through `record.scope` (a Shipment/Receipt/Pickup bound
 // from the URL outside the user's data scope 404s). `perm:` keys come from

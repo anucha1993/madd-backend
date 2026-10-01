@@ -32,7 +32,7 @@ class AuthenticateWebOrigin
 
         $ip = (string) $request->ip();
         // The country list is static reference data — not worth a visitor's request budget.
-        $limits = $request->is('api/public/v1/web/countries', 'api/public/v1/web/hit') ? [] : [["web-client:{$client->id}", $client->rate_limit_per_minute], ["web-client:{$client->id}:ip:{$ip}", $client->end_user_limit_per_minute]];
+        $limits = $request->is('api/public/v1/web/countries', 'api/public/v1/web/hit', 'api/public/v1/web/stats') ? [] : [["web-client:{$client->id}", $client->rate_limit_per_minute], ["web-client:{$client->id}:ip:{$ip}", $client->end_user_limit_per_minute]];
         foreach ($limits as [$bucket, $limit]) {
             if ($limit > 0 && ! RateLimiter::attempt($bucket, $limit, fn () => true, 60)) {
                 return $this->cors(response()->json(['error' => ['code' => 'rate_limited', 'message' => 'เรียกใช้บ่อยเกินไป กรุณาลองใหม่ในอีกสักครู่']], 429, ['Retry-After' => (string) RateLimiter::availableIn($bucket)]), $origin);

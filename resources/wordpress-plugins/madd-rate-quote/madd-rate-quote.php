@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MADD Rate Quote
  * Description: ฟอร์มเช็คราคาค่าส่งระหว่างประเทศ (UPS / DHL) ราคาเดียวกับหน้าร้าน จากระบบ MADD — shortcode [madd_rate_quote] (ภาษาอังกฤษ: [madd_rate_quote lang="en"])
- * Version: 1.0.3
+ * Version: 1.1.0
  * Requires at least: 5.8
  * Requires PHP: 7.4
  * Author: MADD
@@ -20,7 +20,7 @@ if (! defined('ABSPATH')) {
 final class Madd_Rate_Quote
 {
     const OPTION = 'madd_rate_quote';
-    const VERSION = '1.0.3';
+    const VERSION = '1.1.0';
     const NONCE = 'madd_rate_quote';
     const COUNTRIES_CACHE = 'madd_rate_quote_countries';
 
@@ -30,6 +30,9 @@ final class Madd_Rate_Quote
         add_action('admin_init', [__CLASS__, 'register_settings']);
         add_filter('plugin_action_links_'.plugin_basename(__FILE__), [__CLASS__, 'action_links']);
         add_shortcode('madd_rate_quote', [__CLASS__, 'shortcode']);
+        if (! shortcode_exists('madd_stats')) {
+            add_shortcode('madd_stats', [__CLASS__, 'stats_shortcode']);
+        }
         foreach (['madd_quote_rates' => 'ajax_rates', 'madd_quote_countries' => 'ajax_countries'] as $action => $method) {
             add_action('wp_ajax_'.$action, [__CLASS__, $method]);
             add_action('wp_ajax_nopriv_'.$action, [__CLASS__, $method]);
@@ -233,6 +236,33 @@ final class Madd_Rate_Quote
     }
 
     // ------------------------------------------------------------------ Front end
+
+    /**
+     * [madd_stats] — live usage counter from MADD. Provided by both MADD plugins; whichever loads
+     * first registers it. Attributes: lang (en|th), show (quotes,tracked,visitors,views),
+     * min (hide numbers below this).
+     */
+    public static function stats_shortcode($atts = [])
+    {
+        $atts = shortcode_atts(['lang' => '', 'show' => 'quotes,tracked,visitors', 'min' => '0'], $atts, 'madd_stats');
+        $lang = strtolower(preg_replace('/[^a-z]/i', '', (string) $atts['lang']));
+        if (! in_array($lang, ['th', 'en'], true)) {
+            $site = function_exists('pll_current_language') ? pll_current_language('slug') : (defined('ICL_LANGUAGE_CODE') ? ICL_LANGUAGE_CODE : get_locale());
+            $lang = strpos(strtolower((string) $site), 'th') === 0 ? 'th' : 'en';
+        }
+        $s = self::settings();
+        $base = plugin_dir_url(__FILE__);
+        wp_enqueue_style('madd-stats', $base.'assets/madd-stats.css', [], self::VERSION);
+        wp_enqueue_script('madd-stats', $base.'assets/madd-stats.js', [], self::VERSION, true);
+        wp_localize_script('madd-stats', 'MaddStats', ['apiUrl' => $s['api_url'] ? self::base_url($s['api_url']) : '']);
+
+        return sprintf(
+            '<div class="madd-stats" data-lang="%s" data-show="%s" data-min="%d" hidden></div>',
+            esc_attr($lang),
+            esc_attr(preg_replace('/[^a-z,]/', '', strtolower((string) $atts['show']))),
+            (int) $atts['min']
+        );
+    }
 
     public static function shortcode($atts = [])
     {
