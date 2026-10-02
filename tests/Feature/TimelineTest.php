@@ -47,7 +47,7 @@ class TimelineTest extends TestCase
         $shipment = $this->shipment($branch->id); // created with no user = System
         $shipment->update(['tracking_status' => 'delivered']); // tracking sync = System
 
-        $viewer = $this->user(['shipment.view', 'shipment.timeline', 'supply_stock.view']);
+        $viewer = $this->user(['shipment.view', 'shipment.label', 'shipment.timeline', 'supply_stock.view']);
         Sanctum::actingAs($viewer);
         $shipment->update(['status' => 'voided', 'void_reason' => 'ลูกค้ายกเลิก', 'cost_amount' => 950]);
         $supply = Supply::create(['name' => 'Box S', 'cost_price' => 1, 'sale_price' => 30, 'status' => true]);

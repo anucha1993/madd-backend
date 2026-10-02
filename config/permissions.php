@@ -28,9 +28,12 @@ return [
         'shipment' => [
             'label' => 'Shipments',
             'category' => 'operations',
-            'actions' => ['view' => 'ดู', 'create' => 'จอง', 'void' => 'Void', 'delete' => 'ลบ (Test)', 'timeline' => 'Timeline'],
+            'actions' => ['view' => 'ดู', 'create' => 'จอง', 'void' => 'Void', 'delete' => 'ลบ (Test)', 'label' => 'เปิด Label', 'waybill' => 'เปิด Waybill', 'invoice' => 'เปิด Commercial Invoice', 'timeline' => 'Timeline'],
             'action_hints' => [
-                'view' => 'รายการ / รายละเอียด / เอกสาร (Label, Waybill, Invoice)',
+                'view' => 'รายการ / รายละเอียด Shipment',
+                'label' => 'เปิด / พิมพ์ Label ใบปะหน้ากล่อง (ทุกกล่อง หรือรายกล่อง)',
+                'waybill' => "Waybill (Shipper's Copy) และดาวน์โหลด Waybill ต้นฉบับจาก DHL",
+                'invoice' => 'เปิด Commercial Invoice (ใบกำกับสินค้าศุลกากร)',
                 'create' => 'เช็คราคา + จองจริงกับ Carrier, Draft',
                 'void' => 'ยกเลิก Shipment (UPS ยกเลิกกับ Carrier จริง)',
                 'delete' => 'ลบถาวร เฉพาะ Shipment ที่จองด้วยบัญชีโหมด Test',

@@ -181,11 +181,11 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
         Route::get('shipments', [ShipmentController::class, 'index']);
         Route::get('shipments/stats', [ShipmentController::class, 'stats']);
         Route::put('shipments/{shipment}/branch', [ShipmentController::class, 'assignBranch'])->middleware('perm:shipment.create');
-        Route::get('shipments/{shipment}/label', [ShipmentController::class, 'label']);
-        Route::get('shipments/{shipment}/labels/all', [ShipmentController::class, 'allLabels']);
-        Route::get('shipments/{shipment}/waybill', [ShipmentController::class, 'waybill']);
-        Route::get('shipments/{shipment}/waybill/original', [ShipmentController::class, 'originalWaybill']);
-        Route::get('shipments/{shipment}/commercial-invoice', [ShipmentController::class, 'commercialInvoice']);
+        Route::get('shipments/{shipment}/label', [ShipmentController::class, 'label'])->middleware('perm:shipment.label');
+        Route::get('shipments/{shipment}/labels/all', [ShipmentController::class, 'allLabels'])->middleware('perm:shipment.label');
+        Route::get('shipments/{shipment}/waybill', [ShipmentController::class, 'waybill'])->middleware('perm:shipment.waybill');
+        Route::get('shipments/{shipment}/waybill/original', [ShipmentController::class, 'originalWaybill'])->middleware('perm:shipment.waybill');
+        Route::get('shipments/{shipment}/commercial-invoice', [ShipmentController::class, 'commercialInvoice'])->middleware('perm:shipment.invoice');
         Route::get('shipments/{shipment}', [ShipmentController::class, 'show']);
     });
     Route::middleware('perm:shipment.void')->group(function () {

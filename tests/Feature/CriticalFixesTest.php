@@ -79,11 +79,29 @@ class CriticalFixesTest extends TestCase
         $dhl = $make(['carrier' => 'DHL', 'waybill_storage_key' => 'shipments/waybill/5437367191.pdf']);
         $ups = $make(['carrier' => 'UPS', 'waybill_storage_key' => 'shipments/waybill/1Z.pdf']);
 
-        Sanctum::actingAs($this->user(['shipment.view']));
+        Sanctum::actingAs($this->user(['shipment.view', 'shipment.waybill']));
         $res = $this->get("/api/shipments/{$dhl->id}/waybill/original")->assertOk()->assertHeader('Content-Type', 'application/pdf');
         $this->assertStringContainsString('attachment; filename="DHL-waybill-5437367191.pdf"', $res->headers->get('Content-Disposition'));
         $this->assertSame('%PDF-dhl', $res->getContent());
         $this->getJson("/api/shipments/{$ups->id}/waybill/original")->assertNotFound();
+    }
+
+    public function test_shipment_documents_need_their_own_permission(): void
+    {
+        $this->mock(\App\Services\R2Service::class, fn ($m) => $m->shouldReceive('download')->andReturn('%PDF-dhl'));
+        $agentId = DB::table('agents')->insertGetId(['agent_name' => 'DHL', 'agent_code' => 'DHL', 'created_at' => now(), 'updated_at' => now()]);
+        $accountId = DB::table('agent_accounts')->insertGetId(['agent_id' => $agentId, 'username_acc' => '1', 'created_at' => now(), 'updated_at' => now()]);
+        $dhl = Shipment::create(['agent_account_id' => $accountId, 'carrier' => 'DHL', 'service_code' => 'P', 'status' => 'booked', 'tracking_number' => '5437367191', 'origin' => [], 'destination' => [], 'packages' => [], 'waybill_storage_key' => 'shipments/waybill/5437367191.pdf']);
+
+        Sanctum::actingAs($this->user(['shipment.view']));
+        $this->getJson("/api/shipments/{$dhl->id}")->assertOk();
+        $this->getJson("/api/shipments/{$dhl->id}/label")->assertForbidden();
+        $this->getJson("/api/shipments/{$dhl->id}/waybill/original")->assertForbidden();
+        $this->getJson("/api/shipments/{$dhl->id}/commercial-invoice")->assertForbidden();
+
+        Sanctum::actingAs($this->user(['shipment.view', 'shipment.waybill']));
+        $this->get("/api/shipments/{$dhl->id}/waybill/original")->assertOk();
+        $this->getJson("/api/shipments/{$dhl->id}/commercial-invoice")->assertForbidden();
     }
 
     public function test_voided_shipments_cannot_be_billed(): void
