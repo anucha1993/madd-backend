@@ -1317,10 +1317,6 @@ class ShipmentController extends Controller
             $trackingLines,
             $this->buildTotalChargesLines($shipment),
         ]);
-        $totalLines = array_sum(array_map('count', $lineGroups));
-        // Rough heuristic (mm): ~5mm per line plus a small gap between each group, safer to
-        // overshoot slightly (blank space at the bottom) than clip content off the sheet.
-        $extraHeight = 10 + $totalLines * 5 + (count($lineGroups) - 1) * 3;
 
         $bytes = $this->r2Service->download($storageKey);
         $extension = strtolower(pathinfo($storageKey, PATHINFO_EXTENSION)) ?: 'pdf';
@@ -1328,45 +1324,40 @@ class ShipmentController extends Controller
         file_put_contents($tempPath, $bytes);
 
         try {
-            // Always an A4 portrait sheet (same as UPS's Shipper's Copy): DHL's document is
-            // scaled to fit the printable width / the height left after our charges block, centred.
+            // Same layout as UPS's Shipper's Copy: an A4 portrait sheet with DHL's document at the
+            // top-left (about half the page wide) and PAYMENT OF CHARGES / TOTAL CHARGES in a
+            // column to its right.
             $pageW = 210;
             $pageH = 297;
             $margin = 10;
-            $maxW = $pageW - 2 * $margin;
-            $maxH = $pageH - 2 * $margin - $extraHeight - 6;
-            $mpdf = new Mpdf(['format' => 'A4', 'margin_top' => 0, 'margin_bottom' => 0, 'margin_left' => 0, 'margin_right' => 0, 'tempDir' => sys_get_temp_dir()]);
+            $docW = 100;
+            $mpdf = new Mpdf(['format' => 'A4', 'margin_top' => 0, 'margin_bottom' => 0, 'margin_left' => 0, 'margin_right' => 0, 'default_font' => 'dejavusans', 'tempDir' => sys_get_temp_dir()]);
             $mpdf->AddPageByArray(['orientation' => 'P', 'sheet-size' => [$pageW, $pageH], 'margin-top' => 0, 'margin-bottom' => 0, 'margin-left' => 0, 'margin-right' => 0]);
 
             if ($extension === 'pdf') {
                 $mpdf->setSourceFile($tempPath);
                 $templateId = $mpdf->importPage(1);
                 $size = $mpdf->getTemplateSize($templateId);
-                $scale = min($maxW / $size['width'], $maxH / $size['height'], 1.6);
+                $scale = min($docW / $size['width'], ($pageH - 2 * $margin) / $size['height']);
+                $mpdf->useTemplate($templateId, $margin, $margin, $size['width'] * $scale, $size['height'] * $scale);
                 $w = $size['width'] * $scale;
-                $h = $size['height'] * $scale;
-                $mpdf->useTemplate($templateId, ($pageW - $w) / 2, $margin, $w, $h);
             } else {
-                // Non-PDF document (e.g. image) — fitted the same way.
                 [$imgW, $imgH] = getimagesize($tempPath) ?: [1, 1];
-                $scale = min($maxW / $imgW, $maxH / $imgH);
+                $scale = min($docW / $imgW, ($pageH - 2 * $margin) / $imgH);
+                $mpdf->Image($tempPath, $margin, $margin, $imgW * $scale, $imgH * $scale, '', '', false, false);
                 $w = $imgW * $scale;
-                $h = $imgH * $scale;
-                $mpdf->Image($tempPath, ($pageW - $w) / 2, $margin, $w, $h, '', '', false, false);
             }
-            $labelBottomY = $margin + $h;
 
-            $y = $labelBottomY + 6;
+            $x = $margin + $w + 12;
+            $y = $margin + 4;
             foreach ($lineGroups as $lines) {
                 foreach ($lines as $line) {
-                    // Text() writes at an exact fixed position and never triggers mpdf's automatic
-                    // page-break (unlike Write()) — needed since this sits right at the sheet's
-                    // bottom edge, past where Write() would otherwise overflow onto a new page.
-                    $mpdf->SetFont('', $line['bold'] ? 'B' : '', 9);
-                    $mpdf->Text($margin + 5, $y, $line['text']);
-                    $y += 5;
+                    // Text() writes at an exact position and never triggers an automatic page break.
+                    $mpdf->SetFont('dejavusans', $line['bold'] ? 'B' : '', 9.5);
+                    $mpdf->Text($x, $y, $line['text']);
+                    $y += 4.6;
                 }
-                $y += 3;
+                $y += 2;
             }
 
             return $mpdf->Output('', 'S');
