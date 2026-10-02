@@ -41,6 +41,7 @@ use App\Http\Controllers\ReportScheduleController;
 use App\Http\Controllers\RoleController;
 use App\Http\Controllers\ShippingController;
 use App\Http\Controllers\ShipmentController;
+use App\Http\Controllers\ShipmentFieldRuleController;
 use App\Http\Controllers\ShipmentAnalyticsController;
 use App\Http\Controllers\ShipmentDraftController;
 use App\Http\Controllers\SmtpSettingController;
@@ -188,6 +189,8 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
         Route::get('shipments/{shipment}/commercial-invoice', [ShipmentController::class, 'commercialInvoice'])->middleware('perm:shipment.invoice');
         Route::get('shipments/{shipment}', [ShipmentController::class, 'show']);
     });
+    Route::get('shipment-field-rules', [ShipmentFieldRuleController::class, 'index'])->middleware('perm:shipment.create,config.shipment_fields');
+    Route::put('shipment-field-rules', [ShipmentFieldRuleController::class, 'update'])->middleware('perm:config.shipment_fields');
     Route::post('shipments/{shipment}/void', [ShipmentController::class, 'void'])->middleware('perm:shipment.void');
     Route::post('shipments/{shipment}/unvoid', [ShipmentController::class, 'unvoid'])->middleware('perm:shipment.unvoid');
     Route::post('shipments/{shipment}/carrier-cancel-notified', [ShipmentController::class, 'markCarrierCancelNotified'])->middleware('perm:shipment.cancel_notified');

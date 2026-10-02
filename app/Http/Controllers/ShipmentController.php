@@ -333,6 +333,12 @@ class ShipmentController extends Controller
             'rate_quote' => ['nullable', 'array'],
         ]);
 
+        // Fields an admin made mandatory for this carrier (/config/shipment-fields).
+        [$carrierRules, $carrierMessages] = app(\App\Services\ShipmentFieldRules::class)->validationFor($data['carrier']);
+        if ($carrierRules) {
+            $request->validate($carrierRules, $carrierMessages);
+        }
+
 
         $account = AgentAccount::with('agent')->where('status', true)->where('is_api_enabled', true)->find($data['agent_account_id']);
         if (! $account || $account->agent?->agent_code !== $data['carrier']) {
