@@ -184,6 +184,7 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
         Route::get('shipments/{shipment}/label', [ShipmentController::class, 'label']);
         Route::get('shipments/{shipment}/labels/all', [ShipmentController::class, 'allLabels']);
         Route::get('shipments/{shipment}/waybill', [ShipmentController::class, 'waybill']);
+        Route::get('shipments/{shipment}/waybill/original', [ShipmentController::class, 'originalWaybill']);
         Route::get('shipments/{shipment}/commercial-invoice', [ShipmentController::class, 'commercialInvoice']);
         Route::get('shipments/{shipment}', [ShipmentController::class, 'show']);
     });

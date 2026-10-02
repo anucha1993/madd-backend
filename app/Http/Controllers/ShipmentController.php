@@ -1257,6 +1257,24 @@ class ShipmentController extends Controller
     }
 
     /**
+     * DHL's own Waybill Doc exactly as DHL returned it at booking (no MADD payment block added),
+     * as a download — the file DHL / customs may ask for.
+     */
+    public function originalWaybill(Shipment $shipment)
+    {
+        if ($shipment->carrier !== 'DHL' || ! $shipment->waybill_storage_key) {
+            return response()->json(['error' => 'ไม่มีไฟล์ Waybill ต้นฉบับจาก DHL สำหรับ Shipment นี้'], 404);
+        }
+        app(\App\Services\AuditLogger::class)->accessed('document_viewed', $shipment, ['document' => 'waybill_original']);
+        $extension = strtolower(pathinfo($shipment->waybill_storage_key, PATHINFO_EXTENSION)) ?: 'pdf';
+
+        return response($this->r2Service->download($shipment->waybill_storage_key), 200, [
+            'Content-Type' => self::LABEL_MIME_TYPES[strtoupper($extension)] ?? 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="DHL-waybill-'.$shipment->tracking_number.'.'.$extension.'"',
+        ]);
+    }
+
+    /**
      * Imports the FIRST page of DHL's own "*WAYBILL DOC*" (waybill_storage_key — already lists
      * every piece's license plate) onto a slightly taller sheet, then writes our PAYMENT OF
      * CHARGES / TOTAL CHARGES underneath. Shipments booked before the Waybill Doc was requested

@@ -70,6 +70,22 @@ class CriticalFixesTest extends TestCase
         $this->putJson("/api/shipments/{$shipment->id}/branch", ['branch_id' => $a->id])->assertStatus(422); // already set
     }
 
+    public function test_original_dhl_waybill_downloads_as_attachment(): void
+    {
+        $this->mock(\App\Services\R2Service::class, fn ($m) => $m->shouldReceive('download')->andReturn('%PDF-dhl'));
+        $agentId = DB::table('agents')->insertGetId(['agent_name' => 'DHL', 'agent_code' => 'DHL', 'created_at' => now(), 'updated_at' => now()]);
+        $accountId = DB::table('agent_accounts')->insertGetId(['agent_id' => $agentId, 'username_acc' => '1', 'created_at' => now(), 'updated_at' => now()]);
+        $make = fn (array $a) => Shipment::create($a + ['agent_account_id' => $accountId, 'service_code' => 'P', 'status' => 'booked', 'tracking_number' => '5437367191', 'origin' => [], 'destination' => [], 'packages' => []]);
+        $dhl = $make(['carrier' => 'DHL', 'waybill_storage_key' => 'shipments/waybill/5437367191.pdf']);
+        $ups = $make(['carrier' => 'UPS', 'waybill_storage_key' => 'shipments/waybill/1Z.pdf']);
+
+        Sanctum::actingAs($this->user(['shipment.view']));
+        $res = $this->get("/api/shipments/{$dhl->id}/waybill/original")->assertOk()->assertHeader('Content-Type', 'application/pdf');
+        $this->assertStringContainsString('attachment; filename="DHL-waybill-5437367191.pdf"', $res->headers->get('Content-Disposition'));
+        $this->assertSame('%PDF-dhl', $res->getContent());
+        $this->getJson("/api/shipments/{$ups->id}/waybill/original")->assertNotFound();
+    }
+
     public function test_voided_shipments_cannot_be_billed(): void
     {
         $a = Branch::create(['name' => 'A', 'code' => 'A', 'status' => true]);
