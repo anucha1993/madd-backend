@@ -105,3 +105,8 @@
 /* page layouts that draw cell borders with a 1px grid gap */
 .madd-tracking__fact { background: #fff; }
 .madd-tracking__fact dt, .madd-tracking__fact dd { background: transparent !important; }
+
+.madd-tracking .madd-tracking__carrier--dhl { background: #ffcc00 !important; }
+.madd-tracking .madd-tracking__carrier--dhl span { color: #d40511 !important; }
+.madd-tracking .madd-tracking__carrier--ups { background: #351c15 !important; }
+.madd-tracking .madd-tracking__carrier--ups span { color: #ffb500 !important; }

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MADD Tracking
  * Description: ฟอร์มติดตามพัสดุ (UPS / DHL) จากระบบ MADD — shortcode [madd_tracking] (ภาษาอังกฤษ: [madd_tracking lang="en"]) · ลิงก์ตรง ?tn=เลขTracking
- * Version: 1.4.2
+ * Version: 1.4.3
  * Requires at least: 5.8
  * Requires PHP: 7.4
  * Author: MADD
@@ -19,7 +19,7 @@ if (! defined('ABSPATH')) {
 final class Madd_Tracking
 {
     const OPTION = 'madd_tracking';
-    const VERSION = '1.4.2';
+    const VERSION = '1.4.3';
     const AJAX_ACTION = 'madd_tracking_lookup';
     // How long WordPress reuses an answer before asking MADD again (seconds).
     const RESULT_CACHE = 300;

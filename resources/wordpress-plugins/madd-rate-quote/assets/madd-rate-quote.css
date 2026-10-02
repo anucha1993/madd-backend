@@ -275,3 +275,49 @@
 .madd-quote__carrier--dhl b { color: #d40511; }
 .madd-quote__carrier--ups { background: #351c15; }
 .madd-quote__carrier--ups b { color: #ffb500; }
+
+/* ---------- searchable country picker ---------- */
+.madd-quote__combo { position: relative; width: 100%; }
+.madd-quote input.madd-quote__combo-input {
+  padding-right: 40px !important;
+  background: var(--mq-soft) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='15' height='15' fill='none' stroke='%235b6b7c' stroke-width='2.2' stroke-linecap='round' viewBox='0 0 24 24'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") no-repeat right 14px center !important;
+}
+.madd-quote input.madd-quote__combo-input:focus { background-color: #fff !important; }
+.madd-quote__combo-list {
+  position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; right: 0; max-height: 280px; overflow-y: auto;
+  margin: 0 !important; padding: 6px !important; list-style: none !important; border: 1px solid var(--mq-line); border-radius: 14px;
+  background: #fff; box-shadow: 0 18px 40px -16px rgba(11, 42, 54, .35);
+}
+.madd-quote__combo-item, .madd-quote__combo-empty {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 !important; padding: 9px 12px !important;
+  border-radius: 10px; font-size: 14.5px; color: var(--mq-ink); cursor: pointer; list-style: none !important;
+}
+.madd-quote__combo-item small { font-size: 11.5px; font-weight: 700; letter-spacing: .06em; color: var(--mq-muted); }
+.madd-quote__combo-item:hover, .madd-quote__combo-item.is-active { background: var(--mq-soft); }
+.madd-quote__combo-item.is-selected { font-weight: 700; color: var(--mq-navy); }
+.madd-quote__combo-empty { color: var(--mq-muted); cursor: default; }
+
+/* ---------- form card collapsed to a one-line summary ---------- */
+.madd-quote__summary { display: none; align-items: center; gap: 12px; color: var(--mq-ink); font-size: 14.5px; font-weight: 600; }
+.madd-quote__summary > .madd-quote__icon { width: 20px; height: 20px; color: var(--mq-muted); }
+.madd-quote__summary-text { flex: 1; min-width: 0; }
+.madd-quote__summary-edit {
+  display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; margin: 0 !important; padding: 8px 14px !important;
+  border: 1px solid var(--mq-line) !important; border-radius: 10px !important; background: #fff !important; color: var(--mq-navy) !important;
+  font: inherit; font-size: 13.5px !important; font-weight: 700 !important; text-transform: none !important; cursor: pointer;
+  box-shadow: none !important; min-height: 0 !important; line-height: 1.2 !important;
+}
+.madd-quote__summary-edit:hover { border-color: var(--mq-navy) !important; }
+.madd-quote__summary-edit .madd-quote__icon { width: 15px; height: 15px; }
+.madd-quote__form.is-collapsed { padding: 16px 20px; }
+.madd-quote__form.is-collapsed .madd-quote__summary { display: flex; }
+.madd-quote__form.is-collapsed > :not(.madd-quote__summary) { display: none !important; }
+
+/* ---------- AI box: multi-line textarea, button underneath ---------- */
+.madd-quote__ai-row { flex-direction: column; }
+.madd-quote textarea.madd-quote__ai-input { min-height: 92px; resize: vertical; }
+.madd-quote__ai-button { align-self: flex-end; min-height: 44px; }
+@media (max-width: 760px) {
+  .madd-quote__ai-button { align-self: stretch; }
+  .madd-quote__summary { flex-wrap: wrap; }
+}

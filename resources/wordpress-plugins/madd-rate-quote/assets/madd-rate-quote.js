@@ -66,6 +66,12 @@
       aiTitle: "Describe your shipment",
       aiBadge: "AI",
       aiPlaceholder: "e.g. 3 pairs of shoes and 2 T-shirts to Los Angeles",
+      searchCountry: "Type to search a country",
+      noCountry: "No matching country",
+      editDetails: "Edit details",
+      summaryParcel: "Parcel",
+      summaryDoc: "Document",
+      pieces: function (n) { return n + (n === 1 ? " piece" : " pieces"); },
       aiButton: "Fill in for me",
       aiThinking: "Reading your request…",
       aiTry: "Try:",
@@ -134,6 +140,12 @@
       aiTitle: "เล่าสั้นๆ ว่าจะส่งอะไร ไปที่ไหน",
       aiBadge: "AI",
       aiPlaceholder: "เช่น ส่งรองเท้า 3 คู่ กับเสื้อ 2 ตัว ไปลอสแองเจลิส",
+      searchCountry: "พิมพ์เพื่อค้นหาประเทศ",
+      noCountry: "ไม่พบประเทศที่ค้นหา",
+      editDetails: "แก้ไขข้อมูล",
+      summaryParcel: "พัสดุ",
+      summaryDoc: "เอกสาร",
+      pieces: function (n) { return n + " ชิ้น"; },
       aiButton: "กรอกให้อัตโนมัติ",
       aiThinking: "กำลังอ่านข้อความ…",
       aiTry: "ลองพิมพ์:",
@@ -177,6 +189,7 @@
     clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
     cal: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg>',
     arrow: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
+    edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m14 6 4 4"/></svg>',
     info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>',
     sparkle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>',
   };
@@ -241,6 +254,117 @@
     var typeDoc = el("input", { type: "radio", name: "shipment_type", value: "document" });
     var packages = el("div", { class: "madd-quote__packages" });
     var chargeable = el("div", { class: "madd-quote__chargeable", hidden: true });
+    var lastChargeable = 0;
+
+    // ---------- searchable country picker (the hidden <select> stays the value store) ----------
+    var countryItems = [];
+    var countryInput = el("input", { type: "text", class: "madd-quote__combo-input", placeholder: t.searchCountry, autocomplete: "off", spellcheck: "false", role: "combobox", "aria-expanded": "false", "aria-autocomplete": "list" });
+    var countryList = el("ul", { class: "madd-quote__combo-list", role: "listbox", hidden: true });
+    var countryActive = -1;
+    select.hidden = true;
+    select.tabIndex = -1;
+    function norm(v) {
+      return String(v || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    }
+    function findCountry(code) {
+      return countryItems.filter(function (c) { return c.code === code; })[0];
+    }
+    function setCountry(code) {
+      var c = findCountry(code);
+      select.value = c ? c.code : "";
+      countryInput.value = c ? c.name : "";
+    }
+    function closeCountries() {
+      countryList.hidden = true;
+      countryActive = -1;
+      countryInput.setAttribute("aria-expanded", "false");
+    }
+    function openCountries() {
+      var q = norm(countryInput.value === (findCountry(select.value) || {}).name ? "" : countryInput.value);
+      var matches;
+      if (!q) {
+        matches = POPULAR.map(findCountry).filter(Boolean);
+        matches = matches.concat(countryItems.filter(function (c) { return POPULAR.indexOf(c.code) < 0; }));
+      } else {
+        var starts = [], contains = [];
+        countryItems.forEach(function (c) {
+          var hay = [c.key, c.en, c.code.toLowerCase()];
+          if (hay.some(function (h) { return h.indexOf(q) === 0; })) starts.push(c);
+          else if (hay.some(function (h) { return h.indexOf(q) > 0; })) contains.push(c);
+        });
+        matches = starts.concat(contains);
+      }
+      countryList.innerHTML = "";
+      countryActive = -1;
+      if (!matches.length) countryList.appendChild(el("li", { class: "madd-quote__combo-empty", text: t.noCountry }));
+      matches.slice(0, 80).forEach(function (c, i) {
+        var li = el("li", { role: "option", class: "madd-quote__combo-item" + (c.code === select.value ? " is-selected" : ""), "data-code": c.code }, [
+          el("span", { text: c.name }),
+          el("small", { text: c.code }),
+        ]);
+        li.addEventListener("mousedown", function (e) {
+          e.preventDefault(); // keep focus; pick before blur
+          pickCountry(c.code);
+        });
+        countryList.appendChild(li);
+      });
+      countryList.hidden = false;
+      countryInput.setAttribute("aria-expanded", "true");
+    }
+    function pickCountry(code) {
+      setCountry(code);
+      closeCountries();
+      showError("");
+    }
+    function moveActive(step) {
+      var items = countryList.querySelectorAll(".madd-quote__combo-item");
+      if (!items.length) return;
+      countryActive = (countryActive + step + items.length) % items.length;
+      Array.prototype.forEach.call(items, function (li, i) { li.classList.toggle("is-active", i === countryActive); });
+      if (items[countryActive].scrollIntoView) items[countryActive].scrollIntoView({ block: "nearest" });
+    }
+    countryInput.addEventListener("focus", function () { countryInput.select(); openCountries(); });
+    countryInput.addEventListener("input", openCountries);
+    countryInput.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowDown") { e.preventDefault(); if (countryList.hidden) openCountries(); moveActive(1); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); moveActive(-1); }
+      else if (e.key === "Escape") { closeCountries(); }
+      else if (e.key === "Enter" && !countryList.hidden) {
+        e.preventDefault();
+        var items = countryList.querySelectorAll(".madd-quote__combo-item");
+        var li = items[countryActive >= 0 ? countryActive : 0];
+        if (li) pickCountry(li.getAttribute("data-code"));
+      }
+    });
+    countryInput.addEventListener("blur", function () {
+      closeCountries();
+      var q = norm(countryInput.value);
+      var exact = q && countryItems.filter(function (c) { return c.key === q || c.en === q || c.code.toLowerCase() === q; })[0];
+      if (exact) setCountry(exact.code);
+      else setCountry(q ? select.value : "");
+    });
+    var countryCombo = el("div", { class: "madd-quote__combo" }, [countryInput, countryList, select]);
+
+    // ---------- collapsed form summary (while / after checking) ----------
+    var summaryText = el("span", { class: "madd-quote__summary-text" });
+    var editBtn = el("button", { type: "button", class: "madd-quote__summary-edit" }, [icon("edit"), el("span", { text: t.editDetails })]);
+    var summary = el("div", { class: "madd-quote__summary" }, [icon("box"), summaryText, editBtn]);
+    function collapseForm(on) {
+      if (on) {
+        var n = rows().reduce(function (m, r) { return m + Math.max(1, Number(r.quantity) || 1); }, 0);
+        summaryText.textContent = [
+          countryName(select.value),
+          typeDoc.checked ? t.summaryDoc : t.summaryParcel,
+          t.pieces(n),
+          lastChargeable ? lastChargeable.toLocaleString(t.locale) + " " + t.kg : "",
+        ].filter(Boolean).join("  ·  ");
+      }
+      form.classList.toggle("is-collapsed", !!on);
+    }
+    editBtn.addEventListener("click", function () {
+      collapseForm(false);
+      countryInput.focus();
+    });
     var error = el("p", { class: "madd-quote__error", role: "alert", hidden: true });
     var submit = el("button", { type: "submit", class: "madd-quote__submit" }, [el("span", { text: t.submit }), icon("arrow")]);
     var addBtn = el("button", { type: "button", class: "madd-quote__add" }, [icon("plus"), el("span", { text: t.addPackage })]);
@@ -310,6 +434,7 @@
         if (w || vol) any = true;
         total += Math.max(w, vol) * Math.max(1, Number(r.quantity) || 1);
       });
+      lastChargeable = Math.ceil(total * 2) / 2;
       chargeable.hidden = !any;
       chargeable.innerHTML = "";
       chargeable.appendChild(el("span", { text: t.chargeable }));
@@ -323,7 +448,7 @@
 
     // ---------- AI assistant: sentence → form ----------
     var aiEnabled = root.getAttribute("data-ai") !== "off" && !!config.apiUrl;
-    var aiInput = el("textarea", { class: "madd-quote__ai-input", rows: "2", maxlength: "500", placeholder: t.aiPlaceholder });
+    var aiInput = el("textarea", { class: "madd-quote__ai-input", rows: "3", maxlength: "500", placeholder: t.aiPlaceholder });
     var aiButton = el("button", { type: "button", class: "madd-quote__ai-button" }, [icon("sparkle"), el("span", { text: t.aiButton })]);
     var aiNote = el("p", { class: "madd-quote__ai-note", hidden: true });
     var aiBox = el("div", { class: "madd-quote__ai" }, [
@@ -371,13 +496,13 @@
       countriesReady.then(function () {
         var code = data.destination && data.destination.country;
         var hasOption = code && select.querySelector('option[value="' + code + '"]');
-        if (hasOption) select.value = code;
+        if (hasOption) setCountry(code);
         aiMessage([data.note, estimated ? t.aiCheck : "", hasOption ? "" : t.aiNeedCountry].filter(Boolean).join(" "), hasOption ? "ok" : "warn");
         if (hasOption) {
           if (form.requestSubmit) form.requestSubmit();
           else submit.click();
         } else {
-          select.focus();
+          countryInput.focus();
         }
       });
     }
@@ -421,11 +546,12 @@
     // Its own card above the form card (not a section inside it).
     if (aiEnabled) root.insertBefore(aiBox, form);
 
+    form.appendChild(summary);
     form.appendChild(
       el("div", { class: "madd-quote__section" }, [
         el("div", { class: "madd-quote__section-title", text: t.destination }),
         el("div", { class: "madd-quote__grid" }, [
-          field(t.country, select, "", "is-country"),
+          field(t.country, countryCombo, "", "is-country"),
           field(t.city, city),
           field(t.postcode, postcode),
         ]),
@@ -470,6 +596,13 @@
       };
       if (popular.length) select.appendChild(el("optgroup", { label: t.popular }, popular.map(opt)));
       select.appendChild(el("optgroup", { label: t.all }, named.map(opt)));
+      countryItems = list.map(function (c) {
+        var name = countryName(c.iso2, c.name);
+        return { code: c.iso2, name: name, key: norm(name), en: norm(c.name) };
+      });
+      countryItems.sort(function (a, b) {
+        return a.name.localeCompare(b.name, t.locale);
+      });
     });
 
     // ---------- submit ----------
@@ -500,6 +633,7 @@
 
       submit.disabled = true;
       root.classList.add("is-loading");
+      collapseForm(true);
       result.innerHTML = "";
       result.appendChild(
         el("div", { class: "madd-quote__loading" }, [el("div", { class: "madd-quote__spinner" }), el("span", { text: t.loading }), el("div", { class: "madd-quote__skeleton" }), el("div", { class: "madd-quote__skeleton" })])
@@ -509,11 +643,13 @@
         .then(function (res) {
           if (res.ok) return render(res.data, select.value);
           result.innerHTML = "";
+          collapseForm(false);
           var admin = res.data && res.data.admin ? " [Admin] " + res.data.admin : "";
           showError((res.status === 429 ? t.errRate : res.status === 422 ? t.errInvalid : t.errFailed) + admin);
         })
         .catch(function () {
           result.innerHTML = "";
+          collapseForm(false);
           showError(t.errFailed);
         })
         .finally(function () {
@@ -616,19 +752,12 @@
           var badges = [];
           if (o.price === cheapest) badges.push(el("span", { class: "madd-quote__badge is-best", text: t.best }));
           if (o.transit_days && o.transit_days === fastestDays && options.length > 1) badges.push(el("span", { class: "madd-quote__badge is-fast", text: t.fastest }));
-          var meta = [];
-          if (o.transit_days) meta.push(el("span", {}, [icon("clock"), document.createTextNode(t.days(o.transit_days))]));
-          if (o.estimated_delivery) {
-            var d = new Date(o.estimated_delivery);
-            if (!isNaN(d.getTime())) meta.push(el("span", {}, [icon("cal"), document.createTextNode(t.eta + " " + d.toLocaleDateString(t.locale, { weekday: "short", day: "numeric", month: "short" }))]));
-          }
           list.appendChild(
             el("article", { class: "madd-quote__option" + (o.price === cheapest ? " is-best" : ""), style: "animation-delay:" + i * 50 + "ms" }, [
               el("div", { class: "madd-quote__carrier madd-quote__carrier--" + String(o.carrier).toLowerCase() }, [el("b", { text: o.carrier })]),
               el("div", { class: "madd-quote__service" }, [
                 el("div", { class: "madd-quote__badges" }, badges),
                 el("div", { class: "madd-quote__service-name", text: o.service_name }),
-                el("div", { class: "madd-quote__meta" }, meta),
               ]),
               el("div", { class: "madd-quote__price" }, [
                 el("div", { class: "madd-quote__amount-label", text: t.estPrice }),
