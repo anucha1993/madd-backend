@@ -65,7 +65,7 @@ class CriticalFixesTest extends TestCase
         $accountId = DB::table('agent_accounts')->insertGetId(['agent_id' => $agentId, 'username_acc' => '1', 'created_at' => now(), 'updated_at' => now()]);
         $shipment = Shipment::create(['agent_account_id' => $accountId, 'carrier' => 'DHL', 'service_code' => 'P', 'status' => 'booked', 'tracking_number' => '1234567890', 'origin' => [], 'destination' => [], 'packages' => []]);
 
-        Sanctum::actingAs($this->user(['shipment.view', 'shipment.create'], ['can_access_all_branches' => true]));
+        Sanctum::actingAs($this->user(['shipment.view', 'shipment.assign_branch'], ['can_access_all_branches' => true]));
         $this->putJson("/api/shipments/{$shipment->id}/branch", ['branch_id' => $a->id])->assertOk()->assertJsonPath('branch.id', $a->id);
         $this->putJson("/api/shipments/{$shipment->id}/branch", ['branch_id' => $a->id])->assertStatus(422); // already set
     }

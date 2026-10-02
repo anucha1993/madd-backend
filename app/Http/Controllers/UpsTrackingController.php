@@ -36,9 +36,11 @@ class UpsTrackingController extends Controller
             return response()->json(['message' => 'ไม่พบบัญชี UPS ที่เปิดใช้งานอยู่'], 400);
         }
 
+        // Proof of Delivery / signature images are their own permission.
+        $canPod = app(\App\Services\AccessService::class)->can($request->user(), 'tracking.pod');
         $options = [
-            'returnPOD' => (bool) ($data['return_pod'] ?? false),
-            'returnSignature' => (bool) ($data['return_signature'] ?? false),
+            'returnPOD' => $canPod && (bool) ($data['return_pod'] ?? false),
+            'returnSignature' => $canPod && (bool) ($data['return_signature'] ?? false),
             'offset' => $data['offset'] ?? null,
             'count' => $data['count'] ?? null,
             'fromPickUpDate' => $data['from_pickup_date'] ?? null,

@@ -65,6 +65,8 @@ class ShipmentAnalyticsTest extends TestCase
         $this->assertSame(1, collect($res->json('trend'))->sum('UPS'));
 
         $this->getJson('/api/reports/shipment-analytics?carrier=UPS')->assertJsonPath('kpis.shipments', 1);
+        $this->getJson('/api/reports/shipment-analytics/export')->assertForbidden(); // export is its own permission
+        $this->as(['report.summary', 'report.summary_export'], ['shipment' => ['pricing' => 'view']]);
         $this->get('/api/reports/shipment-analytics/export')->assertOk();
     }
 

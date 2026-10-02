@@ -90,7 +90,7 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
     Route::middleware('perm:user.roles')->group(function () {
         Route::post('roles', [RoleController::class, 'store']);
         Route::put('roles/{role}', [RoleController::class, 'update']);
-        Route::delete('roles/{role}', [RoleController::class, 'destroy']);
+        Route::delete('roles/{role}', [RoleController::class, 'destroy'])->middleware('perm:user.roles_delete');
     });
     Route::apiResource('users', UserController::class)->only(['index', 'show'])->middleware('perm:user.view');
     Route::post('users', [UserController::class, 'store'])->middleware('perm:user.create');
@@ -107,16 +107,16 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
         Route::get('api-clients/stats', [ApiClientController::class, 'stats']);
         Route::put('api-clients/{apiClient}', [ApiClientController::class, 'update']);
         Route::delete('api-clients/{apiClient}', [ApiClientController::class, 'destroy']);
-        Route::post('api-clients/{apiClient}/regenerate', [ApiClientController::class, 'regenerate']);
-        Route::post('api-clients/{apiClient}/test', [ApiClientController::class, 'test']);
+        Route::post('api-clients/{apiClient}/regenerate', [ApiClientController::class, 'regenerate'])->middleware('perm:config.api_clients_regenerate');
+        Route::post('api-clients/{apiClient}/test', [ApiClientController::class, 'test'])->middleware('perm:config.api_clients_test');
         Route::get('wordpress-plugins', [WordPressPluginController::class, 'index']);
-        Route::get('wordpress-plugins/{slug}/download', [WordPressPluginController::class, 'download']);
+        Route::get('wordpress-plugins/{slug}/download', [WordPressPluginController::class, 'download'])->middleware('perm:config.wordpress_plugin');
     });
     Route::middleware('perm:config.system_alerts')->group(function () {
         Route::get('system-alerts', [SystemAlertController::class, 'index']);
         Route::get('system-alerts/summary', [SystemAlertController::class, 'summary']);
-        Route::post('system-alerts/resolve-all', [SystemAlertController::class, 'resolveAll']);
-        Route::post('system-alerts/{systemAlert}/resolve', [SystemAlertController::class, 'resolve']);
+        Route::post('system-alerts/resolve-all', [SystemAlertController::class, 'resolveAll'])->middleware('perm:config.system_alerts_resolve');
+        Route::post('system-alerts/{systemAlert}/resolve', [SystemAlertController::class, 'resolve'])->middleware('perm:config.system_alerts_resolve');
     });
 
     // ---- Column Profiles (index returns only the caller's available profiles) ----
@@ -131,7 +131,7 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
     Route::middleware('perm:config.agent_accounts')->group(function () {
         Route::apiResource('agents', AgentController::class)->only(['store', 'update', 'destroy']);
         Route::apiResource('agent-accounts', AgentAccountController::class)->only(['store', 'update', 'destroy']);
-        Route::post('agent-accounts/{agentAccount}/test', [AgentAccountController::class, 'test']);
+        Route::post('agent-accounts/{agentAccount}/test', [AgentAccountController::class, 'test'])->middleware('perm:config.agent_accounts_test');
         Route::get('agent-accounts/{agentAccount}/dhl-products', [AgentAccountController::class, 'dhlProducts']);
     });
 
@@ -143,7 +143,7 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
     Route::delete('branches/{branch}', [BranchController::class, 'destroy'])->middleware('perm:branch.delete');
     // The branch form (create/edit) also loads + saves which carrier accounts the branch uses.
     Route::get('branches/{branch}/carrier-accounts', [BranchCarrierAccountController::class, 'index'])->middleware('perm:branch.view,branch.create,branch.edit');
-    Route::put('branches/{branch}/carrier-accounts', [BranchCarrierAccountController::class, 'sync'])->middleware('perm:branch.create,branch.edit');
+    Route::put('branches/{branch}/carrier-accounts', [BranchCarrierAccountController::class, 'sync'])->middleware('perm:branch.carrier_accounts');
     Route::middleware('perm:branch.doc_numbers')->group(function () {
         Route::get('branches/{branch}/document-number-settings', [BranchController::class, 'documentNumberSettings']);
         Route::put('branches/{branch}/document-number-settings', [BranchController::class, 'updateDocumentNumberSettings']);
@@ -175,12 +175,12 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
         Route::post('address-validation/validate', [AddressValidationController::class, 'validate']);
         Route::post('shipments', [ShipmentController::class, 'store']);
         Route::post('shipments/upload-commercial-invoice', [ShipmentController::class, 'uploadCommercialInvoiceFile']);
-        Route::apiResource('shipment-drafts', ShipmentDraftController::class);
     });
+    Route::apiResource('shipment-drafts', ShipmentDraftController::class)->middleware('perm:shipment.draft');
     Route::middleware('perm:shipment.view')->group(function () {
         Route::get('shipments', [ShipmentController::class, 'index']);
         Route::get('shipments/stats', [ShipmentController::class, 'stats']);
-        Route::put('shipments/{shipment}/branch', [ShipmentController::class, 'assignBranch'])->middleware('perm:shipment.create');
+        Route::put('shipments/{shipment}/branch', [ShipmentController::class, 'assignBranch'])->middleware('perm:shipment.assign_branch');
         Route::get('shipments/{shipment}/label', [ShipmentController::class, 'label'])->middleware('perm:shipment.label');
         Route::get('shipments/{shipment}/labels/all', [ShipmentController::class, 'allLabels'])->middleware('perm:shipment.label');
         Route::get('shipments/{shipment}/waybill', [ShipmentController::class, 'waybill'])->middleware('perm:shipment.waybill');
@@ -188,9 +188,9 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
         Route::get('shipments/{shipment}/commercial-invoice', [ShipmentController::class, 'commercialInvoice'])->middleware('perm:shipment.invoice');
         Route::get('shipments/{shipment}', [ShipmentController::class, 'show']);
     });
-    Route::middleware('perm:shipment.void')->group(function () {
-        Route::post('shipments/{shipment}/void', [ShipmentController::class, 'void']);
-        Route::post('shipments/{shipment}/unvoid', [ShipmentController::class, 'unvoid']);
+    Route::post('shipments/{shipment}/void', [ShipmentController::class, 'void'])->middleware('perm:shipment.void');
+    Route::post('shipments/{shipment}/unvoid', [ShipmentController::class, 'unvoid'])->middleware('perm:shipment.unvoid');
+    Route::middleware('perm:shipment.carrier_cancel')->group(function () {
         Route::post('shipments/{shipment}/confirm-carrier-cancel', [ShipmentController::class, 'confirmCarrierCancel']);
         Route::post('shipments/{shipment}/carrier-cancel-notified', [ShipmentController::class, 'markCarrierCancelNotified']);
     });
@@ -204,8 +204,8 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
     Route::delete('billing-customers/{billing_customer}', [BillingCustomerController::class, 'destroy'])->middleware('perm:billing_customer.delete');
 
     Route::middleware('perm:receipt.view')->group(function () {
-        Route::post('receipts/print-batch', [ReceiptController::class, 'printBatch']);
-        Route::get('receipts/{receipt}/pdf', [ReceiptController::class, 'pdf']);
+        Route::post('receipts/print-batch', [ReceiptController::class, 'printBatch'])->middleware('perm:receipt.print');
+        Route::get('receipts/{receipt}/pdf', [ReceiptController::class, 'pdf'])->middleware('perm:receipt.print');
         Route::get('receipts', [ReceiptController::class, 'index']);
         Route::get('receipts/{receipt}', [ReceiptController::class, 'show']);
     });
@@ -219,8 +219,9 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
 
     // ---- Pickups ----
     Route::get('pickups', [PickupController::class, 'index'])->middleware('perm:pickup.view');
-    Route::post('pickups', [PickupController::class, 'store'])->middleware('perm:pickup.create');
-    Route::post('pickups/{pickup}/cancel', [PickupController::class, 'cancel'])->middleware('perm:pickup.cancel');
+    // Reschedule = cancel the old pickup + book a new one, so it may call both.
+    Route::post('pickups', [PickupController::class, 'store'])->middleware('perm:pickup.create,pickup.reschedule');
+    Route::post('pickups/{pickup}/cancel', [PickupController::class, 'cancel'])->middleware('perm:pickup.cancel,pickup.reschedule');
     Route::middleware('perm:pickup.confirm')->group(function () {
         Route::post('pickups/{pickup}/confirm-collected', [PickupController::class, 'confirmCollected']);
         Route::post('shipments/{shipment}/mark-picked-up', [ShipmentController::class, 'markPickedUp']);
@@ -235,7 +236,7 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
         Route::get('tracking-sync/settings', [TrackingSyncController::class, 'showSettings']);
         Route::put('tracking-sync/settings', [TrackingSyncController::class, 'updateSettings']);
         Route::get('tracking-sync/logs', [TrackingSyncController::class, 'logs']);
-        Route::post('tracking-sync/run-now', [TrackingSyncController::class, 'runNow']);
+        Route::post('tracking-sync/run-now', [TrackingSyncController::class, 'runNow'])->middleware('perm:config.tracking_sync_run');
     });
 
     // ---- Integrations ----
@@ -257,7 +258,7 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
 
     Route::get('countries', [CountryController::class, 'index']);
     Route::middleware('perm:config.countries')->group(function () {
-        Route::post('countries/sync', [CountryController::class, 'sync']);
+        Route::post('countries/sync', [CountryController::class, 'sync'])->middleware('perm:config.countries_sync');
         Route::get('countries/settings', [CountryController::class, 'settings']);
         Route::put('countries/settings', [CountryController::class, 'updateSettings']);
         Route::put('countries/{country}', [CountryController::class, 'update']);
@@ -267,10 +268,10 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
     Route::get('supply-stock', [SupplyStockController::class, 'index'])->middleware('perm:supply_stock.view');
     Route::get('supply-stock/movements', [SupplyStockController::class, 'movements'])->middleware('perm:supply_stock.view');
     Route::post('supply-stock/receive', [SupplyStockController::class, 'receive'])->middleware('perm:supply_stock.receive');
-    Route::post('supply-stock/adjust', [SupplyStockController::class, 'adjust'])->middleware('perm:supply_stock.receive');
+    Route::post('supply-stock/adjust', [SupplyStockController::class, 'adjust'])->middleware('perm:supply_stock.adjust');
     Route::put('supply-stock/limits', [SupplyStockController::class, 'limits'])->middleware('perm:supply_stock.settings');
     Route::get('supply-stock/report', [SupplyStockController::class, 'report'])->middleware('perm:supply_stock.report');
-    Route::get('supply-stock/report/export', [SupplyStockController::class, 'reportExport'])->middleware('perm:supply_stock.report');
+    Route::get('supply-stock/report/export', [SupplyStockController::class, 'reportExport'])->middleware('perm:supply_stock.export');
     Route::get('supplies/{supply}', [SupplyController::class, 'show']);
     Route::apiResource('supplies', SupplyController::class)->only(['store', 'update', 'destroy'])->middleware('perm:config.supplies');
 
@@ -278,7 +279,7 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
     Route::get('insurance-country-caps', [InsuranceCountryCapController::class, 'index']);
     Route::get('insurance-country-caps/{insurance_country_cap}', [InsuranceCountryCapController::class, 'show']);
     Route::middleware('perm:config.insurance')->group(function () {
-        Route::post('insurance-country-caps/import', [InsuranceCountryCapController::class, 'import']);
+        Route::post('insurance-country-caps/import', [InsuranceCountryCapController::class, 'import'])->middleware('perm:config.insurance_import');
         Route::apiResource('insurance-country-caps', InsuranceCountryCapController::class)->only(['store', 'update', 'destroy']);
     });
 
@@ -309,20 +310,20 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
     // ---- Reports ----
     Route::middleware('perm:report.manifest')->group(function () {
         Route::get('manifest-report', [ManifestReportController::class, 'index']);
-        Route::get('manifest-report/export', [ManifestReportController::class, 'export']);
+        Route::get('manifest-report/export', [ManifestReportController::class, 'export'])->middleware('perm:report.manifest_export');
     });
     Route::middleware('perm:report.summary')->group(function () {
         Route::get('reports/shipment-analytics', [ShipmentAnalyticsController::class, 'index']);
-        Route::get('reports/shipment-analytics/export', [ShipmentAnalyticsController::class, 'export']);
+        Route::get('reports/shipment-analytics/export', [ShipmentAnalyticsController::class, 'export'])->middleware('perm:report.summary_export');
     });
     Route::middleware('perm:config.report_schedules')->group(function () {
         Route::apiResource('report-schedules', ReportScheduleController::class)->only(['index', 'store', 'update', 'destroy']);
-        Route::post('report-schedules/{reportSchedule}/send-now', [ReportScheduleController::class, 'sendNow']);
+        Route::post('report-schedules/{reportSchedule}/send-now', [ReportScheduleController::class, 'sendNow'])->middleware('perm:config.report_schedules_send');
     });
 
     Route::middleware('perm:config.smtp')->group(function () {
         Route::get('smtp-settings', [SmtpSettingController::class, 'show']);
         Route::put('smtp-settings', [SmtpSettingController::class, 'update']);
-        Route::post('smtp-settings/test', [SmtpSettingController::class, 'test']);
+        Route::post('smtp-settings/test', [SmtpSettingController::class, 'test'])->middleware('perm:config.smtp_test');
     });
 });
