@@ -242,3 +242,30 @@
 .madd-quote textarea.madd-quote__ai-input { font-size: 14.5px !important; }
 .madd-quote__ai-button { font-size: 14px !important; }
 @media (max-width: 760px) { .madd-quote__form { padding: 18px; } }
+
+/* ---------- results: estimate notice, sort & filter ---------- */
+.madd-quote__estimate {
+  display: flex; gap: 12px; align-items: flex-start; margin: 0 0 14px; padding: 14px 16px; border-radius: 14px;
+  background: #fff8e6; border: 1px solid #f4dd9f; color: #6b4a00; font-size: 13.5px; line-height: 1.55;
+}
+.madd-quote__estimate .madd-quote__icon { width: 20px; height: 20px; margin-top: 1px; color: #b27700; }
+.madd-quote__estimate b { display: block; color: #4a3300; font-size: 14px; margin-bottom: 2px; }
+.madd-quote__toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; margin: 0 0 12px; }
+.madd-quote__tool { display: flex; align-items: center; gap: 8px; }
+.madd-quote__tool-label { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--mq-muted); }
+.madd-quote__seg { display: inline-flex; padding: 3px; border-radius: 12px; background: #eef2f6; }
+.madd-quote__seg-btn {
+  margin: 0 !important; padding: 6px 12px !important; border: 0 !important; border-radius: 9px !important; background: transparent !important;
+  color: var(--mq-muted) !important; font: inherit; font-size: 13px !important; font-weight: 600 !important; text-transform: none !important;
+  cursor: pointer; box-shadow: none !important; min-height: 0 !important; line-height: 1.3 !important; white-space: nowrap;
+}
+.madd-quote__seg-btn:hover { color: var(--mq-ink) !important; }
+.madd-quote__seg-btn.is-on { background: #fff !important; color: var(--mq-navy) !important; box-shadow: 0 1px 3px rgba(15, 23, 42, .12) !important; }
+.madd-quote__count { margin-left: auto; font-size: 12.5px; color: var(--mq-muted); }
+.madd-quote__amount-label { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--mq-muted); }
+@media (max-width: 760px) {
+  .madd-quote__toolbar { gap: 8px; }
+  .madd-quote__tool { width: 100%; overflow-x: auto; }
+  .madd-quote__count { margin-left: 0; }
+  .madd-quote__price { align-items: baseline; gap: 8px; }
+}

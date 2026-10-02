@@ -75,6 +75,16 @@
       aiFailed: "The assistant is busy right now — please fill in the form below.",
       aiEstimated: "AI estimate",
       aiCheck: "Please check the estimate below before booking.",
+      estimateTitle: "Estimated prices — for reference only",
+      estimateBody: "Based on the details you entered and a standard Bangkok pick-up. The final price is confirmed when you book, using the actual weight and size, the pick-up and delivery addresses, and any carrier surcharges (remote area, fuel, duties & taxes).",
+      estPrice: "Est. price",
+      sortBy: "Sort",
+      sortLow: "Price: low to high",
+      sortHigh: "Price: high to low",
+      sortFast: "Fastest",
+      carrierFilter: "Carrier",
+      all2: "All",
+      showing: function (n, total) { return n === total ? total + " options" : n + " of " + total + " options"; },
     },
     th: {
       locale: "th-TH",
@@ -133,6 +143,16 @@
       aiFailed: "ผู้ช่วยไม่ว่างในขณะนี้ กรุณากรอกฟอร์มด้านล่าง",
       aiEstimated: "AI ประมาณ",
       aiCheck: "กรุณาตรวจสอบค่าที่ประมาณไว้ด้านล่างก่อนจอง",
+      estimateTitle: "ราคาประมาณการ — ใช้เพื่อประกอบการตัดสินใจเท่านั้น",
+      estimateBody: "คำนวณจากข้อมูลที่กรอกและการรับพัสดุในกรุงเทพฯ ราคาจริงจะยืนยันตอนจอง ตามน้ำหนักและขนาดจริง ที่อยู่รับ/ส่ง และค่าธรรมเนียมของ Carrier (พื้นที่ห่างไกล น้ำมัน ภาษีนำเข้า)",
+      estPrice: "ราคาประมาณ",
+      sortBy: "เรียง",
+      sortLow: "ราคาน้อย → มาก",
+      sortHigh: "ราคามาก → น้อย",
+      sortFast: "เร็วที่สุด",
+      carrierFilter: "Carrier",
+      all2: "ทั้งหมด",
+      showing: function (n, total) { return n === total ? total + " ตัวเลือก" : n + " จาก " + total + " ตัวเลือก"; },
     },
   };
 
@@ -157,6 +177,7 @@
     clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
     cal: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg>',
     arrow: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
+    info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>',
     sparkle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>',
   };
 
@@ -515,37 +536,110 @@
         return contact();
       }
 
+      // Estimate notice — up front, not only as small print under the list.
+      result.appendChild(
+        el("div", { class: "madd-quote__estimate", role: "note" }, [
+          icon("info"),
+          el("div", {}, [el("b", { text: t.estimateTitle }), el("span", { text: t.estimateBody })]),
+        ])
+      );
+
+      // Badges are computed on ALL options so "Best price" / "Fastest" don't move when filtering.
       var cheapest = options.reduce(function (m, o) {
         return o.price < m ? o.price : m;
       }, Infinity);
       var fastestDays = options.reduce(function (m, o) {
         return o.transit_days && o.transit_days < m ? o.transit_days : m;
       }, Infinity);
+      var carriers = options.map(function (o) { return o.carrier; }).filter(function (c, i, a) { return a.indexOf(c) === i; });
+      var state = { sort: "price_asc", carrier: "all" };
 
       var list = el("div", { class: "madd-quote__options" });
-      options.forEach(function (o, i) {
-        var badges = [];
-        if (o.price === cheapest) badges.push(el("span", { class: "madd-quote__badge is-best", text: t.best }));
-        if (o.transit_days && o.transit_days === fastestDays && options.length > 1) badges.push(el("span", { class: "madd-quote__badge is-fast", text: t.fastest }));
-        var meta = [];
-        if (o.transit_days) meta.push(el("span", {}, [icon("clock"), document.createTextNode(t.days(o.transit_days))]));
-        if (o.estimated_delivery) {
-          var d = new Date(o.estimated_delivery);
-          if (!isNaN(d.getTime())) meta.push(el("span", {}, [icon("cal"), document.createTextNode(t.eta + " " + d.toLocaleDateString(t.locale, { weekday: "short", day: "numeric", month: "short" }))]));
-        }
-        list.appendChild(
-          el("article", { class: "madd-quote__option" + (o.price === cheapest ? " is-best" : ""), style: "animation-delay:" + i * 60 + "ms" }, [
-            el("div", { class: "madd-quote__carrier madd-quote__carrier--" + String(o.carrier).toLowerCase() }, [el("b", { text: o.carrier })]),
-            el("div", { class: "madd-quote__service" }, [
-              el("div", { class: "madd-quote__badges" }, badges),
-              el("div", { class: "madd-quote__service-name", text: o.service_name }),
-              el("div", { class: "madd-quote__meta" }, meta),
-            ]),
-            el("div", { class: "madd-quote__price" }, [el("div", { class: "madd-quote__amount", text: money(o.price, o.currency) })]),
-          ])
-        );
-      });
+      var countNote = el("span", { class: "madd-quote__count" });
+
+      function segmented(items, key) {
+        var wrap = el("div", { class: "madd-quote__seg", role: "group" });
+        items.forEach(function (it) {
+          var b = el("button", { type: "button", class: "madd-quote__seg-btn" + (state[key] === it.value ? " is-on" : ""), "aria-pressed": state[key] === it.value ? "true" : "false", text: it.label });
+          b.addEventListener("click", function () {
+            state[key] = it.value;
+            Array.prototype.forEach.call(wrap.children, function (c) {
+              c.classList.toggle("is-on", c === b);
+              c.setAttribute("aria-pressed", c === b ? "true" : "false");
+            });
+            draw();
+          });
+          wrap.appendChild(b);
+        });
+        return wrap;
+      }
+
+      var toolbar = el("div", { class: "madd-quote__toolbar" }, [
+        el("div", { class: "madd-quote__tool" }, [
+          el("span", { class: "madd-quote__tool-label", text: t.sortBy }),
+          segmented(
+            [
+              { value: "price_asc", label: t.sortLow },
+              { value: "price_desc", label: t.sortHigh },
+              { value: "fastest", label: t.sortFast },
+            ],
+            "sort"
+          ),
+        ]),
+        carriers.length > 1
+          ? el("div", { class: "madd-quote__tool" }, [
+              el("span", { class: "madd-quote__tool-label", text: t.carrierFilter }),
+              segmented([{ value: "all", label: t.all2 }].concat(carriers.map(function (c) { return { value: c, label: c }; })), "carrier"),
+            ])
+          : null,
+        countNote,
+      ]);
+      result.appendChild(toolbar);
       result.appendChild(list);
+
+      function draw() {
+        var shown = options.filter(function (o) {
+          return state.carrier === "all" || o.carrier === state.carrier;
+        });
+        shown.sort(function (a, b) {
+          if (state.sort === "price_desc") return b.price - a.price;
+          if (state.sort === "fastest") {
+            var da = a.transit_days || 99;
+            var db = b.transit_days || 99;
+            return da - db || a.price - b.price;
+          }
+          return a.price - b.price;
+        });
+        countNote.textContent = t.showing(shown.length, options.length);
+        list.innerHTML = "";
+        shown.forEach(function (o, i) {
+          var badges = [];
+          if (o.price === cheapest) badges.push(el("span", { class: "madd-quote__badge is-best", text: t.best }));
+          if (o.transit_days && o.transit_days === fastestDays && options.length > 1) badges.push(el("span", { class: "madd-quote__badge is-fast", text: t.fastest }));
+          var meta = [];
+          if (o.transit_days) meta.push(el("span", {}, [icon("clock"), document.createTextNode(t.days(o.transit_days))]));
+          if (o.estimated_delivery) {
+            var d = new Date(o.estimated_delivery);
+            if (!isNaN(d.getTime())) meta.push(el("span", {}, [icon("cal"), document.createTextNode(t.eta + " " + d.toLocaleDateString(t.locale, { weekday: "short", day: "numeric", month: "short" }))]));
+          }
+          list.appendChild(
+            el("article", { class: "madd-quote__option" + (o.price === cheapest ? " is-best" : ""), style: "animation-delay:" + i * 50 + "ms" }, [
+              el("div", { class: "madd-quote__carrier madd-quote__carrier--" + String(o.carrier).toLowerCase() }, [el("b", { text: o.carrier })]),
+              el("div", { class: "madd-quote__service" }, [
+                el("div", { class: "madd-quote__badges" }, badges),
+                el("div", { class: "madd-quote__service-name", text: o.service_name }),
+                el("div", { class: "madd-quote__meta" }, meta),
+              ]),
+              el("div", { class: "madd-quote__price" }, [
+                el("div", { class: "madd-quote__amount-label", text: t.estPrice }),
+                el("div", { class: "madd-quote__amount", text: money(o.price, o.currency) }),
+              ]),
+            ])
+          );
+        });
+      }
+      draw();
+
       result.appendChild(el("p", { class: "madd-quote__disclaimer", text: "* " + t.disclaimer }));
       contact();
       if (result.scrollIntoView && window.innerWidth < 900) result.scrollIntoView({ behavior: "smooth", block: "start" });
