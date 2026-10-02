@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MADD Rate Quote
  * Description: ฟอร์มเช็คราคาค่าส่งระหว่างประเทศ (UPS / DHL) ราคาเดียวกับหน้าร้าน จากระบบ MADD — shortcode [madd_rate_quote] (ภาษาอังกฤษ: [madd_rate_quote lang="en"])
- * Version: 1.2.1
+ * Version: 1.2.2
  * Requires at least: 5.8
  * Requires PHP: 7.4
  * Author: MADD
@@ -20,7 +20,7 @@ if (! defined('ABSPATH')) {
 final class Madd_Rate_Quote
 {
     const OPTION = 'madd_rate_quote';
-    const VERSION = '1.2.1';
+    const VERSION = '1.2.2';
     const NONCE = 'madd_rate_quote';
     const COUNTRIES_CACHE = 'madd_rate_quote_countries';
 

@@ -397,7 +397,8 @@
         askAi();
       }
     });
-    if (aiEnabled) form.appendChild(aiBox);
+    // Its own card above the form card (not a section inside it).
+    if (aiEnabled) root.insertBefore(aiBox, form);
 
     form.appendChild(
       el("div", { class: "madd-quote__section" }, [

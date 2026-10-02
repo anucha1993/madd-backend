@@ -26,13 +26,13 @@
 
 /* ---------- form card ---------- */
 .madd-quote__form {
-  padding: 36px 40px;
+  padding: 26px 28px;
   border: 1px solid rgba(11, 42, 54, .08);
   border-radius: var(--mq-radius);
   background: #fff;
   box-shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 24px 60px -24px rgba(11, 42, 54, .28);
 }
-.madd-quote__section + .madd-quote__section { margin-top: 30px; padding-top: 30px; border-top: 1px dashed var(--mq-line); }
+.madd-quote__section + .madd-quote__section { margin-top: 20px; padding-top: 20px; border-top: 1px dashed var(--mq-line); }
 .madd-quote__section-title { margin-bottom: 14px; font-size: 12.5px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--mq-muted); }
 .madd-quote__grid { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 16px; }
 .madd-quote__hint { margin: 8px 2px 0 !important; font-size: 12.5px; color: var(--mq-muted); }
@@ -40,9 +40,9 @@
 .madd-quote__label { font-size: 14px; font-weight: 600; color: var(--mq-ink); }
 .madd-quote__control { position: relative; display: flex; }
 .madd-quote input[type="text"], .madd-quote input[type="number"], .madd-quote select {
-  width: 100%; height: 56px !important; margin: 0 !important; padding: 0 16px !important;
+  width: 100%; height: 44px !important; margin: 0 !important; padding: 0 12px !important;
   border: 1px solid transparent !important; border-radius: 12px !important; background: var(--mq-soft) !important;
-  box-shadow: none !important; font: inherit; font-size: 16px !important; color: var(--mq-ink) !important;
+  box-shadow: none !important; font: inherit; font-size: 14.5px !important; color: var(--mq-ink) !important;
   transition: background-color .15s, border-color .15s, box-shadow .15s; -moz-appearance: textfield;
 }
 .madd-quote input::-webkit-outer-spin-button, .madd-quote input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
@@ -60,11 +60,11 @@
 .madd-quote__type { position: relative; margin: 0 !important; cursor: pointer; }
 .madd-quote__type input { position: absolute; opacity: 0; pointer-events: none; }
 .madd-quote__type-body {
-  display: flex; align-items: center; gap: 16px; padding: 20px 22px; border: 1.5px solid var(--mq-line); border-radius: 16px;
+  display: flex; align-items: center; gap: 12px; padding: 12px 16px; border: 1.5px solid var(--mq-line); border-radius: 14px;
   background: #fff; transition: border-color .15s, box-shadow .15s, background .15s;
 }
-.madd-quote__type-body .madd-quote__icon { width: 30px; height: 30px; color: var(--mq-muted); }
-.madd-quote__type-body b { display: block; font-size: 17px; }
+.madd-quote__type-body .madd-quote__icon { width: 24px; height: 24px; color: var(--mq-muted); }
+.madd-quote__type-body b { display: block; font-size: 15px; }
 .madd-quote__type-body small { display: block; font-size: 13.5px; color: var(--mq-muted); }
 .madd-quote__type:hover .madd-quote__type-body { border-color: #cfd8e2; }
 .madd-quote__type input:checked + .madd-quote__type-body { border-color: var(--mq-accent); background: linear-gradient(180deg, #fff, #f7fafc); box-shadow: 0 0 0 4px rgba(11, 42, 54, .07); }
@@ -81,7 +81,7 @@
 .madd-quote.is-document .madd-quote__field.is-dim { display: none; }
 .madd-quote__package-no { align-self: center; padding-top: 22px; font-size: 13px; font-weight: 700; color: var(--mq-muted); text-align: center; }
 .madd-quote__remove {
-  display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 56px; padding: 0 !important; margin: 0 !important;
+  display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 44px; padding: 0 !important; margin: 0 !important;
   border: 0 !important; border-radius: 12px !important; background: transparent !important; color: #94a3b8 !important; cursor: pointer; box-shadow: none !important;
 }
 .madd-quote__remove:hover { background: #fdecec !important; color: var(--mq-bad) !important; }
@@ -98,9 +98,9 @@
 /* submit */
 .madd-quote__error { margin: 18px 0 0 !important; padding: 12px 14px; border-radius: 12px; background: #fdecec; color: var(--mq-bad); font-weight: 500; }
 .madd-quote__submit {
-  display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; height: 66px; margin: 28px 0 0 !important; padding: 0 24px !important;
+  display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; height: 52px; margin: 22px 0 0 !important; padding: 0 24px !important;
   border: 0 !important; border-radius: 16px !important; background: linear-gradient(135deg, var(--mq-navy) 0%, var(--mq-navy-2) 100%) !important;
-  color: #fff !important; font: inherit; font-size: 18px !important; font-weight: 700 !important; letter-spacing: .01em; text-transform: none !important; cursor: pointer;
+  color: #fff !important; font: inherit; font-size: 16px !important; font-weight: 700 !important; letter-spacing: .01em; text-transform: none !important; cursor: pointer;
   box-shadow: 0 14px 30px -14px rgba(11, 42, 54, .8) !important; transition: transform .15s, box-shadow .2s, opacity .2s; line-height: 1 !important;
 }
 .madd-quote__submit:hover { transform: translateY(-1px); box-shadow: 0 18px 34px -14px rgba(11, 42, 54, .85) !important; }
@@ -182,7 +182,7 @@
 
 /* ---------- AI assistant ---------- */
 .madd-quote__ai {
-  position: relative; margin-bottom: 28px; padding: 18px; border-radius: 18px;
+  position: relative; margin-bottom: 16px; padding: 18px 20px; border-radius: var(--mq-radius); box-shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 18px 40px -26px rgba(180, 120, 0, .35);
   background: linear-gradient(135deg, #fffaf0 0%, #f4f8fb 100%); border: 1px solid #f3e3b5;
 }
 .madd-quote__ai[hidden] { display: none !important; }
@@ -194,13 +194,13 @@
 .madd-quote__ai-badge .madd-quote__icon { width: 13px; height: 13px; }
 .madd-quote__ai-row { display: flex; gap: 10px; align-items: stretch; }
 .madd-quote textarea.madd-quote__ai-input {
-  flex: 1; min-width: 0; min-height: 56px; margin: 0 !important; padding: 15px 16px !important; resize: none;
+  flex: 1; min-width: 0; min-height: 46px; margin: 0 !important; padding: 11px 14px !important; resize: none;
   border: 1px solid #ecdcae !important; border-radius: 14px !important; background: #fff !important; box-shadow: none !important;
   font: inherit; font-size: 15.5px !important; line-height: 1.5; color: var(--mq-ink) !important;
 }
 .madd-quote textarea.madd-quote__ai-input:focus { outline: 0 !important; border-color: var(--mq-gold) !important; box-shadow: 0 0 0 4px rgba(245, 180, 0, .15) !important; }
 .madd-quote__ai-button {
-  display: inline-flex; align-items: center; justify-content: center; gap: 8px; flex: 0 0 auto; min-height: 56px; margin: 0 !important; padding: 0 20px !important;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; flex: 0 0 auto; min-height: 46px; margin: 0 !important; padding: 0 18px !important;
   border: 0 !important; border-radius: 14px !important; background: linear-gradient(135deg, #f5b400 0%, #ff9d00 100%) !important;
   color: #3b2600 !important; font: inherit; font-weight: 800 !important; font-size: 15px !important; text-transform: none !important; cursor: pointer;
   box-shadow: 0 10px 22px -12px rgba(200, 120, 0, .8) !important; line-height: 1.2 !important;
@@ -232,3 +232,13 @@
 
 /* carrier text badge (no logos) */
 .madd-quote__carrier b { font-size: 20px; font-weight: 800; letter-spacing: .1em; color: var(--mq-navy); }
+
+/* compact sizing */
+.madd-quote__label { font-size: 13px; }
+.madd-quote__package { padding: 12px; gap: 10px; }
+.madd-quote__package-no { padding-top: 20px; }
+.madd-quote__unit { right: 12px; font-size: 12.5px; }
+.madd-quote__control.has-unit input { padding-right: 38px !important; }
+.madd-quote textarea.madd-quote__ai-input { font-size: 14.5px !important; }
+.madd-quote__ai-button { font-size: 14px !important; }
+@media (max-width: 760px) { .madd-quote__form { padding: 18px; } }
