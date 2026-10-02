@@ -79,7 +79,7 @@ class CriticalFixesTest extends TestCase
         $dhl = $make(['carrier' => 'DHL', 'waybill_storage_key' => 'shipments/waybill/5437367191.pdf']);
         $ups = $make(['carrier' => 'UPS', 'waybill_storage_key' => 'shipments/waybill/1Z.pdf']);
 
-        Sanctum::actingAs($this->user(['shipment.view', 'shipment.waybill']));
+        Sanctum::actingAs($this->user(['shipment.view', 'shipment.waybill_original']));
         $res = $this->get("/api/shipments/{$dhl->id}/waybill/original")->assertOk()->assertHeader('Content-Type', 'application/pdf');
         $this->assertStringContainsString('attachment; filename="DHL-waybill-5437367191.pdf"', $res->headers->get('Content-Disposition'));
         $this->assertSame('%PDF-dhl', $res->getContent());
@@ -99,7 +99,7 @@ class CriticalFixesTest extends TestCase
         $this->getJson("/api/shipments/{$dhl->id}/waybill/original")->assertForbidden();
         $this->getJson("/api/shipments/{$dhl->id}/commercial-invoice")->assertForbidden();
 
-        Sanctum::actingAs($this->user(['shipment.view', 'shipment.waybill']));
+        Sanctum::actingAs($this->user(['shipment.view', 'shipment.waybill_original']));
         $this->get("/api/shipments/{$dhl->id}/waybill/original")->assertOk();
         $this->getJson("/api/shipments/{$dhl->id}/commercial-invoice")->assertForbidden();
     }

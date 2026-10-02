@@ -182,18 +182,16 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
         Route::get('shipments/stats', [ShipmentController::class, 'stats']);
         Route::put('shipments/{shipment}/branch', [ShipmentController::class, 'assignBranch'])->middleware('perm:shipment.assign_branch');
         Route::get('shipments/{shipment}/label', [ShipmentController::class, 'label'])->middleware('perm:shipment.label');
-        Route::get('shipments/{shipment}/labels/all', [ShipmentController::class, 'allLabels'])->middleware('perm:shipment.label');
+        Route::get('shipments/{shipment}/labels/all', [ShipmentController::class, 'allLabels'])->middleware('perm:shipment.label_all');
         Route::get('shipments/{shipment}/waybill', [ShipmentController::class, 'waybill'])->middleware('perm:shipment.waybill');
-        Route::get('shipments/{shipment}/waybill/original', [ShipmentController::class, 'originalWaybill'])->middleware('perm:shipment.waybill');
+        Route::get('shipments/{shipment}/waybill/original', [ShipmentController::class, 'originalWaybill'])->middleware('perm:shipment.waybill_original');
         Route::get('shipments/{shipment}/commercial-invoice', [ShipmentController::class, 'commercialInvoice'])->middleware('perm:shipment.invoice');
         Route::get('shipments/{shipment}', [ShipmentController::class, 'show']);
     });
     Route::post('shipments/{shipment}/void', [ShipmentController::class, 'void'])->middleware('perm:shipment.void');
     Route::post('shipments/{shipment}/unvoid', [ShipmentController::class, 'unvoid'])->middleware('perm:shipment.unvoid');
-    Route::middleware('perm:shipment.carrier_cancel')->group(function () {
-        Route::post('shipments/{shipment}/confirm-carrier-cancel', [ShipmentController::class, 'confirmCarrierCancel']);
-        Route::post('shipments/{shipment}/carrier-cancel-notified', [ShipmentController::class, 'markCarrierCancelNotified']);
-    });
+    Route::post('shipments/{shipment}/carrier-cancel-notified', [ShipmentController::class, 'markCarrierCancelNotified'])->middleware('perm:shipment.cancel_notified');
+    Route::post('shipments/{shipment}/confirm-carrier-cancel', [ShipmentController::class, 'confirmCarrierCancel'])->middleware('perm:shipment.cancel_confirmed');
     Route::delete('shipments/{shipment}', [ShipmentController::class, 'destroy'])->middleware('perm:shipment.delete');
 
     // ---- Billing ----
@@ -222,10 +220,8 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
     // Reschedule = cancel the old pickup + book a new one, so it may call both.
     Route::post('pickups', [PickupController::class, 'store'])->middleware('perm:pickup.create,pickup.reschedule');
     Route::post('pickups/{pickup}/cancel', [PickupController::class, 'cancel'])->middleware('perm:pickup.cancel,pickup.reschedule');
-    Route::middleware('perm:pickup.confirm')->group(function () {
-        Route::post('pickups/{pickup}/confirm-collected', [PickupController::class, 'confirmCollected']);
-        Route::post('shipments/{shipment}/mark-picked-up', [ShipmentController::class, 'markPickedUp']);
-    });
+    Route::post('pickups/{pickup}/confirm-collected', [PickupController::class, 'confirmCollected'])->middleware('perm:pickup.confirm');
+    Route::post('shipments/{shipment}/mark-picked-up', [ShipmentController::class, 'markPickedUp'])->middleware('perm:shipment.mark_picked_up');
 
     // ---- Tracking ----
     Route::middleware('perm:tracking.view,shipment.view')->group(function () {
