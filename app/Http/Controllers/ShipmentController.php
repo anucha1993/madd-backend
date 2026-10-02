@@ -1328,38 +1328,33 @@ class ShipmentController extends Controller
         file_put_contents($tempPath, $bytes);
 
         try {
-            $mpdf = new Mpdf(['format' => 'A4']);
+            // Always an A4 portrait sheet (same as UPS's Shipper's Copy): DHL's document is
+            // scaled to fit the printable width / the height left after our charges block, centred.
+            $pageW = 210;
+            $pageH = 297;
+            $margin = 10;
+            $maxW = $pageW - 2 * $margin;
+            $maxH = $pageH - 2 * $margin - $extraHeight - 6;
+            $mpdf = new Mpdf(['format' => 'A4', 'margin_top' => 0, 'margin_bottom' => 0, 'margin_left' => 0, 'margin_right' => 0, 'tempDir' => sys_get_temp_dir()]);
+            $mpdf->AddPageByArray(['orientation' => 'P', 'sheet-size' => [$pageW, $pageH], 'margin-top' => 0, 'margin-bottom' => 0, 'margin-left' => 0, 'margin-right' => 0]);
 
             if ($extension === 'pdf') {
                 $mpdf->setSourceFile($tempPath);
                 $templateId = $mpdf->importPage(1);
                 $size = $mpdf->getTemplateSize($templateId);
-                // orientation MUST be 'P' — mpdf's _setPageSize() swaps sheet-size width/height
-                // whenever orientation is 'L', which would corrupt an already-exact final size.
-                $mpdf->AddPageByArray([
-                    'orientation' => 'P',
-                    'sheet-size' => [$size['width'], $size['height'] + $extraHeight],
-                    'margin-top' => 0,
-                    'margin-bottom' => 0,
-                    'margin-left' => 0,
-                    'margin-right' => 0,
-                ]);
-                $mpdf->useTemplate($templateId, 0, 0, $size['width'], $size['height']);
-                $labelBottomY = $size['height'];
+                $scale = min($maxW / $size['width'], $maxH / $size['height'], 1.6);
+                $w = $size['width'] * $scale;
+                $h = $size['height'] * $scale;
+                $mpdf->useTemplate($templateId, ($pageW - $w) / 2, $margin, $w, $h);
             } else {
-                // Non-PDF label (e.g. image) — draw it in at a fixed size, same as allLabels().
-                $sheetWidth = 190;
-                $labelHeight = 270;
-                $mpdf->AddPageByArray([
-                    'sheet-size' => [$sheetWidth + 20, $labelHeight + 20 + $extraHeight],
-                    'margin-top' => 0,
-                    'margin-bottom' => 0,
-                    'margin-left' => 0,
-                    'margin-right' => 0,
-                ]);
-                $mpdf->Image($tempPath, 10, 10, $sheetWidth, 0, '', '', false, false);
-                $labelBottomY = $labelHeight + 10;
+                // Non-PDF document (e.g. image) — fitted the same way.
+                [$imgW, $imgH] = getimagesize($tempPath) ?: [1, 1];
+                $scale = min($maxW / $imgW, $maxH / $imgH);
+                $w = $imgW * $scale;
+                $h = $imgH * $scale;
+                $mpdf->Image($tempPath, ($pageW - $w) / 2, $margin, $w, $h, '', '', false, false);
             }
+            $labelBottomY = $margin + $h;
 
             $y = $labelBottomY + 6;
             foreach ($lineGroups as $lines) {
@@ -1368,7 +1363,7 @@ class ShipmentController extends Controller
                     // page-break (unlike Write()) — needed since this sits right at the sheet's
                     // bottom edge, past where Write() would otherwise overflow onto a new page.
                     $mpdf->SetFont('', $line['bold'] ? 'B' : '', 9);
-                    $mpdf->Text(5, $y, $line['text']);
+                    $mpdf->Text($margin + 5, $y, $line['text']);
                     $y += 5;
                 }
                 $y += 3;
