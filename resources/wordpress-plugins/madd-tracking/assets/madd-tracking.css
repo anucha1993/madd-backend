@@ -76,7 +76,7 @@
   .madd-tracking__event-time { flex: none; }
 }
 
-/* carrier logo in the result header */
+/* carrier badge in the result header */
 .madd-tracking__id { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .madd-tracking__carrier {
   flex: 0 0 auto; display: flex; align-items: center; justify-content: center; height: 48px; min-width: 64px; padding: 0 12px;
@@ -91,3 +91,7 @@
   .madd-tracking__carrier--ups img { height: 26px; }
   .madd-tracking__carrier--dhl img { height: 13px; }
 }
+
+/* carrier text badge (no logos) */
+.madd-tracking__carrier { min-width: 70px; height: 44px; }
+.madd-tracking__carrier span { font-size: 15px; font-weight: 800; letter-spacing: .08em; color: #0b2a36; }

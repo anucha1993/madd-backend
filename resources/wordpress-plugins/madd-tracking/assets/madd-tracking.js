@@ -118,9 +118,8 @@
     }
 
     function carrierBadge(carrier) {
-      var logo = config.logos && config.logos[carrier];
       return el("div", { class: "madd-tracking__carrier madd-tracking__carrier--" + String(carrier).toLowerCase() }, [
-        logo ? el("img", { src: logo, alt: carrier, loading: "lazy" }) : el("span", { text: carrier }),
+        el("span", { text: carrier }),
       ]);
     }
 

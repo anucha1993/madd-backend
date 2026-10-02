@@ -523,7 +523,6 @@
 
       var list = el("div", { class: "madd-quote__options" });
       options.forEach(function (o, i) {
-        var logo = config.logos && config.logos[o.carrier];
         var badges = [];
         if (o.price === cheapest) badges.push(el("span", { class: "madd-quote__badge is-best", text: t.best }));
         if (o.transit_days && o.transit_days === fastestDays && options.length > 1) badges.push(el("span", { class: "madd-quote__badge is-fast", text: t.fastest }));
@@ -535,7 +534,7 @@
         }
         list.appendChild(
           el("article", { class: "madd-quote__option" + (o.price === cheapest ? " is-best" : ""), style: "animation-delay:" + i * 60 + "ms" }, [
-            el("div", { class: "madd-quote__carrier madd-quote__carrier--" + String(o.carrier).toLowerCase() }, [logo ? el("img", { src: logo, alt: o.carrier, loading: "lazy" }) : el("b", { text: o.carrier })]),
+            el("div", { class: "madd-quote__carrier madd-quote__carrier--" + String(o.carrier).toLowerCase() }, [el("b", { text: o.carrier })]),
             el("div", { class: "madd-quote__service" }, [
               el("div", { class: "madd-quote__badges" }, badges),
               el("div", { class: "madd-quote__service-name", text: o.service_name }),

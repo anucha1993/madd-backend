@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MADD Tracking
  * Description: ฟอร์มติดตามพัสดุ (UPS / DHL) จากระบบ MADD — shortcode [madd_tracking] (ภาษาอังกฤษ: [madd_tracking lang="en"]) · ลิงก์ตรง ?tn=เลขTracking
- * Version: 1.4.0
+ * Version: 1.4.1
  * Requires at least: 5.8
  * Requires PHP: 7.4
  * Author: MADD
@@ -19,7 +19,7 @@ if (! defined('ABSPATH')) {
 final class Madd_Tracking
 {
     const OPTION = 'madd_tracking';
-    const VERSION = '1.4.0';
+    const VERSION = '1.4.1';
     const AJAX_ACTION = 'madd_tracking_lookup';
     // How long WordPress reuses an answer before asking MADD again (seconds).
     const RESULT_CACHE = 300;
@@ -58,8 +58,6 @@ final class Madd_Tracking
             'turnstile_secret' => '',
             'contact_url' => '',
             'contact_label' => 'ติดต่อเจ้าหน้าที่',
-            'ups_logo' => 'https://madd.co.th/wp-content/uploads/2026/09/United_Parcel_Service_logo_2014.svg.webp',
-            'dhl_logo' => 'https://madd.co.th/wp-content/uploads/2026/09/DHL_Logo.svg-scaled.webp',
         ]);
         // Constants in wp-config.php win, so the key never has to sit in the database.
         if (defined('MADD_RATE_API_URL')) {
@@ -97,8 +95,6 @@ final class Madd_Tracking
                     'turnstile_site_key' => sanitize_text_field($input['turnstile_site_key'] ?? ''),
                     'contact_url' => esc_url_raw(trim($input['contact_url'] ?? '')),
                     'contact_label' => sanitize_text_field($input['contact_label'] ?? ''),
-                    'ups_logo' => esc_url_raw(trim($input['ups_logo'] ?? '')),
-                    'dhl_logo' => esc_url_raw(trim($input['dhl_logo'] ?? '')),
                     // Secrets: an empty submit keeps the stored value (never echoed back to the form).
                     'api_key' => trim($input['api_key'] ?? '') !== '' ? sanitize_text_field($input['api_key']) : ($old['api_key'] ?? ''),
                     'turnstile_secret' => trim($input['turnstile_secret'] ?? '') !== '' ? sanitize_text_field($input['turnstile_secret']) : ($old['turnstile_secret'] ?? ''),
@@ -155,14 +151,6 @@ final class Madd_Tracking
                             <input name="<?php echo $name; ?>[contact_label]" type="text" class="regular-text" value="<?php echo esc_attr($s['contact_label']); ?>" placeholder="ข้อความบนปุ่ม"><br>
                             <input name="<?php echo $name; ?>[contact_url]" type="url" class="regular-text" value="<?php echo esc_attr($s['contact_url']); ?>" placeholder="เช่น https://line.me/R/ti/p/@yourshop" style="margin-top:6px">
                             <p class="description">เว้นว่าง = ไม่แสดงปุ่ม</p>
-                        </td>
-                    </tr>
-                    <tr>
-                        <th scope="row">โลโก้ Carrier</th>
-                        <td>
-                            <input name="<?php echo $name; ?>[ups_logo]" type="url" class="regular-text" value="<?php echo esc_attr($s['ups_logo']); ?>" placeholder="URL โลโก้ UPS"><br>
-                            <input name="<?php echo $name; ?>[dhl_logo]" type="url" class="regular-text" value="<?php echo esc_attr($s['dhl_logo']); ?>" placeholder="URL โลโก้ DHL" style="margin-top:6px">
-                            <p class="description">แสดงที่หัวผลการค้นหา — เว้นว่าง = แสดงเป็นชื่อ Carrier</p>
                         </td>
                     </tr>
                 </table>
@@ -327,7 +315,6 @@ final class Madd_Tracking
             'contactLabel' => $s['contact_label'],
             // Public base URL (no key): the browser asks MADD directly first — see madd-tracking.js.
             'apiUrl' => $s['api_url'] ? self::base_url($s['api_url']) : '',
-            'logos' => ['UPS' => $s['ups_logo'], 'DHL' => $s['dhl_logo']],
         ]);
         $prefill = isset($_GET['tn']) ? self::clean_number(wp_unslash($_GET['tn'])) : '';
         $input_id = 'madd-tn-'.wp_unique_id();

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: MADD Rate Quote
  * Description: ฟอร์มเช็คราคาค่าส่งระหว่างประเทศ (UPS / DHL) ราคาเดียวกับหน้าร้าน จากระบบ MADD — shortcode [madd_rate_quote] (ภาษาอังกฤษ: [madd_rate_quote lang="en"])
- * Version: 1.2.0
+ * Version: 1.2.1
  * Requires at least: 5.8
  * Requires PHP: 7.4
  * Author: MADD
@@ -20,7 +20,7 @@ if (! defined('ABSPATH')) {
 final class Madd_Rate_Quote
 {
     const OPTION = 'madd_rate_quote';
-    const VERSION = '1.2.0';
+    const VERSION = '1.2.1';
     const NONCE = 'madd_rate_quote';
     const COUNTRIES_CACHE = 'madd_rate_quote_countries';
 
@@ -48,8 +48,6 @@ final class Madd_Rate_Quote
             'api_key' => '',
             'contact_url' => '',
             'contact_label' => '',
-            'ups_logo' => 'https://madd.co.th/wp-content/uploads/2026/09/United_Parcel_Service_logo_2014.svg.webp',
-            'dhl_logo' => 'https://madd.co.th/wp-content/uploads/2026/09/DHL_Logo.svg-scaled.webp',
         ]);
         if (defined('MADD_RATE_API_URL')) {
             $settings['api_url'] = MADD_RATE_API_URL;
@@ -98,8 +96,6 @@ final class Madd_Rate_Quote
                     'api_key' => trim($input['api_key'] ?? '') !== '' ? sanitize_text_field($input['api_key']) : ($old['api_key'] ?? ''),
                     'contact_url' => esc_url_raw(trim($input['contact_url'] ?? '')),
                     'contact_label' => sanitize_text_field($input['contact_label'] ?? ''),
-                    'ups_logo' => esc_url_raw(trim($input['ups_logo'] ?? '')),
-                    'dhl_logo' => esc_url_raw(trim($input['dhl_logo'] ?? '')),
                 ];
             },
         ]);
@@ -139,13 +135,6 @@ final class Madd_Rate_Quote
                             <input name="<?php echo $name; ?>[contact_label]" type="text" class="regular-text" value="<?php echo esc_attr($s['contact_label']); ?>" placeholder="เช่น Book via LINE / จองผ่าน LINE"><br>
                             <input name="<?php echo $name; ?>[contact_url]" type="url" class="regular-text" value="<?php echo esc_attr($s['contact_url']); ?>" placeholder="https://line.me/R/ti/p/@yourshop" style="margin-top:6px">
                             <p class="description">เว้นว่าง = ไม่แสดงปุ่ม</p>
-                        </td>
-                    </tr>
-                    <tr>
-                        <th scope="row">โลโก้ Carrier</th>
-                        <td>
-                            <input name="<?php echo $name; ?>[ups_logo]" type="url" class="regular-text" value="<?php echo esc_attr($s['ups_logo']); ?>" placeholder="URL โลโก้ UPS"><br>
-                            <input name="<?php echo $name; ?>[dhl_logo]" type="url" class="regular-text" value="<?php echo esc_attr($s['dhl_logo']); ?>" placeholder="URL โลโก้ DHL" style="margin-top:6px">
                         </td>
                     </tr>
                 </table>
@@ -283,7 +272,6 @@ final class Madd_Rate_Quote
             'apiUrl' => $s['api_url'] ? self::base_url($s['api_url']) : '',
             'contactUrl' => $s['contact_url'],
             'contactLabel' => $s['contact_label'],
-            'logos' => ['UPS' => $s['ups_logo'], 'DHL' => $s['dhl_logo']],
         ]);
 
         ob_start(); ?>
