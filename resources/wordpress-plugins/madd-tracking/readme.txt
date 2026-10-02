@@ -1,7 +1,7 @@
 === MADD Tracking ===
 Requires at least: 5.8
 Requires PHP: 7.4
-Stable tag: 1.4.1
+Stable tag: 1.4.2
 
 ฟอร์มติดตามพัสดุ (UPS / DHL) สำหรับ Shipment ที่จองผ่านระบบ MADD
 

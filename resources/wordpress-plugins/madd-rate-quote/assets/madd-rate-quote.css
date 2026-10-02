@@ -269,3 +269,9 @@
   .madd-quote__count { margin-left: 0; }
   .madd-quote__price { align-items: baseline; gap: 8px; }
 }
+
+/* carrier colours on the text badge */
+.madd-quote__carrier--dhl { background: #ffcc00; }
+.madd-quote__carrier--dhl b { color: #d40511; }
+.madd-quote__carrier--ups { background: #351c15; }
+.madd-quote__carrier--ups b { color: #ffb500; }

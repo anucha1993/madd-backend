@@ -51,9 +51,10 @@
 .madd-tracking__step.is-current { font-weight: 700; }
 .madd-tracking__step.is-current::before { box-shadow: 0 0 0 4px #e0e7ff; }
 .madd-tracking__cancelled { margin: 16px 0; padding: 10px 12px; border-radius: 8px; background: #fef2f2; color: #b91c1c; }
-.madd-tracking__facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0 0 18px; }
-.madd-tracking__facts dt { color: var(--madd-muted); }
-.madd-tracking__facts dd { margin: 0; }
+.madd-tracking__facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px 16px; margin: 0 0 18px; }
+.madd-tracking__fact { min-width: 0; }
+.madd-tracking__facts dt { margin: 0 0 2px; color: var(--madd-muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+.madd-tracking__facts dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
 .madd-tracking__title { margin: 6px 0 10px; font-size: 15px; }
 .madd-tracking__events { list-style: none; margin: 0; padding: 0 0 0 4px; border-left: 2px solid var(--madd-border); }
 .madd-tracking__event { position: relative; display: flex; gap: 14px; padding: 0 0 14px 16px; }
@@ -95,3 +96,12 @@
 /* carrier text badge (no logos) */
 .madd-tracking__carrier { min-width: 70px; height: 44px; }
 .madd-tracking__carrier span { font-size: 15px; font-weight: 800; letter-spacing: .08em; color: #0b2a36; }
+
+/* carrier colours on the text badge */
+.madd-tracking__carrier--dhl { background: #ffcc00; }
+.madd-tracking__carrier--dhl span { color: #d40511; }
+.madd-tracking__carrier--ups { background: #351c15; }
+.madd-tracking__carrier--ups span { color: #ffb500; }
+/* page layouts that draw cell borders with a 1px grid gap */
+.madd-tracking__fact { background: #fff; }
+.madd-tracking__fact dt, .madd-tracking__fact dd { background: transparent !important; }

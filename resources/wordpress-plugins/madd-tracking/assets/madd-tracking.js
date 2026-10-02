@@ -174,7 +174,7 @@
             "dl",
             { class: "madd-tracking__facts" },
             facts.reduce(function (acc, f) {
-              acc.push(el("dt", { text: f[0] }), el("dd", { text: f[1] }));
+              acc.push(el("div", { class: "madd-tracking__fact" }, [el("dt", { text: f[0] }), el("dd", { text: f[1] })]));
               return acc;
             }, [])
           ),
