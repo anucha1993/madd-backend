@@ -10,7 +10,7 @@ class ReportScheduleController extends Controller
 {
     public function index()
     {
-        return ReportSchedule::with(['branch:id,name,code', 'agentAccount:id,username_acc'])->orderBy('name')->get();
+        return ReportSchedule::with(['branch:id,name,code,nickname', 'agentAccount:id,username_acc'])->orderBy('name')->get();
     }
 
     private function rules(?ReportSchedule $schedule = null): array

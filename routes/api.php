@@ -25,12 +25,15 @@ use App\Http\Controllers\ColumnProfileController;
 use App\Http\Controllers\CustomerAddressController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\CountryController;
+use App\Http\Controllers\CarrierInvoiceController;
+use App\Http\Controllers\GoogleVisionController;
 use App\Http\Controllers\AddressValidationController;
 use App\Http\Controllers\DhlTrackingController;
 use App\Http\Controllers\R2Controller;
 use App\Http\Controllers\InsuranceCountryCapController;
 use App\Http\Controllers\ManifestOptionController;
 use App\Http\Controllers\ManifestReportController;
+use App\Http\Controllers\KeyBillingReportController;
 use App\Http\Controllers\ChargeFixedOverrideController;
 use App\Http\Controllers\MarkupRuleController;
 use App\Http\Controllers\PickupController;
@@ -218,6 +221,22 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
     Route::get('receipt-line-templates', [ReceiptLineTemplateController::class, 'index']);
     Route::apiResource('receipt-line-templates', ReceiptLineTemplateController::class)->only(['store', 'update', 'destroy'])->middleware('perm:config.receipt_templates');
 
+    // ---- Carrier Invoices (OCR reconciliation against UPS/DHL's real monthly invoice) ----
+    Route::middleware('perm:carrier_invoice.view')->group(function () {
+        Route::get('carrier-invoices', [CarrierInvoiceController::class, 'index']);
+        Route::get('carrier-invoices/{carrier_invoice}', [CarrierInvoiceController::class, 'show']);
+    });
+    Route::middleware('perm:carrier_invoice.upload')->group(function () {
+        Route::post('carrier-invoices', [CarrierInvoiceController::class, 'store']);
+        Route::post('carrier-invoices/{carrier_invoice}/reparse', [CarrierInvoiceController::class, 'reparse']);
+    });
+    Route::middleware('perm:carrier_invoice.edit')->group(function () {
+        Route::put('carrier-invoices/{carrier_invoice}', [CarrierInvoiceController::class, 'update']);
+        Route::put('carrier-invoice-lines/{line}', [CarrierInvoiceController::class, 'updateLine']);
+        Route::delete('carrier-invoice-lines/{line}', [CarrierInvoiceController::class, 'destroyLine']);
+    });
+    Route::delete('carrier-invoices/{carrier_invoice}', [CarrierInvoiceController::class, 'destroy'])->middleware('perm:carrier_invoice.delete');
+
     // ---- Pickups ----
     Route::get('pickups', [PickupController::class, 'index'])->middleware('perm:pickup.view');
     // Reschedule = cancel the old pickup + book a new one, so it may call both.
@@ -249,6 +268,8 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
         Route::put('ai/toggle', [AiController::class, 'toggleEnabled']);
         Route::get('r2/settings', [R2Controller::class, 'settings']);
         Route::put('r2/settings', [R2Controller::class, 'updateSettings']);
+        Route::get('google-vision/settings', [GoogleVisionController::class, 'settings']);
+        Route::put('google-vision/settings', [GoogleVisionController::class, 'updateSettings']);
     });
 
     // ---- Reference data used by the booking / receipt forms ----
@@ -314,6 +335,10 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
     Route::middleware('perm:report.summary')->group(function () {
         Route::get('reports/shipment-analytics', [ShipmentAnalyticsController::class, 'index']);
         Route::get('reports/shipment-analytics/export', [ShipmentAnalyticsController::class, 'export'])->middleware('perm:report.summary_export');
+    });
+    Route::middleware('perm:report.key_billing')->group(function () {
+        Route::get('key-billing-report', [KeyBillingReportController::class, 'index']);
+        Route::get('key-billing-report/export', [KeyBillingReportController::class, 'export']);
     });
     Route::middleware('perm:config.report_schedules')->group(function () {
         Route::apiResource('report-schedules', ReportScheduleController::class)->only(['index', 'store', 'update', 'destroy']);

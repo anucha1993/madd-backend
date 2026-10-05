@@ -24,7 +24,7 @@ class ApiClientController extends Controller
             ->selectRaw('api_client_id, COUNT(*) as calls, SUM(CASE WHEN status_code = 200 THEN 0 ELSE 1 END) as failed')
             ->get()->keyBy('api_client_id');
 
-        return ApiClient::with('branch:id,name,code')->orderBy('name')->get()->map(fn (ApiClient $c) => $c->toArray() + [
+        return ApiClient::with('branch:id,name,code,nickname')->orderBy('name')->get()->map(fn (ApiClient $c) => $c->toArray() + [
             'calls_30d' => (int) ($usage[$c->id]->calls ?? 0),
             'failed_30d' => (int) ($usage[$c->id]->failed ?? 0),
         ]);
@@ -35,20 +35,20 @@ class ApiClientController extends Controller
     {
         $client = ApiClient::create($this->validated($request) + ['created_by' => $request->user()->id]);
 
-        return response()->json(['client' => $client->load('branch:id,name,code'), 'api_key' => $client->issueKey()], 201);
+        return response()->json(['client' => $client->load('branch:id,name,code,nickname'), 'api_key' => $client->issueKey()], 201);
     }
 
     public function update(Request $request, ApiClient $apiClient)
     {
         $apiClient->update($this->validated($request));
 
-        return $apiClient->load('branch:id,name,code');
+        return $apiClient->load('branch:id,name,code,nickname');
     }
 
     /** Replaces the key — the old one stops working immediately. */
     public function regenerate(ApiClient $apiClient)
     {
-        return response()->json(['client' => $apiClient->load('branch:id,name,code'), 'api_key' => $apiClient->issueKey()]);
+        return response()->json(['client' => $apiClient->load('branch:id,name,code,nickname'), 'api_key' => $apiClient->issueKey()]);
     }
 
     public function destroy(ApiClient $apiClient)

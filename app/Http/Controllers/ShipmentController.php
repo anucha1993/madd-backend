@@ -23,6 +23,8 @@ use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\Cache;
 use Mpdf\Mpdf;
+use Mpdf\QrCode\Output\Png as QrCodePngOutput;
+use Mpdf\QrCode\QrCode;
 
 class ShipmentController extends Controller
 {
@@ -1366,6 +1368,26 @@ class ShipmentController extends Controller
                 $y += 2;
             }
 
+            // QR code linking to the public tracking page, drawn directly via Image() (not HTML
+            // — same reason the lines above use raw Text(), see class docblock note). Caption is
+            // English-only here (unlike buildTrackingQrHtml's bilingual one) — raw Text() expects
+            // pre-OTL-shaped input for complex scripts (see Mpdf::Text() docblock: "Expects...RTL
+            // reversed & OTL processed"), so Thai combining marks render as tofu boxes when drawn
+            // this way; every other Text() line in this method is English-only for the same reason.
+            $qrPng = $this->buildTrackingQrPng($shipment);
+            if ($qrPng) {
+                $qrSize = 32;
+                $tempQrPath = tempnam(sys_get_temp_dir(), 'dhl-waybill-qr-').'.png';
+                file_put_contents($tempQrPath, $qrPng);
+                try {
+                    $mpdf->Image($tempQrPath, $x, $y, $qrSize, $qrSize);
+                    $mpdf->SetFont('dejavusans', '', 8);
+                    $mpdf->Text($x, $y + $qrSize + 4, 'Scan to track shipment');
+                } finally {
+                    unlink($tempQrPath);
+                }
+            }
+
             return $mpdf->Output('', 'S');
         } catch (\Throwable $e) {
             report($e);
@@ -1466,6 +1488,7 @@ class ShipmentController extends Controller
                 $this->buildPaymentOfChargesHtml($shipment),
                 $trackingHtml,
                 $this->buildTotalChargesHtml($shipment),
+                $this->buildTrackingQrHtml($shipment),
             ]));
 
             $bodyHtml = '<table width="100%" cellpadding="0" cellspacing="0"><tr>'
@@ -1534,6 +1557,95 @@ class ShipmentController extends Controller
     {
         return $this->linesToHtml($this->buildPaymentOfChargesLines($shipment));
     }
+
+    /**
+     * QR code (raw PNG binary) linking to the public tracking page for this shipment, e.g.
+     * https://madd.co.th/tracking/?tn=5084355500 — printed on the Waybill/Shipment Copy PDFs
+     * (see buildUpsDiyWaybill/buildDhlDiyWaybill) so recipients can scan it to check shipment
+     * status without typing the tracking number in by hand. Returns null if the shipment has
+     * no tracking number yet (e.g. not booked with the carrier).
+     */
+    private function buildTrackingQrPng(Shipment $shipment, int $sizePx = 480): ?string
+    {
+        if (! $shipment->tracking_number) {
+            return null;
+        }
+
+        $url = rtrim(config('services.madd.tracking_url'), '/').'/?tn='.urlencode($shipment->tracking_number);
+        // HIGH (30% recoverable) error correction — needed headroom to cover the MADD mark
+        // stamped over the center below, not just a "nice to have".
+        $qrCode = new QrCode($url, QrCode::ERROR_CORRECTION_HIGH);
+        $png = (new QrCodePngOutput())->output($qrCode, $sizePx);
+
+        return $this->stampQrLogo($png, $sizePx);
+    }
+
+    /**
+     * Stamps the full "MADD" wordmark (public/logo/qr-mark.png, cropped from logo-250.png) in a
+     * white rectangular badge over the QR's center so it reads as an official MADD document at a
+     * glance — the triangle mark ALONE (no text) was tried first but looked like a generic hazard/
+     * warning icon once isolated from the rest of the logo, not a recognizable brand. Badge width
+     * follows the wordmark's own (wide, ~3.8:1) aspect ratio instead of forcing it into a square,
+     * centered well clear of the three corner finder patterns, within the ~30% damage HIGH error
+     * correction can recover from. Falls back to the plain QR if the logo asset is missing.
+     */
+    private function stampQrLogo(string $qrPng, int $sizePx): string
+    {
+        $logoPath = public_path('logo/qr-mark.png');
+        $logo = @imagecreatefrompng($logoPath);
+        if (! $logo) {
+            return $qrPng;
+        }
+
+        $qr = imagecreatefromstring($qrPng);
+        $logoW = imagesx($logo);
+        $logoH = imagesy($logo);
+
+        $badgeW = (int) round($sizePx * 0.42);
+        $badgeH = (int) round($badgeW * $logoH / $logoW);
+        $badgeX = (int) (($sizePx - $badgeW) / 2);
+        $badgeY = (int) (($sizePx - $badgeH) / 2);
+        $white = imagecolorallocate($qr, 255, 255, 255);
+        imagefilledrectangle($qr, $badgeX, $badgeY, $badgeX + $badgeW, $badgeY + $badgeH, $white);
+
+        // Small inset so the wordmark doesn't touch the badge edges.
+        $insetX = (int) round($badgeW * 0.08);
+        $insetY = (int) round($badgeH * 0.08);
+        $destW = $badgeW - $insetX * 2;
+        $destH = $badgeH - $insetY * 2;
+        $destX = $badgeX + $insetX;
+        $destY = $badgeY + $insetY;
+        imagecopyresampled($qr, $logo, $destX, $destY, 0, 0, $destW, $destH, $logoW, $logoH);
+        imagedestroy($logo);
+
+        ob_start();
+        imagepng($qr);
+        $result = ob_get_clean();
+        imagedestroy($qr);
+
+        return $result;
+    }
+
+    /**
+     * "สแกนเพื่อติดตามพัสดุ" block (HTML) — QR code + caption, same visual pattern as the other
+     * right-column blocks in buildUpsDiyWaybill (PAYMENT OF CHARGES / Tracking Numbers / TOTAL
+     * CHARGES), built from buildTrackingQrPng(). Returns '' if there's no tracking number yet.
+     */
+    private function buildTrackingQrHtml(Shipment $shipment): string
+    {
+        $png = $this->buildTrackingQrPng($shipment);
+        if (! $png) {
+            return '';
+        }
+
+        $dataUri = 'data:image/png;base64,'.base64_encode($png);
+
+        return '<div style="text-align:center;">'
+            .'<img src="'.$dataUri.'" style="width:32mm;height:32mm;">'
+            .'<div style="font-family:garuda;font-size:8pt;">สแกนเพื่อติดตามพัสดุ / Scan to track</div>'
+            .'</div>';
+    }
+
 
     /**
      * TOTAL CHARGES line data — the actual price billed to the customer for this shipment

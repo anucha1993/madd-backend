@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['name', 'company_name', 'code', 'tax_id', 'address', 'phone', 'fax', 'is_head_office', 'status'])]
+#[Fillable(['name', 'nickname', 'company_name', 'code', 'tax_id', 'address', 'phone', 'fax', 'is_head_office', 'status'])]
 class Branch extends Model
 {
     use Auditable, HasFactory;

@@ -108,4 +108,16 @@ return [
         'endpoint' => env('R2_ENDPOINT'),
     ],
 
+    // Google Cloud Vision API key, used to OCR uploaded carrier invoice PDFs — see GoogleVisionService.
+    'google_vision' => [
+        'api_key' => env('GOOGLE_VISION_API_KEY'),
+    ],
+
+    // Public tracking page on the madd.co.th marketing site — a QR code linking here (with
+    // ?tn={tracking_number} appended) is printed on the Waybill/Shipment Copy PDFs so recipients
+    // can scan to check shipment status. See ShipmentController::buildTrackingQrCode.
+    'madd' => [
+        'tracking_url' => env('MADD_TRACKING_URL', 'https://madd.co.th/tracking/'),
+    ],
+
 ];

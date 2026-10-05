@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 #[Fillable([
     'agent_account_id', 'branch_id', 'created_by', 'carrier', 'service_code', 'service_label',
@@ -139,6 +140,11 @@ class Shipment extends Model
     public function receipts(): BelongsToMany
     {
         return $this->belongsToMany(Receipt::class, 'receipt_shipment');
+    }
+
+    public function carrierInvoiceLines(): HasMany
+    {
+        return $this->hasMany(CarrierInvoiceLine::class);
     }
 
     /**

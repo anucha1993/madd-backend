@@ -219,6 +219,16 @@ return [
             ],
             'scope' => true,
         ],
+        'carrier_invoice' => [
+            'label' => 'Carrier Invoice Reconcile (UPS/DHL)',
+            'category' => 'operations',
+            'actions' => ['view' => 'ดู', 'upload' => 'อัพโหลด / อ่านใหม่ (OCR)', 'edit' => 'แก้ไขรายการ', 'delete' => 'ลบ Invoice'],
+            'action_hints' => [
+                'view' => 'รายการ Invoice ที่อัพโหลด + เทียบ Rate Quote ตอน book กับยอดจริงจากใบแจ้งหนี้',
+                'upload' => 'อัพโหลดไฟล์ PDF ใบแจ้งหนี้ UPS/DHL ให้ระบบ OCR อ่านอัตโนมัติ (Google Vision)',
+                'edit' => 'แก้ไข/จับคู่รายการที่ OCR อ่านมาไม่ตรง',
+            ],
+        ],
         'supply_stock' => [
             'label' => 'Stock วัสดุห่อ (Packing Supplies)',
             'category' => 'operations',
@@ -277,8 +287,9 @@ return [
                 'summary' => 'Shipment Summary',
                 'summary_export' => 'Shipment Summary: Export Excel',
                 'finance' => 'Revenue & Expense',
+                'key_billing' => 'Key Billing Report',
             ],
-            'action_hints' => ['manifest' => 'ดูรายงาน Manifest', 'summary' => 'Dashboard วิเคราะห์ Shipment'],
+            'action_hints' => ['manifest' => 'ดูรายงาน Manifest', 'summary' => 'Dashboard วิเคราะห์ Shipment', 'key_billing' => 'ดูยอดขายเทียบกับต้นทุนจาก Carrier Invoice'],
         ],
         'branch' => [
             'label' => 'สาขา',

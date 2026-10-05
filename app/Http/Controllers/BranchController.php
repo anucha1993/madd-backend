@@ -17,6 +17,7 @@ class BranchController extends Controller
     {
         $data = $request->validate([
             'name' => ['required', 'string', 'max:255'],
+            'nickname' => ['nullable', 'string', 'max:100'],
             'company_name' => ['required', 'string', 'max:255'],
             'code' => ['required', 'string', 'max:50', 'unique:branches,code'],
             'tax_id' => ['required', 'string', 'max:20'],
@@ -39,6 +40,7 @@ class BranchController extends Controller
     {
         $data = $request->validate([
             'name' => ['sometimes', 'required', 'string', 'max:255'],
+            'nickname' => ['nullable', 'string', 'max:100'],
             'company_name' => ['sometimes', 'required', 'string', 'max:255'],
             'code' => ['sometimes', 'required', 'string', 'max:50', 'unique:branches,code,' . $branch->id],
             'tax_id' => ['sometimes', 'required', 'string', 'max:20'],

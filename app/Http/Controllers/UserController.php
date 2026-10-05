@@ -12,7 +12,7 @@ class UserController extends Controller
 {
     public function index()
     {
-        return User::with('branches:id,name,code', 'roles:id,key,name,is_super_admin')->orderBy('name')->get();
+        return User::with('branches:id,name,code,nickname', 'roles:id,key,name,is_super_admin')->orderBy('name')->get();
     }
 
     public function store(Request $request)
@@ -41,12 +41,12 @@ class UserController extends Controller
             $this->syncAudited($user, 'branches', $branchIds);
         }
 
-        return response()->json($user->load('branches:id,name,code', 'roles:id,key,name,is_super_admin'), 201);
+        return response()->json($user->load('branches:id,name,code,nickname', 'roles:id,key,name,is_super_admin'), 201);
     }
 
     public function show(User $user)
     {
-        return $user->load('branches:id,name,code', 'roles:id,key,name,is_super_admin');
+        return $user->load('branches:id,name,code,nickname', 'roles:id,key,name,is_super_admin');
     }
 
     public function update(Request $request, User $user)
@@ -87,7 +87,7 @@ class UserController extends Controller
             $this->syncAudited($user, 'branches', []);
         }
 
-        return $user->load('branches:id,name,code', 'roles:id,key,name,is_super_admin');
+        return $user->load('branches:id,name,code,nickname', 'roles:id,key,name,is_super_admin');
     }
 
     public function destroy(Request $request, User $user)

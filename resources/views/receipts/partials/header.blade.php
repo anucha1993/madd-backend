@@ -16,7 +16,9 @@
                         @endif
                     </td>
                     <td style="vertical-align:middle; padding-left:8px; font-size:12pt;">
-                        <div style="font-weight:bold;">{{ $headOffice->company_name ?? '-' }}</div>
+                        <div style="font-weight:bold;">
+                            {{ $headOffice->company_name ?? '-' }}@if($issuingBranch->nickname ?? null) ({{ $issuingBranch->nickname }})@endif
+                        </div>
                         <div style="font-weight:bold;">{{ mb_strtoupper($headOffice->name ?? '-') }}</div>
                     </td>
                 </tr>

@@ -71,6 +71,6 @@ class AuthController extends Controller
      */
     private function withAccess(User $user): array
     {
-        return $user->load('branches:id,name,code')->toArray() + ['access' => $this->access->resolve($user)];
+        return $user->load('branches:id,name,code,nickname')->toArray() + ['access' => $this->access->resolve($user)];
     }
 }

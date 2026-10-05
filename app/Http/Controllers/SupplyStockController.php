@@ -54,7 +54,7 @@ class SupplyStockController extends Controller
             'date_to' => ['nullable', 'date'],
         ]);
 
-        $query = SupplyStockMovement::with('supply:id,name', 'branch:id,name,code', 'user:id,name', 'shipment:id,tracking_number')
+        $query = SupplyStockMovement::with('supply:id,name', 'branch:id,name,code,nickname', 'user:id,name', 'shipment:id,tracking_number')
             ->whereIn('branch_id', $this->branchIds($request, $data['branch_id'] ?? null))
             ->latest('created_at')->latest('id');
         foreach (['supply_id', 'type'] as $field) {
@@ -80,7 +80,7 @@ class SupplyStockController extends Controller
 
         $movement = $this->stock->move($data['supply_id'], $data['branch_id'], $data['quantity'], 'receive', $this->attrs($request, $data));
 
-        return response()->json($movement->load('supply:id,name', 'branch:id,name,code'), 201);
+        return response()->json($movement->load('supply:id,name', 'branch:id,name,code,nickname'), 201);
     }
 
     /** Stock count (ปรับยอด) — the counted balance; records the difference. */
@@ -94,7 +94,7 @@ class SupplyStockController extends Controller
 
         $movement = $this->stock->setCounted($data['supply_id'], $data['branch_id'], $data['counted'], $this->attrs($request, $data));
 
-        return response()->json(['movement' => $movement?->load('supply:id,name', 'branch:id,name,code')]);
+        return response()->json(['movement' => $movement?->load('supply:id,name', 'branch:id,name,code,nickname')]);
     }
 
     public function limits(Request $request)
@@ -171,7 +171,7 @@ class SupplyStockController extends Controller
         $stocks = SupplyStock::whereIn('branch_id', $branchIds)->get()->keyBy(fn ($s) => "{$s->supply_id}-{$s->branch_id}");
 
         $supplies = Supply::orderBy('name')->get(['id', 'name']);
-        $branches = Branch::whereIn('id', $branchIds)->orderBy('name')->get(['id', 'name', 'code']);
+        $branches = Branch::whereIn('id', $branchIds)->orderBy('name')->get(['id', 'name', 'code', 'nickname']);
         $rows = collect();
         foreach ($branches as $branch) {
             foreach ($supplies as $supply) {
