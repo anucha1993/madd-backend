@@ -19,14 +19,23 @@ class ChargeFormulaController extends Controller
             'formula' => ['required', 'string', 'max:500'],
             'values' => ['required', 'array'],
             'values.*' => ['numeric'],
+            // Per-box weights for BOX_OVER(kg); without them, {BOX} boxes of {W}/{BOX} kg each.
+            'package_weights' => ['nullable', 'array', 'max:500'],
+            'package_weights.*' => ['numeric', 'min:0'],
         ]);
+
+        $values = array_map('floatval', $data['values']);
+        $weights = array_map('floatval', $data['package_weights'] ?? []);
+        if (! $weights && ($boxes = (int) ($values['BOX'] ?? 0)) > 0) {
+            $weights = array_fill(0, min($boxes, 500), ($values['W'] ?? $values['BILLED_WEIGHT'] ?? 0) / $boxes);
+        }
 
         if ($error = ChargeFormulaEvaluator::validate($data['formula'])) {
             return response()->json(['message' => $error], 422);
         }
 
         try {
-            $result = ChargeFormulaEvaluator::evaluate($data['formula'], array_map('floatval', $data['values']));
+            $result = ChargeFormulaEvaluator::evaluate($data['formula'], $values, ['package_weights' => $weights]);
         } catch (\Throwable $e) {
             return response()->json(['message' => 'คำนวณไม่สำเร็จ: '.$e->getMessage()], 422);
         }

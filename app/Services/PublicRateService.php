@@ -87,7 +87,7 @@ class PublicRateService
         }
 
         $options = [];
-        foreach ($this->markup->applyToResults($ok) as $r) {
+        foreach ($this->markup->applyToResults($ok, $shipment['packages'], $shipment['to']['country']) as $r) {
             $price = $r['negotiated'] ?? $r['published'] ?? null;
             if ($price === null) {
                 continue;

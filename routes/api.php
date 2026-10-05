@@ -8,6 +8,7 @@ use App\Http\Controllers\AgentController;
 use App\Http\Controllers\AiController;
 use App\Http\Controllers\ApiClientController;
 use App\Http\Controllers\WordPressPluginController;
+use App\Http\Controllers\ZonePriceController;
 use App\Http\Controllers\PublicApi\RateController as PublicRateController;
 use App\Http\Controllers\PublicApi\TrackingController as PublicTrackingController;
 use App\Http\Controllers\PublicApi\PageViewController;
@@ -20,11 +21,13 @@ use App\Http\Controllers\BillingCustomerController;
 use App\Http\Controllers\BranchCarrierAccountController;
 use App\Http\Controllers\BranchController;
 use App\Http\Controllers\ChargeCodeController;
+use App\Http\Controllers\ChargeDisplayNameController;
 use App\Http\Controllers\ChargeFormulaController;
 use App\Http\Controllers\ColumnProfileController;
 use App\Http\Controllers\CustomerAddressController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\CountryController;
+use App\Http\Controllers\CountryZoneController;
 use App\Http\Controllers\CarrierInvoiceController;
 use App\Http\Controllers\GoogleVisionController;
 use App\Http\Controllers\AddressValidationController;
@@ -284,6 +287,17 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
         Route::put('countries/{country}', [CountryController::class, 'update']);
     });
 
+    // Staff's own zones per country + prices per zone ({ZONE_PRICE} in Fixed Charges / Markup
+    // formulas) — prices are sell-price inputs, so they have their own permission.
+    Route::middleware('perm:config.zone_prices')->group(function () {
+        Route::get('country-zones/export', [CountryZoneController::class, 'export']);
+        Route::post('country-zones/import', [CountryZoneController::class, 'import']);
+        Route::put('country-zones/{country}', [CountryZoneController::class, 'update']);
+        Route::get('zone-prices/export', [ZonePriceController::class, 'export']);
+        Route::post('zone-prices/import', [ZonePriceController::class, 'import']);
+        Route::apiResource('zone-prices', ZonePriceController::class)->only(['index', 'store', 'update', 'destroy']);
+    });
+
     Route::get('supplies', [SupplyController::class, 'index']);
     Route::get('supply-stock', [SupplyStockController::class, 'index'])->middleware('perm:supply_stock.view');
     Route::get('supply-stock/movements', [SupplyStockController::class, 'movements'])->middleware('perm:supply_stock.view');
@@ -303,10 +317,11 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
         Route::apiResource('insurance-country-caps', InsuranceCountryCapController::class)->only(['store', 'update', 'destroy']);
     });
 
+    // The code list itself carries no markup values — /config/charge-names lists it too.
+    Route::get('charge-codes', [ChargeCodeController::class, 'index'])->middleware('perm:config.markup,config.agent_accounts,config.charge_names');
     // Markup values let anyone who sees the sell price work out the carrier cost — only the
     // Mark-up / Agent Accounts settings screens (their only users) may read them.
     Route::middleware('perm:config.markup,config.agent_accounts')->group(function () {
-        Route::get('charge-codes', [ChargeCodeController::class, 'index']);
         Route::get('markup-rules', [MarkupRuleController::class, 'index']);
         Route::get('charge-fixed-overrides', [ChargeFixedOverrideController::class, 'index']);
     });
@@ -315,6 +330,13 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
         Route::post('charge-formula/preview', [ChargeFormulaController::class, 'preview']);
         Route::apiResource('markup-rules', MarkupRuleController::class)->only(['store', 'update', 'destroy']);
         Route::apiResource('charge-fixed-overrides', ChargeFixedOverrideController::class)->only(['store', 'update', 'destroy']);
+    });
+
+    // Display names only (no markup values) — every screen that renders charge lines needs them.
+    Route::get('charge-display-names', [ChargeDisplayNameController::class, 'index']);
+    Route::middleware('perm:config.charge_names')->group(function () {
+        Route::post('charge-display-names', [ChargeDisplayNameController::class, 'store']);
+        Route::put('charge-codes/{charge_code}/display-name', [ChargeDisplayNameController::class, 'update']);
     });
 
     Route::get('addon-categories', [AddonCategoryController::class, 'index']);

@@ -307,6 +307,7 @@ return [
             'category' => 'admin',
             'actions' => [
                 'markup' => 'Mark-up',
+                'charge_names' => 'Charge Display Names',
                 'addon' => 'Add-on',
                 'insurance' => 'Insurance UPSC',
                 'supplies' => 'Packaging Supplies',
@@ -316,6 +317,7 @@ return [
                 'insurance_import' => 'Insurance UPSC: นำเข้าไฟล์',
                 'countries' => 'Countries',
                 'countries_sync' => 'Countries: Sync รายชื่อ',
+                'zone_prices' => 'Countries: Zone & ราคา Manual',
                 'agent_accounts' => 'Agent Accounts',
                 'agent_accounts_test' => 'Agent Accounts: ทดสอบเชื่อมต่อ',
                 'thai_address' => 'Thai Address DB',
@@ -337,6 +339,8 @@ return [
             ],
             'action_hints' => [
                 'markup' => 'Mark-up / Charge Codes / สูตรค่าบริการ',
+                'zone_prices' => 'ตั้ง Zone ของแต่ละประเทศ (UPS / DHL) และราคาตาม Zone ที่ใช้เป็น {ZONE_PRICE} ในสูตร Fixed Charges / Mark-up',
+                'charge_names' => 'ตั้งชื่อแสดงของ Charge Code (เช่น BASE → ค่าขนส่ง) — มีผลทุกหน้าและใบเสร็จ / ใบกำกับภาษีที่ออกใหม่',
                 'agent_accounts' => 'บัญชี UPS / DHL (Fixed Charges ของบัญชีต้องมีสิทธิ์ Mark-up ด้วย)',
                 'agent_accounts_test' => 'เรียก API ของ Carrier จริงเพื่อทดสอบบัญชี',
                 'shipment_fields' => 'กำหนดช่องที่ต้องกรอกก่อนจอง แยก UPS / DHL',

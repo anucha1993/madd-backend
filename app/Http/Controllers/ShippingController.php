@@ -149,7 +149,7 @@ class ShippingController extends Controller
             $shipment,
         );
 
-        $results = $this->chargeMarkupService->applyToResults([...$upsResults, ...$dhlResults]);
+        $results = $this->chargeMarkupService->applyToResults([...$upsResults, ...$dhlResults], $shipment['packages'], $shipment['to']['country']);
 
         // Full quote stays server-side (booking reads cost from it by quoteId); the browser only
         // gets what this user's Role may see — e.g. front-counter staff get the sell price and

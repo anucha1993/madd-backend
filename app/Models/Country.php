@@ -6,7 +6,7 @@ use App\Models\Concerns\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 
-#[Fillable(['iso2', 'name', 'region', 'subregion', 'status', 'synced_at'])]
+#[Fillable(['iso2', 'name', 'region', 'subregion', 'ups_zone', 'dhl_zone', 'status', 'synced_at'])]
 class Country extends Model
 {
     use Auditable;

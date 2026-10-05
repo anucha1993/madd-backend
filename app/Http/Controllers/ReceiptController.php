@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\ChargeCode;
 use App\Models\Receipt;
 use App\Models\ReceiptLine;
 use App\Models\Shipment;
@@ -89,6 +90,7 @@ class ReceiptController extends Controller
         $branchId = $shipments->first()->branch_id;
         $targetTotal = round((float) $shipments->sum('order_total'), 2);
 
+        $displayNames = ChargeCode::displayNameMap();
         $totalsByDescription = [];
         foreach ($shipments as $shipment) {
             // Tag every suggested line with the shipment's carrier — keeps UPS and DHL charges
@@ -105,6 +107,7 @@ class ReceiptController extends Controller
 
                 continue;
             }
+            $amountsByCode = ChargeCode::amountsByCode($chargeBreakdown);
             foreach ($chargeBreakdown as $line) {
                 // Cost-only codes (carrier-own Declared Value/Insurance: UPS '400', DHL 'II'/'IB')
                 // are a COST reference only, never a real charge on their own — their actual sell
@@ -113,7 +116,10 @@ class ReceiptController extends Controller
                 if (in_array($line['code'] ?? null, ChargeMarkupService::COST_ONLY_CODES, true)) {
                     continue;
                 }
-                $description = mb_strtoupper(trim((string) ($line['description'] ?? 'CHARGE'))).$carrierTag;
+                // A staff-set display name (/config/charge-names) is used exactly as typed;
+                // the carrier's own description keeps the old upper-cased style.
+                $carrierDescription = mb_strtoupper(trim((string) ($line['description'] ?? 'CHARGE')));
+                $description = trim(ChargeCode::displayNameFor($displayNames, $shipment->carrier, $line['code'] ?? null, $carrierDescription, $amountsByCode)).$carrierTag;
                 $totalsByDescription[$description] = ($totalsByDescription[$description] ?? 0) + (float) ($line['amount'] ?? 0);
             }
 

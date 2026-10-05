@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\ChargeFixedOverride;
 use App\Models\MarkupRule;
+use App\Models\ZonePrice;
 
 class ChargeMarkupService
 {
@@ -22,9 +23,23 @@ class ChargeMarkupService
      * the carrier's raw amount first) and MarkupRule (value/unit markup on top of that) to every
      * chargeBreakdown line of every quote, then adjust published/negotiated totals by the same
      * net delta so the total always still matches the sum of its breakdown lines.
+     *
+     * @param  array<int, array{weight?: mixed, quantity?: mixed}>  $packages  the rate request's
+     *         packages — feeds {BOX} and BOX_OVER(kg) in formulas (see ChargeFormulaEvaluator)
+     * @param  ?string  $destinationCountry  ISO2 — feeds {ZONE} / {ZONE_PRICE} (staff's own zone
+     *         prices, /config/countries) for the carrier of each quote
      */
-    public function applyToResults(array $results): array
+    public function applyToResults(array $results, array $packages = [], ?string $destinationCountry = null): array
     {
+        // One weight per physical box (a package line with quantity 3 = 3 boxes).
+        $packageWeights = [];
+        foreach ($packages as $package) {
+            for ($i = 0; $i < max(1, (int) ($package['quantity'] ?? 1)); $i++) {
+                $packageWeights[] = (float) ($package['weight'] ?? 0);
+            }
+        }
+        $formulaContext = ['package_weights' => $packageWeights];
+
         $accountIds = collect($results)->pluck('accountId')->filter()->unique()->values()->all();
         if (empty($accountIds)) {
             return $results;
@@ -46,7 +61,10 @@ class ChargeMarkupService
             ->groupBy('agent_account_id')
             ->map(fn ($rules) => $rules->keyBy(fn ($rule) => $rule->chargeCode->code));
 
-        return array_map(function ($result) use ($overridesByAccount, $rulesByAccount) {
+        // Manual zone + prices per carrier for this destination, looked up once per carrier.
+        $zoneLookups = [];
+
+        return array_map(function ($result) use ($overridesByAccount, $rulesByAccount, $formulaContext, $packageWeights, $destinationCountry, &$zoneLookups) {
             if (! empty($result['error']) || empty($result['accountId'])) {
                 return $result;
             }
@@ -82,12 +100,29 @@ class ChargeMarkupService
             // real charge code.
             $rawAmountsByCode['BILLED_WEIGHT'] = (float) ($result['billedWeight'] ?? 0);
             $rawAmountsByCode['TOTAL'] = (float) ($result['negotiated'] ?? $result['published'] ?? $result['total'] ?? 0);
+            $rawAmountsByCode['W'] = $rawAmountsByCode['BILLED_WEIGHT']; // short alias for IF formulas
+            $rawAmountsByCode['BOX'] = (float) count($packageWeights);
+
+            $carrier = strtoupper((string) ($result['carrier'] ?? ''));
+            $zoneLookups[$carrier] ??= ZonePrice::lookup($carrier, $destinationCountry);
+            $zoneInfo = $zoneLookups[$carrier];
+            if ($zoneInfo['zone'] !== null && is_numeric($zoneInfo['zone'])) {
+                $rawAmountsByCode['ZONE'] = (float) $zoneInfo['zone'];
+            }
+            // {ZONE_PRICE} = the manual price for the charge code being computed. Left OUT (not 0)
+            // when nothing is configured for this destination, so the formula fails and the line
+            // falls back to the carrier's own API amount — "manual if set, otherwise API".
+            $valuesFor = function ($code) use ($rawAmountsByCode, $zoneInfo) {
+                $price = $zoneInfo['prices'][(string) $code] ?? null;
+
+                return $price === null ? $rawAmountsByCode : $rawAmountsByCode + ['ZONE_PRICE' => $price];
+            };
 
             $delta = 0.0;
             // Tracked separately from $delta: only the portion coming from a MarkupRule (not
             // from a ChargeFixedOverride) — this is what the frontend shows as "(+X Marked Up)".
             $markupTotal = 0.0;
-            $breakdown = array_map(function ($line) use ($accountOverrides, $accountRules, $rawAmountsByCode, &$delta, &$markupTotal) {
+            $breakdown = array_map(function ($line) use ($accountOverrides, $accountRules, $valuesFor, $formulaContext, &$delta, &$markupTotal) {
                 $code = $line['code'] ?? null;
                 if ($code === null || in_array($code, self::COST_ONLY_CODES, true)) {
                     return $line;
@@ -101,10 +136,11 @@ class ChargeMarkupService
 
                 $original = (float) $line['amount'];
                 $base = $original;
+                $values = $valuesFor($code);
                 if ($override) {
                     if ($override->override_type === 'FORMULA' && $override->formula) {
                         try {
-                            $base = ChargeFormulaEvaluator::evaluate($override->formula, $rawAmountsByCode);
+                            $base = ChargeFormulaEvaluator::evaluate($override->formula, $values, $formulaContext);
                         } catch (\Throwable $e) {
                             // Bad/unresolvable formula (e.g. references a code this quote doesn't
                             // have) — fall back to the carrier's own amount instead of breaking
@@ -121,7 +157,7 @@ class ChargeMarkupService
                 }
                 $new = $rule
                     ? ($rule->rule_type === 'FORMULA' && $rule->formula
-                        ? $this->safeEvaluateFormula($rule->formula, $rawAmountsByCode, $base)
+                        ? $this->safeEvaluateFormula($rule->formula, $values, $base, $formulaContext)
                         : ($rule->unit === 'PERCENTAGE' ? $base * (1 + (float) $rule->value / 100) : $base + (float) $rule->value))
                     : $base;
                 $new = round($new, 2);
@@ -163,7 +199,7 @@ class ChargeMarkupService
 
                     if ($rule->rule_type === 'FORMULA' && $rule->formula) {
                         try {
-                            $extra = round(ChargeFormulaEvaluator::evaluate($rule->formula, $rawAmountsByCode), 2);
+                            $extra = round(ChargeFormulaEvaluator::evaluate($rule->formula, $valuesFor($code), $formulaContext), 2);
                         } catch (\Throwable $e) {
                             // No sensible base to fall back to for a brand-new line — skip it
                             // rather than inject a wrong/zero amount.
@@ -219,10 +255,10 @@ class ChargeMarkupService
 
     /** Evaluates a MarkupRule formula against an EXISTING line, falling back to that line's
      * base amount (override result or the carrier's own amount) if the formula fails. */
-    private function safeEvaluateFormula(string $formula, array $rawAmountsByCode, float $fallback): float
+    private function safeEvaluateFormula(string $formula, array $rawAmountsByCode, float $fallback, array $context = []): float
     {
         try {
-            return ChargeFormulaEvaluator::evaluate($formula, $rawAmountsByCode);
+            return ChargeFormulaEvaluator::evaluate($formula, $rawAmountsByCode, $context);
         } catch (\Throwable $e) {
             return $fallback;
         }
