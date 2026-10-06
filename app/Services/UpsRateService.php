@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Services\Concerns\HasUpsOAuthToken;
+use App\Support\StateCode;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -71,7 +72,7 @@ class UpsRateService
                         'Address' => array_filter([
                             'AddressLine' => [$to['address'] ?? ''],
                             'City' => $to['city'] ?? '',
-                            'StateProvinceCode' => $to['stateCode'] ?? null,
+                            'StateProvinceCode' => StateCode::clean($to['stateCode'] ?? null),
                             'PostalCode' => $to['postcode'] ?? '',
                             'CountryCode' => $to['country'] ?? '',
                         ], fn ($v) => $v !== null),
@@ -286,7 +287,7 @@ class UpsRateService
         return ! empty($item['Code']) ? "Other Charge (code {$item['Code']})" : 'Other Charge';
     }
 
-    private function buildBreakdown(?array $baseCharge, ?array $itemizedCharges, string $currency, ?array $serviceOptionsCharge = null): array
+    private function buildBreakdown(?array $baseCharge, ?array $itemizedCharges, string $currency, ?array $serviceOptionsCharge = null, bool $declaredValueSent = false): array
     {
         $lines = [];
         if (isset($baseCharge['MonetaryValue'])) {
@@ -307,8 +308,11 @@ class UpsRateService
         }
         // ServiceOptionsCharges (e.g. Declared Value insurance) is usually already broken out
         // in ItemizedCharges as Code 400 — only add this as a fallback if it isn't there yet.
+        // ServiceOptionsCharges is NOT insurance-only (UPS also puts e.g. the published Extended
+        // Area surcharge there), so only treat it as insurance when a Declared Value was sent —
+        // otherwise an uninsured shipment shows a phantom "Declared Value (Insurance)" line.
         $hasDeclaredValueLine = collect($itemizedCharges ?? [])->contains(fn ($item) => ($item['Code'] ?? null) === '400');
-        if (! $hasDeclaredValueLine && isset($serviceOptionsCharge['MonetaryValue']) && (float) $serviceOptionsCharge['MonetaryValue'] > 0) {
+        if ($declaredValueSent && ! $hasDeclaredValueLine && isset($serviceOptionsCharge['MonetaryValue']) && (float) $serviceOptionsCharge['MonetaryValue'] > 0) {
             $lines[] = [
                 'code' => 'SERVICE_OPTIONS',
                 'description' => 'Declared Value (Insurance)',
@@ -320,7 +324,7 @@ class UpsRateService
         return $lines;
     }
 
-    private function extractQuote(array $raw): array
+    private function extractQuote(array $raw, bool $declaredValueSent = false): array
     {
         $ratedShipments = $raw['RateResponse']['RatedShipment'] ?? [];
         $rs = array_is_list($ratedShipments) ? ($ratedShipments[0] ?? null) : $ratedShipments;
@@ -333,9 +337,9 @@ class UpsRateService
         $published = $rs['TotalCharges']['MonetaryValue'] ?? $rs['TransportationCharges']['MonetaryValue'] ?? null;
         $negotiated = $rs['NegotiatedRateCharges']['TotalCharge']['MonetaryValue'] ?? null;
 
-        $chargeBreakdown = $this->buildBreakdown($rs['BaseServiceCharge'] ?? null, $rs['ItemizedCharges'] ?? null, $currency, $rs['ServiceOptionsCharges'] ?? null);
+        $chargeBreakdown = $this->buildBreakdown($rs['BaseServiceCharge'] ?? null, $rs['ItemizedCharges'] ?? null, $currency, $rs['ServiceOptionsCharges'] ?? null, $declaredValueSent);
         $negotiatedChargeBreakdown = isset($rs['NegotiatedRateCharges'])
-            ? $this->buildBreakdown($rs['NegotiatedRateCharges']['BaseServiceCharge'] ?? null, $rs['NegotiatedRateCharges']['ItemizedCharges'] ?? null, $currency, $rs['NegotiatedRateCharges']['ServiceOptionsCharges'] ?? $rs['ServiceOptionsCharges'] ?? null)
+            ? $this->buildBreakdown($rs['NegotiatedRateCharges']['BaseServiceCharge'] ?? null, $rs['NegotiatedRateCharges']['ItemizedCharges'] ?? null, $currency, $rs['NegotiatedRateCharges']['ServiceOptionsCharges'] ?? $rs['ServiceOptionsCharges'] ?? null, $declaredValueSent)
             : null;
 
 
@@ -364,6 +368,10 @@ class UpsRateService
         if (empty($accounts)) {
             return [];
         }
+
+        // Mirrors buildRateRequest: DeclaredValue only goes out for non-document packages with a value.
+        $declaredValueSent = collect($shipment['packages'] ?? [])
+            ->contains(fn ($pkg) => (float) ($pkg['declaredValue'] ?? 0) > 0 && ! ($pkg['isDocument'] ?? false));
 
         // Cache-first, same 55-min TTL/key scheme as HasUpsOAuthToken::getAccessToken() (checked
         // rates are the highest-traffic UPS call by far, so this is where caching saves the most
@@ -511,8 +519,8 @@ class UpsRateService
                         throw new \RuntimeException('UPS rate request failed: ' . ($negResp->json('response.errors.0.message') ?? $negResp->status()));
                     }
 
-                    $publishedQuote = $this->extractQuote($pubResp->json());
-                    $negotiatedQuote = $this->extractQuote($negResp->json());
+                    $publishedQuote = $this->extractQuote($pubResp->json(), $declaredValueSent);
+                    $negotiatedQuote = $this->extractQuote($negResp->json(), $declaredValueSent);
 
                     $results[] = [
                         'carrier' => 'UPS',

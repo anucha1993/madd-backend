@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Services\Concerns\HasUpsOAuthToken;
+use App\Support\StateCode;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 
@@ -45,7 +46,7 @@ class UpsAddressValidationService
                 'AddressKeyFormat' => array_filter([
                     'AddressLine' => $addressLines ?: null,
                     'PoliticalDivision2' => $address['city'] ?? null,
-                    'PoliticalDivision1' => $address['stateCode'] ?? null,
+                    'PoliticalDivision1' => StateCode::clean($address['stateCode'] ?? null),
                     'PostcodePrimaryLow' => $address['postcode'] ?? null,
                     'CountryCode' => $address['country'] ?? null,
                 ], fn ($v) => $v !== null && $v !== ''),

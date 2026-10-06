@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Exceptions\UpsTokenExpiredException;
 use App\Services\Concerns\HasUpsOAuthToken;
+use App\Support\StateCode;
 use Illuminate\Support\Facades\Http;
 
 /**
@@ -27,7 +28,7 @@ class UpsShipmentService
         return array_filter([
             'AddressLine' => [$addr['address'] ?? ''],
             'City' => $addr['city'] ?? '',
-            'StateProvinceCode' => $addr['stateCode'] ?? null,
+            'StateProvinceCode' => StateCode::clean($addr['stateCode'] ?? null),
             'PostalCode' => $addr['postcode'] ?? '',
             'CountryCode' => $addr['country'] ?? '',
         ], fn ($v) => $v !== null);

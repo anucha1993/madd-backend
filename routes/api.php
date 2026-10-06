@@ -329,6 +329,7 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
         Route::apiResource('charge-codes', ChargeCodeController::class)->only(['store', 'update', 'destroy']);
         Route::post('charge-formula/preview', [ChargeFormulaController::class, 'preview']);
         Route::apiResource('markup-rules', MarkupRuleController::class)->only(['store', 'update', 'destroy']);
+        Route::post('charge-fixed-overrides/clone', [ChargeFixedOverrideController::class, 'clone']);
         Route::apiResource('charge-fixed-overrides', ChargeFixedOverrideController::class)->only(['store', 'update', 'destroy']);
     });
 
