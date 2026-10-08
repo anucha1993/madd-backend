@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Services\Concerns\HasUpsOAuthToken;
 use App\Support\StateCode;
+use App\Support\UpsOptionalServices;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -52,7 +53,7 @@ class UpsRateService
     {
         $from = $shipment['from'];
         $to = $shipment['to'];
-        $shipmentOptionalServices = self::buildShipmentOptionalServices($shipment['upsOptionalServiceCodes'] ?? []);
+        $shipmentOptionalServices = UpsOptionalServices::shipmentLevel($shipment['upsOptionalServiceCodes'] ?? []);
 
         return [
             'RateRequest' => [
@@ -114,7 +115,7 @@ class UpsRateService
                                     'MonetaryValue' => number_format($pkgDeclaredValue, 2, '.', ''),
                                 ],
                             ] : [],
-                            self::buildPackageOptionalServices($shipment['upsOptionalServiceCodes'] ?? []),
+                            UpsOptionalServices::packageLevel($shipment['upsOptionalServiceCodes'] ?? []),
                         );
 
                         $packageEntry = array_merge([
@@ -140,38 +141,6 @@ class UpsRateService
         ];
     }
 
-    /** Shipment-level UPS Optional Services — currently just Saturday Delivery. */
-    private static function buildShipmentOptionalServices(array $codes): array
-    {
-        return in_array('SATURDAY', $codes, true) ? ['SaturdayDeliveryIndicator' => ''] : [];
-    }
-
-    /**
-     * Package-level UPS Optional Services. Signature options (DCIS1/2/3) are mutually exclusive
-     * by nature (radio in the UI) — DeliveryConfirmation.DCISType: "1"=Delivery Confirmation,
-     * "2"=Signature Required, "3"=Adult Signature Required.
-     */
-    private static function buildPackageOptionalServices(array $codes): array
-    {
-        $options = [];
-        $dcisType = match (true) {
-            in_array('DCIS3', $codes, true) => '3',
-            in_array('DCIS2', $codes, true) => '2',
-            in_array('DCIS1', $codes, true) => '1',
-            default => null,
-        };
-        if ($dcisType !== null) {
-            $options['DeliveryConfirmation'] = ['DCISType' => $dcisType];
-        }
-        if (in_array('ADDRESSEE_ONLY', $codes, true)) {
-            $options['DeliverToAddresseeOnlyIndicator'] = '';
-        }
-        if (in_array('DIRECT_ONLY', $codes, true)) {
-            $options['DirectDeliveryOnlyIndicator'] = '';
-        }
-
-        return $options;
-    }
 
     private function getRate(string $token, array $shipment, string $negotiatedIndicator): array
     {

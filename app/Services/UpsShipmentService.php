@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Exceptions\UpsTokenExpiredException;
 use App\Services\Concerns\HasUpsOAuthToken;
 use App\Support\StateCode;
+use App\Support\UpsOptionalServices;
 use Illuminate\Support\Facades\Http;
 
 /**
@@ -163,7 +164,7 @@ class UpsShipmentService
                             'MonetaryValue' => number_format($pkgDeclaredValue, 2, '.', ''),
                         ],
                     ] : [],
-                    $this->buildPackageOptionalServices($shipment['upsOptionalServiceCodes'] ?? []),
+                    UpsOptionalServices::packageLevel($shipment['upsOptionalServiceCodes'] ?? []),
                 );
 
                 $packageEntry = array_merge([
@@ -195,12 +196,12 @@ class UpsShipmentService
             ];
         }
 
-        // Shipment-level Optional Services (currently just Saturday Delivery) + the Commercial
+        // Shipment-level Optional Services (Saturday Delivery, signature) + the Commercial
         // Invoice (InternationalForms) — mandatory-ish for international non-document shipments
         // so UPS actually returns a printable Commercial Invoice document (Form), matching DHL's
         // auto-generated one.
         $shipmentServiceOptions = array_merge(
-            $this->buildShipmentOptionalServices($shipment['upsOptionalServiceCodes'] ?? []),
+            UpsOptionalServices::shipmentLevel($shipment['upsOptionalServiceCodes'] ?? []),
             $isInternational && $hasNonDocument ? ['InternationalForms' => $this->buildInternationalForms($shipment, $shipment['declaredValueCurrency'] ?? 'THB')] : [],
         );
         if ($shipmentServiceOptions !== []) {
@@ -222,38 +223,6 @@ class UpsShipmentService
         ];
     }
 
-    /** Shipment-level UPS Optional Services — currently just Saturday Delivery. */
-    private function buildShipmentOptionalServices(array $codes): array
-    {
-        return in_array('SATURDAY', $codes, true) ? ['SaturdayDeliveryIndicator' => ''] : [];
-    }
-
-    /**
-     * Package-level UPS Optional Services. Signature options (DCIS1/2/3) are mutually exclusive
-     * by nature (radio in the UI) — DeliveryConfirmation.DCISType: "1"=Delivery Confirmation,
-     * "2"=Signature Required, "3"=Adult Signature Required.
-     */
-    private function buildPackageOptionalServices(array $codes): array
-    {
-        $options = [];
-        $dcisType = match (true) {
-            in_array('DCIS3', $codes, true) => '3',
-            in_array('DCIS2', $codes, true) => '2',
-            in_array('DCIS1', $codes, true) => '1',
-            default => null,
-        };
-        if ($dcisType !== null) {
-            $options['DeliveryConfirmation'] = ['DCISType' => $dcisType];
-        }
-        if (in_array('ADDRESSEE_ONLY', $codes, true)) {
-            $options['DeliverToAddresseeOnlyIndicator'] = '';
-        }
-        if (in_array('DIRECT_ONLY', $codes, true)) {
-            $options['DirectDeliveryOnlyIndicator'] = '';
-        }
-
-        return $options;
-    }
 
     /**
      * Prefers the free-form Commercial Invoice line items (same shipment-level list used by
