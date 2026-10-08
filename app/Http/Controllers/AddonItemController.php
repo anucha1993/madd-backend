@@ -36,6 +36,7 @@ class AddonItemController extends Controller
             // price_type (e.g. still add +2% on top of a PERCENT-of-declared-value or API_COST price).
             'markup_percent' => ['nullable', 'numeric', 'min:0'],
             'trigger_type' => ['required', 'in:MANUAL,AUTO'],
+            'always_show' => ['boolean'],
             'status' => ['boolean'],
             'note' => ['nullable', 'string', 'max:255'],
         ]);
@@ -58,6 +59,7 @@ class AddonItemController extends Controller
             'price' => ['nullable', 'required_if:price_type,FIXED,PERCENT', 'numeric', 'min:0'],
             'markup_percent' => ['nullable', 'numeric', 'min:0'],
             'trigger_type' => ['sometimes', 'required', 'in:MANUAL,AUTO'],
+            'always_show' => ['boolean'],
             'status' => ['boolean'],
             'note' => ['nullable', 'string', 'max:255'],
         ]);
