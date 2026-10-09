@@ -94,7 +94,7 @@ class ShippingController extends Controller
                 'declaredValue' => $pkg['declared_value'] ?? null,
             ], $data['packages']),
             'declaredValueCurrency' => $data['declared_value_currency'] ?? 'THB',
-            'optionalServiceCodes' => $data['dhl_optional_services'] ?? ['SF'],
+            'optionalServiceCodes' => $data['dhl_optional_services'] ?? DhlRateService::DEFAULT_OPTIONAL_SERVICE_CODES,
             'upsOptionalServiceCodes' => $data['ups_optional_services'] ?? [],
         ];
 

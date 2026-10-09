@@ -21,3 +21,7 @@ Schedule::command('pickups:notify-overdue')->everyFifteenMinutes();
 
 // Drops Public Rate API request logs older than ApiRequestLog::RETENTION_DAYS (365) days.
 Schedule::command('model:prune', ['--model' => [\App\Models\ApiRequestLog::class]])->daily();
+
+// Runs every minute but self-gates on the Rate Book's own weekly/monthly schedule or a "Sync now"
+// request (see SyncRateBook). In the background so a ~15-minute run never delays the others.
+Schedule::command('rate-book:sync')->everyMinute()->withoutOverlapping(180)->runInBackground();

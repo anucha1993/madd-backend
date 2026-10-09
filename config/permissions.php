@@ -288,8 +288,10 @@ return [
                 'summary_export' => 'Shipment Summary: Export Excel',
                 'finance' => 'Revenue & Expense',
                 'key_billing' => 'Key Billing Report',
+                'rate_book' => 'Rate Book',
+                'rate_book_settings' => 'Rate Book: ตั้งค่า / สั่ง Sync',
             ],
-            'action_hints' => ['manifest' => 'ดูรายงาน Manifest', 'summary' => 'Dashboard วิเคราะห์ Shipment', 'key_billing' => 'ดูยอดขายเทียบกับต้นทุนจาก Carrier Invoice'],
+            'action_hints' => ['manifest' => 'ดูรายงาน Manifest', 'summary' => 'Dashboard วิเคราะห์ Shipment', 'key_billing' => 'ดูยอดขายเทียบกับต้นทุนจาก Carrier Invoice', 'rate_book' => 'ดู/ดาวน์โหลด Rate Book ราคาขาย (เห็น Markup/กำไร)'],
         ],
         'branch' => [
             'label' => 'สาขา',

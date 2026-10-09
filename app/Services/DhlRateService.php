@@ -7,6 +7,10 @@ use Illuminate\Support\Facades\Http;
 
 class DhlRateService
 {
+    // Optional services every DHL quote carries unless staff pick others — Create Shipment's own
+    // default (Direct Signature). The Rate Book uses the same so its prices match Check Rate.
+    public const DEFAULT_OPTIONAL_SERVICE_CODES = ['SF'];
+
     private function generateMessageReference(): string
     {
         return 'madd-' . now()->timestamp . '-' . bin2hex(random_bytes(4));
@@ -68,7 +72,7 @@ class DhlRateService
             }
         }
 
-        $valueAddedServices = collect($shipment['optionalServiceCodes'] ?? ['SF'])
+        $valueAddedServices = collect($shipment['optionalServiceCodes'] ?? self::DEFAULT_OPTIONAL_SERVICE_CODES)
             ->map(fn ($code) => ['serviceCode' => $code])->all();
         if ($declaredValue > 0) {
             // 'II' (Insurance) must carry its own value/currency (per DHL's rates schema
