@@ -27,6 +27,15 @@ class RateBookSettings
 
     public const REQUESTED_KEY = 'rate_book.requested_by';
 
+    // Id of a running run staff asked to stop — the run checks it between points.
+    public const CANCEL_KEY = 'rate_book.cancel_run';
+
+    public const LOCK = 'rate-book-sync';
+
+    // A running run reports progress every few points (seconds apart); this long without any means
+    // its process died (server restart, killed task…) — it's closed and the lock freed.
+    public const STALE_MINUTES = 10;
+
     public const CARRIERS = ['UPS', 'DHL'];
 
     public const PACKAGE_TYPES = ['document', 'box'];
@@ -95,6 +104,29 @@ class RateBookSettings
         natsort($zones);
 
         return array_values(array_map('strval', $zones));
+    }
+
+    /**
+     * Closes runs whose process died mid-way (no progress for STALE_MINUTES) and frees the sync
+     * lock they left behind, so a new sync can start. Returns how many were closed.
+     */
+    public static function closeStaleRuns(): int
+    {
+        $stale = \App\Models\RateBookRun::where('status', 'running')
+            ->where('updated_at', '<', now()->subMinutes(self::STALE_MINUTES))
+            ->get();
+        foreach ($stale as $run) {
+            $run->update([
+                'status' => 'failed',
+                'error' => 'หยุดทำงานกลางคัน (ไม่มีความคืบหน้าเกิน '.self::STALE_MINUTES.' นาที) — ระบบปิดรอบนี้ให้อัตโนมัติ',
+                'finished_at' => now(),
+            ]);
+        }
+        if ($stale->isNotEmpty() && ! \App\Models\RateBookRun::where('status', 'running')->exists()) {
+            \Illuminate\Support\Facades\Cache::lock(self::LOCK)->forceRelease();
+        }
+
+        return $stale->count();
     }
 
     /** Is a scheduled run due now (settings enabled + day/time reached + not yet run this period)? */

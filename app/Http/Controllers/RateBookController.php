@@ -5,10 +5,12 @@ namespace App\Http\Controllers;
 use App\Models\AgentAccount;
 use App\Models\IntegrationSetting;
 use App\Models\RateBookRun;
+use App\Support\RateBookLauncher;
 use App\Support\RateBookRateCard;
 use App\Support\RateBookSettings;
 use App\Support\RateBookWorkbook;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -95,19 +97,51 @@ class RateBookController extends Controller
     }
 
     /** Leaves a request the scheduler picks up within a minute (see SyncRateBook). */
-    public function requestSync(Request $request)
+    /**
+     * Leaves the request (who asked) and starts the sync right away in the background — no need to
+     * wait for a scheduler tick, or for a scheduler at all. If one is already running, its lock wins.
+     */
+    public function requestSync(Request $request, RateBookLauncher $launcher)
     {
         IntegrationSetting::set(RateBookSettings::REQUESTED_KEY, (string) $request->user()->id);
+        $launcher->launch();
 
-        return response()->json(['message' => 'สั่ง Sync แล้ว — ระบบจะเริ่มภายใน 1 นาที (ใช้เวลาประมาณ 10-20 นาที)']);
+        return response()->json(['message' => 'เริ่ม Sync แล้ว — ใช้เวลาประมาณ 20-30 นาที ดูความคืบหน้าได้ที่ประวัติการ Sync']);
     }
 
     public function runs()
     {
+        RateBookSettings::closeStaleRuns();
+
         return response()->json(
             RateBookRun::with('requester:id,name')->latest('id')->limit(20)
-                ->get(['id', 'status', 'trigger', 'requested_by', 'total_points', 'done_points', 'error_points', 'error', 'started_at', 'finished_at'])
+                ->get(['id', 'status', 'trigger', 'requested_by', 'total_points', 'done_points', 'error_points', 'error', 'started_at', 'finished_at', 'updated_at'])
         );
+    }
+
+    /**
+     * Stops a running sync. A live process sees the request within a few points and closes the run
+     * itself; one whose process is already gone (no progress for 2+ minutes) is closed right here
+     * and its lock freed, so "Sync now" works again immediately.
+     */
+    public function cancel(RateBookRun $rateBookRun)
+    {
+        if ($rateBookRun->status !== 'running') {
+            return response()->json(['message' => 'รอบนี้ไม่ได้กำลัง Sync อยู่'], 422);
+        }
+
+        if ($rateBookRun->updated_at->lt(now()->subMinutes(2))) {
+            $rateBookRun->update(['status' => 'failed', 'error' => 'ยกเลิกโดยผู้ใช้', 'finished_at' => now()]);
+            if (! RateBookRun::where('status', 'running')->exists()) {
+                Cache::lock(RateBookSettings::LOCK)->forceRelease();
+            }
+
+            return response()->json(['message' => 'ยกเลิกแล้ว']);
+        }
+
+        IntegrationSetting::set(RateBookSettings::CANCEL_KEY, (string) $rateBookRun->id);
+
+        return response()->json(['message' => 'กำลังยกเลิก — จะหยุดภายในไม่กี่วินาที']);
     }
 
     /** One carrier's rows of a run, for the on-screen rate table (same data as the Excel). */

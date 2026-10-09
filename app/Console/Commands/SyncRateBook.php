@@ -32,7 +32,8 @@ class SyncRateBook extends Command
             return self::SUCCESS;
         }
 
-        $lock = Cache::lock('rate-book-sync', 3 * 3600);
+        RateBookSettings::closeStaleRuns();
+        $lock = Cache::lock(RateBookSettings::LOCK, 3 * 3600);
         if (! $lock->get()) {
             return self::SUCCESS; // a run is already in progress
         }

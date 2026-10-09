@@ -120,4 +120,10 @@ return [
         'tracking_url' => env('MADD_TRACKING_URL', 'https://madd.co.th/tracking/'),
     ],
 
+    // CLI php used by Rate Book's "Sync now" (RateBookLauncher). Set it where the site runs on
+    // PHP-FPM (e.g. Plesk: /opt/plesk/php/8.3/bin/php); empty = auto-detect.
+    'rate_book' => [
+        'php_binary' => env('RATE_BOOK_PHP_BINARY'),
+    ],
+
 ];

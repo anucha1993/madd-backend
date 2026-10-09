@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\AgentAccount;
+use App\Models\IntegrationSetting;
 use App\Models\RateBookRow;
 use App\Models\RateBookRun;
 use App\Support\RateBookSettings;
@@ -111,6 +112,11 @@ class RateBookService
         return $value !== null ? round((float) $value, 2) : null;
     }
 
+    private static function isTransient(string $error): bool
+    {
+        return (bool) preg_match('/cURL error|timed out|timeout|Connection|could not resolve|\b5\d\d\b/i', $error);
+    }
+
     public static function bandLabel(float $min, ?float $max): string
     {
         return number_format($min, 2).($max !== null ? '-'.number_format($max, 2) : '+').' kg';
@@ -134,14 +140,26 @@ class RateBookService
             foreach ($columnsByCarrier[$point['carrier']] as $column) {
                 $accountId = self::accountFor($settings['carriers'][$point['carrier']]['account_rules'] ?? [], $column['zone'], $point['weight'], $point['account_id']);
                 $row = $this->quotePoint($point, $column['key'], $column['address'], $accounts->get($accountId));
+                if ($row['error'] !== null && self::isTransient($row['error'])) {
+                    // Network blip (DNS / timeout / carrier 5xx) — one more try before giving up on the point.
+                    sleep(app()->runningUnitTests() ? 0 : 3);
+                    $row = $this->quotePoint($point, $column['key'], $column['address'], $accounts->get($accountId));
+                }
                 RateBookRow::create(['rate_book_run_id' => $run->id] + $row);
                 usleep(app()->runningUnitTests() ? 0 : self::PAUSE_MICROSECONDS);
                 $done++;
                 if ($row['error'] !== null) {
                     $errors++;
                 }
-                if ($done % 10 === 0) {
+                // Progress (also the heartbeat closeStaleRuns() watches) + a chance to stop.
+                if ($done % 5 === 0) {
                     $run->update(['done_points' => $done, 'error_points' => $errors]);
+                    if ((string) IntegrationSetting::get(RateBookSettings::CANCEL_KEY) === (string) $run->id) {
+                        IntegrationSetting::set(RateBookSettings::CANCEL_KEY, null);
+                        $run->update(['status' => 'failed', 'error' => 'ยกเลิกโดยผู้ใช้', 'finished_at' => now()]);
+
+                        return $run;
+                    }
                 }
             }
         }

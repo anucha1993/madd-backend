@@ -369,6 +369,7 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
         Route::middleware('perm:report.rate_book_settings')->group(function () {
             Route::put('rate-book/settings', [RateBookController::class, 'updateSettings']);
             Route::post('rate-book/sync', [RateBookController::class, 'requestSync']);
+            Route::post('rate-book/runs/{rateBookRun}/cancel', [RateBookController::class, 'cancel']);
         });
     });
     Route::middleware('perm:report.key_billing')->group(function () {

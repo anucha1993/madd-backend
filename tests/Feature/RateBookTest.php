@@ -157,6 +157,31 @@ class RateBookTest extends TestCase
         $this->assertEquals(400, $run->rows()->where('carrier', 'DHL')->where('package_type', 'document')->first()->sell);
     }
 
+    public function test_dead_runs_are_closed_and_running_ones_can_be_cancelled(): void
+    {
+        $this->actingWith(['report.rate_book', 'report.rate_book_settings']);
+
+        // Process died: no progress for > STALE_MINUTES → closed when the history is read, lock freed.
+        $dead = RateBookRun::create(['status' => 'running', 'trigger' => 'manual', 'settings' => []]);
+        RateBookRun::whereKey($dead->id)->update(['updated_at' => now()->subMinutes(RateBookSettings::STALE_MINUTES + 1)]);
+        \Illuminate\Support\Facades\Cache::lock(RateBookSettings::LOCK, 3600)->get();
+        $this->getJson('/api/rate-book/runs')->assertOk();
+        $this->assertSame('failed', $dead->fresh()->status);
+        $this->assertTrue(\Illuminate\Support\Facades\Cache::lock(RateBookSettings::LOCK, 10)->get());
+
+        // Live run: cancelling only leaves the request — the run stops itself between points.
+        $live = RateBookRun::create(['status' => 'running', 'trigger' => 'manual', 'settings' => []]);
+        $this->postJson("/api/rate-book/runs/{$live->id}/cancel")->assertOk();
+        $this->assertSame('running', $live->fresh()->status);
+        $this->assertSame((string) $live->id, IntegrationSetting::get(RateBookSettings::CANCEL_KEY));
+
+        // Stuck run (no progress for 2+ minutes): cancelled immediately.
+        RateBookRun::whereKey($live->id)->update(['updated_at' => now()->subMinutes(3)]);
+        $this->postJson("/api/rate-book/runs/{$live->id}/cancel")->assertOk();
+        $this->assertSame('failed', $live->fresh()->status);
+        $this->postJson("/api/rate-book/runs/{$live->id}/cancel")->assertStatus(422);
+    }
+
     public function test_endpoints_need_their_permissions_and_export_downloads(): void
     {
         $this->actingWith(['report.summary']);
@@ -167,6 +192,8 @@ class RateBookTest extends TestCase
         $this->postJson('/api/rate-book/sync')->assertForbidden();
 
         $this->actingWith(['report.rate_book', 'report.rate_book_settings']);
+        // "Sync now" starts the run itself (no scheduler needed) — exactly once per click.
+        $this->mock(\App\Support\RateBookLauncher::class)->shouldReceive('launch')->once();
         $this->postJson('/api/rate-book/sync')->assertOk();
         $this->assertNotNull(IntegrationSetting::get(RateBookSettings::REQUESTED_KEY));
 
