@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\ChargeFixedOverride;
+use App\Models\Country;
 use App\Models\MarkupRule;
 use App\Models\ZonePrice;
 
@@ -63,8 +64,15 @@ class ChargeMarkupService
 
         // Manual zone + prices per carrier for this destination, looked up once per carrier.
         $zoneLookups = [];
+        $weightMarkups = app(WeightMarkupService::class);
 
-        return array_map(function ($result) use ($overridesByAccount, $rulesByAccount, $formulaContext, $packageWeights, $destinationCountry, &$zoneLookups) {
+        return array_map(fn ($result) => $this->applyWeightMarkup($this->applyAccountPricing($result, $overridesByAccount, $rulesByAccount, $formulaContext, $packageWeights, $destinationCountry, $zoneLookups), $weightMarkups, $packages, $destinationCountry), $results);
+    }
+
+    /** The account's Fixed Charges + Mark-up rules on one quote (see applyToResults). */
+    private function applyAccountPricing(array $result, $overridesByAccount, $rulesByAccount, array $formulaContext, array $packageWeights, ?string $destinationCountry, array &$zoneLookups): array
+    {
+        return (function ($result) use ($overridesByAccount, $rulesByAccount, $formulaContext, $packageWeights, $destinationCountry, &$zoneLookups) {
             if (! empty($result['error']) || empty($result['accountId'])) {
                 return $result;
             }
@@ -250,7 +258,53 @@ class ChargeMarkupService
             }
 
             return $result;
-        }, $results);
+        })($result);
+    }
+
+    /**
+     * Weight Markup (/config/weight-markups): THB per chargeable kg by weight band, added last — on
+     * top of Fixed Charges + Mark-up rules — as its own "Weight Markup" line, so it shows up in the
+     * quote, in Create Shipment's sell price and in the Rate Book alike.
+     */
+    private function applyWeightMarkup(array $result, WeightMarkupService $weightMarkups, array $packages, ?string $destinationCountry): array
+    {
+        if (! empty($result['error']) || empty($result['carrier'])) {
+            return $result;
+        }
+
+        $carrier = strtoupper((string) $result['carrier']);
+        $packageType = $packages !== [] && collect($packages)->every(fn ($p) => ! empty($p['isDocument'])) ? 'document' : 'box';
+        // Chargeable weight: what the carrier billed (or its volumetric weight), never below what was declared.
+        $declared = collect($packages)->sum(fn ($p) => (float) ($p['weight'] ?? 0) * max(1, (int) ($p['quantity'] ?? 1)));
+        $weight = max((float) ($result['billedWeight'] ?? 0), (float) ($result['volumetricWeight'] ?? 0), $declared);
+        $zone = $destinationCountry && in_array($carrier, ['UPS', 'DHL'], true)
+            ? Country::where('iso2', strtoupper($destinationCountry))->value(strtolower($carrier).'_zone')
+            : null;
+
+        $markup = $weightMarkups->resolve($carrier, $packageType, $result['accountId'] ?? null, $destinationCountry, $zone, $weight);
+        if (! $markup) {
+            return $result;
+        }
+
+        $result['chargeBreakdown'] = [...($result['chargeBreakdown'] ?? []), [
+            'code' => 'WEIGHT_MARKUP',
+            'description' => 'Weight Markup',
+            'amount' => $markup['amount'],
+            'currency' => $result['currency'] ?? 'THB',
+            'isCustomCharge' => true,
+            'markupUnit' => 'PER_KG',
+            'markupValue' => $markup['rate'],
+            'markupBase' => $markup['weight'],
+            'markupNote' => "{$markup['band']} · {$markup['scope']}",
+        ]];
+        foreach (['published', 'negotiated'] as $total) {
+            if (isset($result[$total]) && $result[$total] !== null) {
+                $result[$total] = round($result[$total] + $markup['amount'], 2);
+            }
+        }
+        $result['markupTotal'] = round(($result['markupTotal'] ?? 0) + $markup['amount'], 2);
+
+        return $result;
     }
 
     /** Evaluates a MarkupRule formula against an EXISTING line, falling back to that line's

@@ -162,7 +162,7 @@ return [
                 'markup' => [
                     'label' => 'รายละเอียด Mark-up',
                     'hint' => 'สูตร, % × ฐานคำนวณ, ยอด Mark-up รวม',
-                    'columns' => ['markupTotal', 'chargeBreakdown.*.markupUnit', 'chargeBreakdown.*.markupValue', 'chargeBreakdown.*.markupBase', 'chargeBreakdown.*.markupFormula'],
+                    'columns' => ['markupTotal', 'chargeBreakdown.*.markupUnit', 'chargeBreakdown.*.markupValue', 'chargeBreakdown.*.markupBase', 'chargeBreakdown.*.markupFormula', 'chargeBreakdown.*.markupNote'],
                     'default' => 'hidden',
                 ],
                 'carrier_raw' => [
@@ -309,6 +309,8 @@ return [
             'category' => 'admin',
             'actions' => [
                 'markup' => 'Mark-up',
+                'weight_markups' => 'Weight Markup',
+                'weight_markups_edit' => 'Weight Markup: แก้ไข',
                 'charge_names' => 'Charge Display Names',
                 'addon' => 'Add-on',
                 'insurance' => 'Insurance UPSC',
@@ -341,6 +343,8 @@ return [
             ],
             'action_hints' => [
                 'markup' => 'Mark-up / Charge Codes / สูตรค่าบริการ',
+                'weight_markups' => 'ดูราคาบวกเพิ่ม (บาท/kg) ตามช่วงน้ำหนัก ราย Zone / ประเทศ',
+                'weight_markups_edit' => 'แก้ช่วงน้ำหนัก / ราคา Weight Markup — มีผลกับราคาขายทันที',
                 'zone_prices' => 'ตั้ง Zone ของแต่ละประเทศ (UPS / DHL) และราคาตาม Zone ที่ใช้เป็น {ZONE_PRICE} ในสูตร Fixed Charges / Mark-up',
                 'charge_names' => 'ตั้งชื่อแสดงของ Charge Code (เช่น BASE → ค่าขนส่ง) — มีผลทุกหน้าและใบเสร็จ / ใบกำกับภาษีที่ออกใหม่',
                 'agent_accounts' => 'บัญชี UPS / DHL (Fixed Charges ของบัญชีต้องมีสิทธิ์ Mark-up ด้วย)',

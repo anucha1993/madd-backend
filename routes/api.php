@@ -56,6 +56,7 @@ use App\Http\Controllers\SupplyStockController;
 use App\Http\Controllers\ThaiSubdistrictController;
 use App\Http\Controllers\RateBookController;
 use App\Http\Controllers\TrackingSyncController;
+use App\Http\Controllers\WeightMarkupController;
 use App\Http\Controllers\UpsTrackingController;
 use App\Http\Controllers\UserController;
 use Illuminate\Http\Request;
@@ -325,6 +326,14 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
     Route::middleware('perm:config.markup,config.agent_accounts')->group(function () {
         Route::get('markup-rules', [MarkupRuleController::class, 'index']);
         Route::get('charge-fixed-overrides', [ChargeFixedOverrideController::class, 'index']);
+    });
+    // Weight Markup has its own permissions (view / edit), apart from Mark-up.
+    Route::middleware('perm:config.weight_markups')->group(function () {
+        Route::get('weight-markups', [WeightMarkupController::class, 'show']);
+        Route::middleware('perm:config.weight_markups_edit')->group(function () {
+            Route::put('weight-markups', [WeightMarkupController::class, 'save']);
+            Route::delete('weight-markups', [WeightMarkupController::class, 'destroy']);
+        });
     });
     Route::middleware('perm:config.markup')->group(function () {
         Route::apiResource('charge-codes', ChargeCodeController::class)->only(['store', 'update', 'destroy']);
