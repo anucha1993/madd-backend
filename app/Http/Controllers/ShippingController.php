@@ -8,7 +8,11 @@ use App\Services\DhlRateService;
 use App\Services\QuotableAccountResolver;
 use App\Services\RateQuoteVault;
 use App\Services\UpsRateService;
+use App\Support\DocumentWeightLimit;
+use App\Support\PieceWeightLimit;
+use App\Support\WholeKgBilledWeight;
 use Illuminate\Http\Request;
+
 
 class ShippingController extends Controller
 {
@@ -107,6 +111,9 @@ class ShippingController extends Controller
             $accountsQuery->whereIn('id', $data['agent_account_ids']);
         }
         $accounts = $accountsQuery->get();
+        // Only accounts whose Check Rate weight range (/config/agent-accounts) covers this shipment.
+        $billedWeight = WholeKgBilledWeight::billedWeight($shipment['packages']);
+        $accounts = $accounts->filter(fn ($a) => $a->quotesWeight($billedWeight));
 
         $carriers = ! empty($data['carriers']) ? $data['carriers'] : ['UPS', 'DHL'];
         $upsAccounts = in_array('UPS', $carriers, true)
@@ -117,13 +124,31 @@ class ShippingController extends Controller
             : collect();
 
         if ($upsAccounts->isEmpty() && $dhlAccounts->isEmpty()) {
-            return response()->json(['error' => 'ไม่พบบัญชี UPS หรือ DHL ที่เปิดใช้งานอยู่'], 400);
+            return response()->json(['error' => "ไม่พบบัญชี UPS หรือ DHL ที่เปิดใช้งานอยู่สำหรับน้ำหนัก {$billedWeight} kg (ดูช่วงน้ำหนักของแต่ละบัญชีที่ Agent Accounts)"], 400);
         }
+
+        // Document over the carrier's weight limit → that carrier isn't quoted, just reported.
+        $limitResults = [];
+        $overLimit = function (string $carrier, $carrierAccounts) use ($shipment, &$limitResults) {
+            $limitError = DocumentWeightLimit::error($carrier, $shipment['packages']) ?? PieceWeightLimit::error($carrier, $shipment['packages']);
+            if (! $limitError) {
+                return $carrierAccounts;
+            }
+            foreach ($carrierAccounts as $account) {
+                $limitResults[] = ['carrier' => $carrier, 'accountId' => $account->id, 'username' => $account->username_acc, 'serviceCode' => null, 'serviceLabel' => $carrier, 'error' => $limitError];
+            }
+
+            return collect();
+        };
+        $upsAccounts = $overLimit('UPS', $upsAccounts);
+        $dhlAccounts = $overLimit('DHL', $dhlAccounts);
 
         $serviceCodes = ! empty($data['service_codes'])
             ? $data['service_codes']
             : array_map('strval', array_keys($this->upsRateService->serviceLabels()));
 
+        // Over 10 kg the carrier is asked for the next whole kg (10.1 → 11) — see WholeKgBilledWeight.
+        $quoteShipment = ['packages' => WholeKgBilledWeight::forQuote($shipment['packages'])] + $shipment;
         $upsResults = $this->upsRateService->quoteAccounts(
             $upsAccounts->map(fn ($account) => [
                 'id' => $account->id,
@@ -133,7 +158,7 @@ class ShippingController extends Controller
                 'mode' => $account->mode,
                 'allowed_service_codes' => $allowedServiceCodesByAccountId[$account->id] ?? null,
             ])->values()->all(),
-            $shipment,
+            $quoteShipment,
             $serviceCodes,
         );
 
@@ -146,10 +171,10 @@ class ShippingController extends Controller
                 'mode' => $account->mode,
                 'allowed_service_codes' => $allowedServiceCodesByAccountId[$account->id] ?? null,
             ])->values()->all(),
-            $shipment,
+            $quoteShipment,
         );
 
-        $results = $this->chargeMarkupService->applyToResults([...$upsResults, ...$dhlResults], $shipment['packages'], $shipment['to']['country']);
+        $results = $this->chargeMarkupService->applyToResults([...$upsResults, ...$dhlResults, ...$limitResults], $shipment['packages'], $shipment['to']['country']);
 
         // Full quote stays server-side (booking reads cost from it by quoteId); the browser only
         // gets what this user's Role may see — e.g. front-counter staff get the sell price and

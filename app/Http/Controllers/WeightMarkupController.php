@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\WeightMarkupBand;
+use App\Services\ChargeFormulaEvaluator;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -22,7 +23,8 @@ class WeightMarkupController extends Controller
             'bands' => $bands->map(fn ($b) => [
                 'min_weight' => $b->min_weight,
                 'max_weight' => $b->max_weight,
-                'rates' => $b->rates->mapWithKeys(fn ($r) => [self::scopeKey($r->scope_type, $r->scope_value) => $r->rate_per_kg]),
+                // THB per kg, or the formula text.
+                'rates' => $b->rates->mapWithKeys(fn ($r) => [self::scopeKey($r->scope_type, $r->scope_value) => $r->formula ?? $r->rate_per_kg]),
             ]),
             // Accounts of this carrier/type that have their own set (instead of the carrier-wide one).
             'account_sets' => WeightMarkupBand::where('carrier', $data['carrier'])->where('package_type', $data['package_type'])
@@ -37,7 +39,7 @@ class WeightMarkupController extends Controller
             'bands.*.min_weight' => ['required', 'numeric', 'min:0'],
             'bands.*.max_weight' => ['nullable', 'numeric', 'min:0'],
             'bands.*.rates' => ['present', 'array'],
-            'bands.*.rates.*' => ['nullable', 'numeric', 'min:0'],
+            'bands.*.rates.*' => ['nullable'],
         ]);
 
         $bands = collect($data['bands'])->sortBy('min_weight')->values();
@@ -48,9 +50,22 @@ class WeightMarkupController extends Controller
             if ($band['max_weight'] === null && $i < $bands->count() - 1) {
                 return response()->json(['message' => 'ช่วงที่ไม่มีน้ำหนักสูงสุด ("ขึ้นไป") ต้องเป็นช่วงสุดท้าย'], 422);
             }
-            foreach (array_keys($band['rates']) as $key) {
+            foreach ($band['rates'] as $key => $cell) {
                 if (! preg_match('/^(all|zone:[A-Z0-9-]{1,10}|country:[A-Z]{2})$/', (string) $key)) {
                     return response()->json(['message' => "คอลัมน์ไม่ถูกต้อง: {$key}"], 422);
+                }
+                if ($cell === null || $cell === '' || is_numeric($cell)) {
+                    if (is_numeric($cell) && (float) $cell < 0) {
+                        return response()->json(['message' => "ช่วง {$band['min_weight']}: ราคาต้องไม่ติดลบ"], 422);
+                    }
+
+                    continue;
+                }
+                if (! is_string($cell) || mb_strlen($cell) > 500) {
+                    return response()->json(['message' => "ช่วง {$band['min_weight']}: ค่าไม่ถูกต้อง"], 422);
+                }
+                if ($error = ChargeFormulaEvaluator::validate($cell)) {
+                    return response()->json(['message' => "ช่วง {$band['min_weight']} ({$key}): {$error}"], 422);
                 }
             }
         }
@@ -66,12 +81,14 @@ class WeightMarkupController extends Controller
                     'max_weight' => $band['max_weight'],
                     'sort_order' => $i,
                 ]);
-                foreach ($band['rates'] as $key => $rate) {
-                    if ($rate === null || $rate === '') {
+                foreach ($band['rates'] as $key => $cell) {
+                    if ($cell === null || $cell === '') {
                         continue;
                     }
                     [$type, $value] = array_pad(explode(':', $key, 2), 2, null);
-                    $model->rates()->create(['scope_type' => $type, 'scope_value' => $value, 'rate_per_kg' => $rate]);
+                    $model->rates()->create(is_numeric($cell)
+                        ? ['scope_type' => $type, 'scope_value' => $value, 'rate_per_kg' => $cell, 'formula' => null]
+                        : ['scope_type' => $type, 'scope_value' => $value, 'rate_per_kg' => 0, 'formula' => trim($cell)]);
                 }
             }
         });

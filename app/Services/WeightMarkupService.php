@@ -11,6 +11,8 @@ use Illuminate\Support\Collection;
  *
  * Band set: the account's own set if it has one, else the carrier-wide set (per document/box).
  * Rate within the band: country override > zone override > the band's default ("all").
+ * A cell is either THB per kg (× chargeable weight) or a formula — e.g. "{BASE}*5%" — evaluated by
+ * ChargeFormulaEvaluator against the quote's values; a formula's result is THB for the shipment.
  */
 class WeightMarkupService
 {
@@ -18,9 +20,12 @@ class WeightMarkupService
     private ?Collection $sets = null;
 
     /**
-     * @return array{rate: float, amount: float, weight: float, band: string, scope: string}|null
+     * @param  array<string, float>  $values  formula variables: the carrier's own amount per charge
+     *         code ({BASE}, {375} …) plus W, BILLED_WEIGHT, TOTAL (final total so far), COST, BOX, ZONE
+     * @param  array{package_weights?: array<int, float>}  $context  for BOX_OVER() etc.
+     * @return array{rate: ?float, formula: ?string, amount: float, weight: float, band: string, scope: string}|null
      */
-    public function resolve(string $carrier, string $packageType, ?int $accountId, ?string $countryIso2, ?string $zone, float $weight): ?array
+    public function resolve(string $carrier, string $packageType, ?int $accountId, ?string $countryIso2, ?string $zone, float $weight, array $values = [], array $context = []): ?array
     {
         if ($weight <= 0) {
             return null;
@@ -43,13 +48,27 @@ class WeightMarkupService
         $rate = ($countryIso2 ? $rates->get('country:'.strtoupper($countryIso2)) : null)
             ?? ($zone !== null && $zone !== '' ? $rates->get('zone:'.strtoupper($zone)) : null)
             ?? $rates->get('all:');
-        if (! $rate || (float) $rate->rate_per_kg == 0.0) {
+        if (! $rate) {
+            return null;
+        }
+        if ($rate->formula) {
+            try {
+                $amount = round(ChargeFormulaEvaluator::evaluate($rate->formula, $values + ['W' => $weight], $context), 2);
+            } catch (\Throwable) {
+                // A formula this quote can't resolve (e.g. a code the carrier didn't return) adds nothing.
+                return null;
+            }
+        } else {
+            $amount = round((float) $rate->rate_per_kg * $weight, 2);
+        }
+        if ($amount == 0.0) {
             return null;
         }
 
         return [
-            'rate' => (float) $rate->rate_per_kg,
-            'amount' => round((float) $rate->rate_per_kg * $weight, 2),
+            'rate' => $rate->formula ? null : (float) $rate->rate_per_kg,
+            'formula' => $rate->formula,
+            'amount' => $amount,
             'weight' => $weight,
             'band' => number_format($band->min_weight, 2).($band->max_weight !== null ? '-'.number_format($band->max_weight, 2) : '+').' kg',
             'scope' => $rate->scope_type === 'all' ? 'ทุกประเทศ' : ($rate->scope_type === 'zone' ? "Zone {$rate->scope_value}" : (string) $rate->scope_value),

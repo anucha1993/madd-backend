@@ -75,6 +75,51 @@ class WeightMarkupTest extends TestCase
         $this->assertSame(1000.0, $this->quote(2, 'US', $this->account, true)['negotiated']); // documents: own bands, no rate
     }
 
+    public function test_a_percent_of_subtotal_rule_line_includes_the_weight_markup(): void
+    {
+        // The account's own "Total" line = 7% of the sell subtotal (a Mark-up rule on a self-defined code).
+        $total = \App\Models\ChargeCode::updateOrCreate(['provider' => 'UPS', 'code' => 'TOTAL'], ['label' => 'Total']);
+        \App\Models\MarkupRule::create([
+            'agent_id' => DB::table('agent_accounts')->where('id', $this->account)->value('agent_id'),
+            'agent_account_id' => $this->account, 'charge_code_id' => $total->id,
+            'rule_type' => 'SIMPLE', 'value' => 7, 'unit' => 'PERCENTAGE', 'status' => true,
+        ]);
+        $this->putJson('/api/weight-markups', ['carrier' => 'UPS', 'package_type' => 'box', 'bands' => [['min_weight' => 0.1, 'max_weight' => null, 'rates' => ['all' => 50]]]])->assertOk();
+
+        $quote = $this->quote(4, 'SG', $this->account);
+        $lines = collect($quote['chargeBreakdown'])->keyBy('code');
+        $this->assertSame(200.0, $lines['WEIGHT_MARKUP']['amount']);       // 50 × 4 kg
+        $this->assertEquals(1200.0, $lines['TOTAL']['markupBase']);        // 1,000 + 200 — Weight Markup included
+        $this->assertSame(84.0, $lines['TOTAL']['amount']);                // 7% of 1,200
+        $this->assertSame(1284.0, $quote['negotiated']);
+    }
+
+    public function test_a_cell_can_be_a_formula(): void
+    {
+        $bands = [
+            ['min_weight' => 0.1, 'max_weight' => 5, 'rates' => ['all' => '{BASE}*5%', 'zone:5' => 'IF({W} > 1, {W}*20, 100)']],
+            ['min_weight' => 5.01, 'max_weight' => 10, 'rates' => ['all' => '{TOTAL}*10%']],
+            ['min_weight' => 10.01, 'max_weight' => null, 'rates' => ['all' => '{COST}*1%']],
+        ];
+        $this->putJson('/api/weight-markups', ['carrier' => 'UPS', 'package_type' => 'box', 'bands' => $bands])->assertOk()
+            ->assertJsonPath('bands.0.rates.all', '{BASE}*5%');
+
+        $sg = $this->quote(2, 'SG', $this->account);
+        $this->assertSame(1050.0, $sg['negotiated']); // 5% of BASE 1,000
+        $line = collect($sg['chargeBreakdown'])->firstWhere('code', 'WEIGHT_MARKUP');
+        $this->assertSame('FORMULA', $line['markupUnit']);
+        $this->assertSame('{BASE}*5%', $line['markupFormula']);
+
+        $this->assertSame(1040.0, $this->quote(2, 'CA', $this->account)['negotiated']);   // zone 5: 2 kg × 20
+        $this->assertSame(1100.0, $this->quote(0.5, 'CA', $this->account)['negotiated']); // zone 5: flat 100
+        $this->assertSame(1100.0, $this->quote(7, 'SG', $this->account)['negotiated']);   // 10% of TOTAL (final total so far)
+        $this->assertSame(1010.0, $this->quote(20, 'SG', $this->account)['negotiated']);  // 1% of COST (carrier total)
+
+        $this->putJson('/api/weight-markups', ['carrier' => 'UPS', 'package_type' => 'box', 'bands' => [
+            ['min_weight' => 0.1, 'max_weight' => null, 'rates' => ['all' => '{BASE}*(5%']],
+        ]])->assertStatus(422);
+    }
+
     public function test_an_account_can_have_its_own_set_and_drop_it_again(): void
     {
         $this->putJson('/api/weight-markups', ['carrier' => 'UPS', 'package_type' => 'box', 'bands' => [['min_weight' => 0.1, 'max_weight' => null, 'rates' => ['all' => 10]]]])->assertOk();

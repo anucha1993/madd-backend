@@ -22,6 +22,7 @@ class SpecialFormulaChargeCodeSeeder extends Seeder
         $rows = [
             ['code' => 'BILLED_WEIGHT', 'label' => 'น้ำหนักที่คิดเงิน (Billed Weight)', 'description' => 'น้ำหนักที่ Carrier ใช้คิดค่าขนส่งจริงของใบเสนอราคานี้ (กก.) — ใช้ในสูตรเท่านั้น'],
             ['code' => 'TOTAL', 'label' => 'ยอดรวมทั้งหมด (Total)', 'description' => 'ยอดรวมค่าขนส่งทั้งหมดของใบเสนอราคานี้ ก่อนใช้กฎนี้ — ใช้ในสูตรเท่านั้น'],
+            ['code' => 'COST', 'label' => 'ต้นทุนรวมของ Carrier (Cost)', 'description' => 'ยอดรวมที่ Carrier คิดเรา (ก่อน Fixed Charges / Mark-up ทุกตัว) — ใช้ในสูตรเท่านั้น'],
             ['code' => 'W', 'label' => 'น้ำหนักที่คิดเงิน (W — ชื่อย่อของ BILLED_WEIGHT)', 'description' => 'เหมือน {BILLED_WEIGHT} แต่สั้นกว่า สำหรับสูตร IF เช่น IF({W} > 26, 30 * {W}, 800) — ใช้ในสูตรเท่านั้น'],
             ['code' => 'BOX', 'label' => 'จำนวนกล่อง (Box)', 'description' => 'จำนวนกล่องทั้งหมดของ Shipment นี้ (รวม Quantity) — ใช้ในสูตรเท่านั้น, ดู BOX_OVER(kg) สำหรับนับเฉพาะกล่องที่หนักเกิน'],
         ];

@@ -5,6 +5,9 @@ namespace App\Services;
 use App\Models\ApiClient;
 use App\Models\Country;
 use App\Models\SystemAlert;
+use App\Support\DocumentWeightLimit;
+use App\Support\PieceWeightLimit;
+use App\Support\WholeKgBilledWeight;
 
 /**
  * Sell-price quotes for the Public Rate API: the same carrier accounts/services as the client's
@@ -62,19 +65,26 @@ class PublicRateService
 
         ['query' => $query, 'allowedServiceCodes' => $allowed] = $this->accounts->forBranches($client->branch_id ? [$client->branch_id] : null);
         $accounts = $query->get();
+        // Only accounts whose Check Rate weight range (/config/agent-accounts) covers this shipment.
+        $billedWeight = WholeKgBilledWeight::billedWeight($shipment['packages']);
+        $accounts = $accounts->filter(fn ($a) => $a->quotesWeight($billedWeight));
         $carriers = $client->carriers ?: ['UPS', 'DHL'];
+        // A carrier is skipped when the documents are over its weight limit (see DocumentWeightLimit).
+        $carriers = array_values(array_filter($carriers, fn ($c) => ! DocumentWeightLimit::error($c, $shipment['packages']) && ! PieceWeightLimit::error($c, $shipment['packages'])));
         $ups = $accounts->filter(fn ($a) => in_array('UPS', $carriers, true) && $a->agent?->agent_code === 'UPS' && $a->client_id && $a->client_secret);
         $dhl = $accounts->filter(fn ($a) => in_array('DHL', $carriers, true) && $a->agent?->agent_code === 'DHL' && $a->basic_auth_username && $a->basic_auth_password);
 
+        // Over 10 kg the carrier is asked for the next whole kg (10.1 → 11) — see WholeKgBilledWeight.
+        $quoteShipment = ['packages' => WholeKgBilledWeight::forQuote($shipment['packages'])] + $shipment;
         $results = [
             ...$this->ups->quoteAccounts(
                 $ups->map(fn ($a) => ['id' => $a->id, 'username_acc' => $a->username_acc, 'client_id' => $a->client_id, 'client_secret' => $a->client_secret, 'mode' => $a->mode, 'allowed_service_codes' => $allowed[$a->id] ?? null])->values()->all(),
-                $shipment,
+                $quoteShipment,
                 array_map('strval', array_keys($this->ups->serviceLabels())),
             ),
             ...$this->dhl->quoteAccounts(
                 $dhl->map(fn ($a) => ['id' => $a->id, 'username_acc' => $a->username_acc, 'basic_auth_username' => $a->basic_auth_username, 'basic_auth_password' => $a->basic_auth_password, 'mode' => $a->mode, 'allowed_service_codes' => $allowed[$a->id] ?? null])->values()->all(),
-                $shipment,
+                $quoteShipment,
             ),
         ];
 

@@ -8,6 +8,9 @@ use App\Services\DhlRateService;
 use App\Services\OpenAiService;
 use App\Services\QuotableAccountResolver;
 use App\Services\UpsRateService;
+use App\Support\DocumentWeightLimit;
+use App\Support\PieceWeightLimit;
+use App\Support\WholeKgBilledWeight;
 use Illuminate\Http\Request;
 
 class AiController extends Controller
@@ -185,11 +188,17 @@ class AiController extends Controller
         // not every account in the system.
         ['query' => $accountsQuery, 'allowedServiceCodes' => $allowedServiceCodes] = $this->quotableAccounts->forUser($request->user());
         $accounts = $accountsQuery->get();
-        $upsAccounts = $accounts->filter(fn ($a) => $a->agent?->agent_code === 'UPS' && $a->client_id && $a->client_secret);
-        $dhlAccounts = $accounts->filter(fn ($a) => $a->agent?->agent_code === 'DHL' && $a->basic_auth_username && $a->basic_auth_password);
+        // Only accounts whose Check Rate weight range (/config/agent-accounts) covers this shipment.
+        $billedWeight = WholeKgBilledWeight::billedWeight($shipment['packages']);
+        $accounts = $accounts->filter(fn ($a) => $a->quotesWeight($billedWeight));
+        // A carrier is skipped when the documents are over its weight limit (see DocumentWeightLimit).
+        $upsAccounts = $accounts->filter(fn ($a) => $a->agent?->agent_code === 'UPS' && $a->client_id && $a->client_secret && ! DocumentWeightLimit::error('UPS', $shipment['packages']) && ! PieceWeightLimit::error('UPS', $shipment['packages']));
+        $dhlAccounts = $accounts->filter(fn ($a) => $a->agent?->agent_code === 'DHL' && $a->basic_auth_username && $a->basic_auth_password && ! DocumentWeightLimit::error('DHL', $shipment['packages']));
 
         $serviceCodes = array_map('strval', array_keys($this->upsRateService->serviceLabels()));
 
+        // Over 10 kg the carrier is asked for the next whole kg (10.1 → 11) — see WholeKgBilledWeight.
+        $quoteShipment = ['packages' => WholeKgBilledWeight::forQuote($shipment['packages'])] + $shipment;
         $upsResults = $this->upsRateService->quoteAccounts(
             $upsAccounts->map(fn ($a) => [
                 'id' => $a->id,
@@ -199,7 +208,7 @@ class AiController extends Controller
                 'mode' => $a->mode,
                 'allowed_service_codes' => $allowedServiceCodes[$a->id] ?? null,
             ])->values()->all(),
-            $shipment,
+            $quoteShipment,
             $serviceCodes,
         );
 
@@ -212,7 +221,7 @@ class AiController extends Controller
                 'mode' => $a->mode,
                 'allowed_service_codes' => $allowedServiceCodes[$a->id] ?? null,
             ])->values()->all(),
-            $shipment,
+            $quoteShipment,
         );
 
         // Same sell-price markup as the real check-rate (previously skipped here, so the chat

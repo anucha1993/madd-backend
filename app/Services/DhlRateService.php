@@ -8,8 +8,8 @@ use Illuminate\Support\Facades\Http;
 class DhlRateService
 {
     // Optional services every DHL quote carries unless staff pick others — Create Shipment's own
-    // default (Direct Signature). The Rate Book uses the same so its prices match Check Rate.
-    public const DEFAULT_OPTIONAL_SERVICE_CODES = ['SF'];
+    // default (No Signature Required). The Rate Book uses the same so its prices match Check Rate.
+    public const DEFAULT_OPTIONAL_SERVICE_CODES = ['SX'];
 
     private function generateMessageReference(): string
     {
@@ -202,7 +202,9 @@ class DhlRateService
                 'currency' => $currency,
                 'total' => $total,
                 'billedWeight' => $product['weight']['provided'] ?? null,
-                'billedWeightUnit' => $product['weight']['unitOfMeasurement'] ?? 'metric',
+                // Rates are always requested in metric (see buildRateRequest), and DHL only echoes the
+                // unit SYSTEM back ("metric") — so the weights are kilograms: shown as KGS, like UPS.
+                'billedWeightUnit' => 'KGS',
                 'volumetricWeight' => $product['weight']['volumetric'] ?? null,
                 'isCustomerAgreement' => ($product['isCustomerAgreement'] ?? false) === true,
                 'transitDays' => $product['deliveryCapabilities']['totalTransitDays'] ?? null,

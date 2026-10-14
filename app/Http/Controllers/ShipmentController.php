@@ -12,12 +12,15 @@ use App\Models\Supply;
 use App\Models\SystemAlert;
 use App\Models\User;
 use App\Services\AccessService;
+use App\Services\DhlRateService;
 use App\Services\DhlShipmentService;
 use App\Services\PickupCanceller;
 use App\Services\R2Service;
 use App\Services\RateQuoteVault;
 use App\Services\SupplyStockService;
 use App\Services\UpsShipmentService;
+use App\Support\DocumentWeightLimit;
+use App\Support\PieceWeightLimit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Validation\ValidationException;
@@ -371,6 +374,10 @@ class ShipmentController extends Controller
             ];
         }, $data['packages']);
 
+        if ($limitError = DocumentWeightLimit::error($data['carrier'], $packages) ?? PieceWeightLimit::error($data['carrier'], $packages)) {
+            throw ValidationException::withMessages(['packages' => $limitError]);
+        }
+
         $shipment = [
             'from' => [
                 'contactName' => $data['origin']['contact_name'] ?? null,
@@ -405,7 +412,7 @@ class ShipmentController extends Controller
             // DHL mandates lineItems on every customs-declarable shipment (confirmed against
             // MyDHL+ portal). A supplementary file upload (see below) does NOT replace this.
             'invoiceLines' => $data['invoice_lines'] ?? [],
-            'optionalServiceCodes' => $data['dhl_optional_services'] ?? ['SF'],
+            'optionalServiceCodes' => $data['dhl_optional_services'] ?? DhlRateService::DEFAULT_OPTIONAL_SERVICE_CODES,
             'upsOptionalServiceCodes' => $data['ups_optional_services'] ?? [],
             // Who pays freight/duty-tax (Payment Info step) — see UpsShipmentService::
             // buildPaymentInformation() / DhlShipmentService::resolveIncoterm() for how each

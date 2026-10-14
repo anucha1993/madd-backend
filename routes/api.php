@@ -57,6 +57,7 @@ use App\Http\Controllers\ThaiSubdistrictController;
 use App\Http\Controllers\RateBookController;
 use App\Http\Controllers\TrackingSyncController;
 use App\Http\Controllers\WeightMarkupController;
+use App\Http\Controllers\HeavyRateController;
 use App\Http\Controllers\UpsTrackingController;
 use App\Http\Controllers\UserController;
 use Illuminate\Http\Request;
@@ -334,6 +335,12 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
             Route::put('weight-markups', [WeightMarkupController::class, 'save']);
             Route::delete('weight-markups', [WeightMarkupController::class, 'destroy']);
         });
+    });
+    // Heavy Weight sell rates (71 kg+ priced by staff instead of the carrier) — own view / edit permissions.
+    Route::middleware('perm:config.heavy_rates')->group(function () {
+        Route::get('heavy-rates', [HeavyRateController::class, 'show']);
+        Route::put('heavy-rates', [HeavyRateController::class, 'save'])->middleware('perm:config.heavy_rates_edit');
+        Route::put('heavy-rates/codes', [HeavyRateController::class, 'saveCodes'])->middleware('perm:config.heavy_rates_edit');
     });
     Route::middleware('perm:config.markup')->group(function () {
         Route::apiResource('charge-codes', ChargeCodeController::class)->only(['store', 'update', 'destroy']);

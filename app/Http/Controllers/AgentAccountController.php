@@ -37,8 +37,11 @@ class AgentAccountController extends Controller
             'status' => ['boolean'],
             'mode' => ['nullable', 'in:test,production'],
             'is_api_enabled' => ['boolean'],
+            'rate_min_weight' => ['nullable', 'numeric', 'min:0'],
+            'rate_max_weight' => ['nullable', 'numeric', 'min:0'],
         ]);
 
+        $this->assertWeightRange($data);
         $account = AgentAccount::create($data);
 
         return response()->json($account->load('agent'), 201);
@@ -62,6 +65,8 @@ class AgentAccountController extends Controller
             'status' => ['boolean'],
             'mode' => ['nullable', 'in:test,production'],
             'is_api_enabled' => ['boolean'],
+            'rate_min_weight' => ['nullable', 'numeric', 'min:0'],
+            'rate_max_weight' => ['nullable', 'numeric', 'min:0'],
         ]);
 
         // Blank secret fields mean "leave unchanged", not "clear the value".
@@ -71,6 +76,7 @@ class AgentAccountController extends Controller
             }
         }
 
+        $this->assertWeightRange($data + $agentAccount->only(['rate_min_weight', 'rate_max_weight']));
         $agentAccount->update($data);
 
         return $agentAccount->load('agent');
@@ -182,6 +188,16 @@ class AgentAccountController extends Controller
             ], 200);
         } catch (\Throwable $e) {
             return response()->json(['success' => false, 'message' => 'เกิดข้อผิดพลาดขณะเชื่อมต่อ DHL: ' . $e->getMessage()], 200);
+        }
+    }
+
+    /** Check Rate weight range: max (if any) must be above min (if any). */
+    private function assertWeightRange(array $data): void
+    {
+        $min = $data['rate_min_weight'] ?? null;
+        $max = $data['rate_max_weight'] ?? null;
+        if ($min !== null && $max !== null && (float) $max <= (float) $min) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['rate_max_weight' => 'น้ำหนักสูงสุดต้องมากกว่าน้ำหนักต่ำสุด']);
         }
     }
 }

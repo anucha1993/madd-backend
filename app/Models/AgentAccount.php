@@ -16,6 +16,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'client_id', 'client_secret',
     'basic_auth_username', 'basic_auth_password',
     'status', 'mode', 'is_api_enabled',
+    'rate_min_weight', 'rate_max_weight',
 ])]
 #[Hidden(['client_secret', 'basic_auth_password'])]
 class AgentAccount extends Model
@@ -29,6 +30,8 @@ class AgentAccount extends Model
         return [
             'status' => 'boolean',
             'is_api_enabled' => 'boolean',
+            'rate_min_weight' => 'float',
+            'rate_max_weight' => 'float',
             'client_secret' => CarrierSecret::class,
             'basic_auth_password' => CarrierSecret::class,
         ];
@@ -47,6 +50,16 @@ class AgentAccount extends Model
     public function chargeFixedOverrides(): HasMany
     {
         return $this->hasMany(ChargeFixedOverride::class);
+    }
+
+    /**
+     * Whether Check Rate asks this account for a shipment of this chargeable weight — its own
+     * weight range (/config/agent-accounts, e.g. ax3173 = 0-10 kg); no range = every weight.
+     */
+    public function quotesWeight(float $weight): bool
+    {
+        return ($this->rate_min_weight === null || $weight >= $this->rate_min_weight - 0.005)
+            && ($this->rate_max_weight === null || $weight <= $this->rate_max_weight + 0.005);
     }
 
     /**

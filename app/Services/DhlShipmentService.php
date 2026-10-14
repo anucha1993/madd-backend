@@ -209,7 +209,7 @@ class DhlShipmentService
                     : null,
             ], fn ($v) => $v !== null),
             'valueAddedServices' => array_merge(
-                collect($shipment['optionalServiceCodes'] ?? ['SF'])->map(fn ($code) => ['serviceCode' => $code])->all(),
+                collect($shipment['optionalServiceCodes'] ?? DhlRateService::DEFAULT_OPTIONAL_SERVICE_CODES)->map(fn ($code) => ['serviceCode' => $code])->all(),
                 $insuranceValue > 0 ? [['serviceCode' => 'II', 'value' => $insuranceValue, 'currency' => $currency]] : [],
                 $hasInsuredDocument ? [['serviceCode' => 'IB']] : [],
             ),

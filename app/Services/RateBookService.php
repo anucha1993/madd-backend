@@ -191,23 +191,31 @@ class RateBookService
         ];
 
         try {
-            if (! $account || $account->agent?->agent_code !== $point['carrier']) {
-                throw new \RuntimeException('ไม่ได้เลือกบัญชี '.$point['carrier'].' สำหรับช่วงน้ำหนักนี้');
-            }
             if (empty($address['iso2']) || empty($address['city'])) {
                 throw new \RuntimeException("Zone {$zone}: ยังไม่ได้ตั้งประเทศ/เมืองตัวแทน");
+            }
+            if (! $account || $account->agent?->agent_code !== $point['carrier']) {
+                throw new \RuntimeException('ไม่ได้เลือกบัญชี '.$point['carrier'].' สำหรับช่วงน้ำหนักนี้');
             }
 
             $isDocument = $point['package_type'] === 'document';
             $pieces = $isDocument ? 1 : max(1, (int) ceil($point['weight'] / self::MAX_PIECE_KG));
-            $packages = [[
-                'weight' => round($point['weight'] / $pieces, 2),
-                'quantity' => $pieces,
+            // Split into whole-kg boxes (e.g. 41 kg = 14 + 14 + 13): carriers round each box up to
+            // 0.5 kg, so 3 × 13.67 would be billed as 42 kg.
+            $base = $pieces > 1 ? floor($point['weight'] / $pieces) : $point['weight'];
+            $heavier = $pieces > 1 ? (int) round($point['weight'] - $base * $pieces) : 0;
+            $box = fn (float $weight, int $quantity) => [
+                'weight' => $weight,
+                'quantity' => $quantity,
                 'isDocument' => $isDocument,
                 'length' => $isDocument ? null : 10,
                 'width' => $isDocument ? null : 10,
                 'height' => $isDocument ? null : 10,
-            ]];
+            ];
+            $packages = array_values(array_filter([
+                $heavier > 0 ? $box($base + 1, $heavier) : null,
+                $pieces - $heavier > 0 ? $box($base, $pieces - $heavier) : null,
+            ]));
             $shipment = [
                 'from' => self::ORIGIN,
                 'to' => [
@@ -219,8 +227,8 @@ class RateBookService
                 ],
                 'packages' => $packages,
                 'declaredValueCurrency' => 'THB',
-                // Exactly what Check Rate sends when staff pick nothing: DHL's default Direct
-                // Signature, no UPS options — so the prices match /shipment/create.
+                // Exactly what Check Rate sends when staff pick nothing: DHL's default (No
+                // Signature Required), no UPS options — so the prices match /shipment/create.
                 'optionalServiceCodes' => DhlRateService::DEFAULT_OPTIONAL_SERVICE_CODES,
                 'upsOptionalServiceCodes' => [],
             ];
@@ -283,6 +291,12 @@ class RateBookService
     {
         $columns = array_fill_keys(['freight', 'fuel', 'surge', 'remote', 'peak', 'gogreen', 'other'], 0.0);
         foreach ($result['chargeBreakdown'] ?? [] as $line) {
+            // The Heavy Weight Rate line (/config/heavy-rates) stands in for freight (+ fuel).
+            if (($line['code'] ?? null) === 'HEAVY_RATE') {
+                $columns['freight'] += (float) $line['amount'];
+
+                continue;
+            }
             if (in_array($line['code'] ?? null, ChargeMarkupService::COST_ONLY_CODES, true) || ! empty($line['isCustomCharge'])) {
                 continue;
             }
