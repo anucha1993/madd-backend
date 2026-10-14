@@ -34,6 +34,7 @@ return [
                 'detail' => 'View Shipment Details',
                 'create' => 'Create Shipment (เช็คราคา + จอง)',
                 'draft' => 'Drafts (ฉบับร่าง)',
+                'customer_display' => 'เปิดจอลูกค้า (จอที่ 2)',
                 'assign_branch' => 'กำหนดสาขาให้ Shipment',
                 'label' => 'Open Label',
                 'label_all' => 'Print All Labels',
@@ -54,6 +55,7 @@ return [
                 'view' => 'หน้า Shipments (รายการ)',
                 'detail' => 'เปิดหน้ารายละเอียดของ Shipment',
                 'draft' => 'บันทึก / เปิด / ลบ ฉบับร่างการจอง (หน้า Drafts)',
+                'customer_display' => 'ปุ่ม "เปิดจอลูกค้า" ในหน้า Create Shipment — จอที่ 2 ให้ลูกค้าดูข้อมูลการจัดส่ง / ราคาขาย (ไม่มีต้นทุนเด็ดขาด)',
                 'assign_branch' => 'เลือกสาขาให้ Shipment ที่ยังไม่มีสาขา',
                 'label' => 'เปิด Label ใบปะหน้า (ทั้ง Shipment หรือรายกล่อง)',
                 'label_all' => 'พิมพ์ Label ทุกกล่องรวมไฟล์เดียว (Shipment หลายกล่อง)',
@@ -163,6 +165,14 @@ return [
                     'label' => 'รายละเอียด Mark-up',
                     'hint' => 'สูตร, % × ฐานคำนวณ, ยอด Mark-up รวม',
                     'columns' => ['markupTotal', 'chargeBreakdown.*.markupUnit', 'chargeBreakdown.*.markupValue', 'chargeBreakdown.*.markupBase', 'chargeBreakdown.*.markupFormula', 'chargeBreakdown.*.markupNote'],
+                    'default' => 'hidden',
+                ],
+                // UI only (no quote field of its own): the Cost button on Create Shipment's rate cards —
+                // carrier cost beside the sell price and the profit. Needs "cost" too for the numbers.
+                'profit' => [
+                    'label' => 'ปุ่ม Cost (ต้นทุน vs ราคาขาย / กำไร)',
+                    'hint' => 'ปุ่ม Cost บนการ์ดเช็คราคา — เทียบต้นทุน Carrier กับราคาขายรายบรรทัด และกำไร (ต้องเปิด "ต้นทุน Carrier" ด้วย)',
+                    'columns' => [],
                     'default' => 'hidden',
                 ],
                 'carrier_raw' => [
@@ -312,6 +322,8 @@ return [
                 'weight_markups' => 'Weight Markup',
                 'weight_markups_edit' => 'Weight Markup: แก้ไข',
                 'heavy_rates' => 'ราคาขายน้ำหนักเกิน (Heavy Weight)',
+                'customer_display' => 'จอลูกค้า (Customer Display)',
+                'customer_display_edit' => 'จอลูกค้า: แก้ไขการตั้งค่า',
                 'heavy_rates_edit' => 'ราคาขายน้ำหนักเกิน: แก้ไข',
                 'charge_names' => 'Charge Display Names',
                 'addon' => 'Add-on',
@@ -348,6 +360,8 @@ return [
                 'weight_markups' => 'ดูราคาบวกเพิ่ม (บาท/kg) ตามช่วงน้ำหนัก ราย Zone / ประเทศ',
                 'weight_markups_edit' => 'แก้ช่วงน้ำหนัก / ราคา Weight Markup — มีผลกับราคาขายทันที',
                 'heavy_rates' => 'ดูราคาขาย บาท/kg ที่ตั้งเองสำหรับน้ำหนักมาก (เช่น 71 kg ขึ้นไป) ราย Zone',
+                'customer_display' => 'ดูการตั้งค่าจอลูกค้า (ส่วนที่แสดง, หน้าจอว่าง, ข้อความ)',
+                'customer_display_edit' => 'แก้การตั้งค่าจอลูกค้า — มีผลกับทุกสาขาทันที',
                 'heavy_rates_edit' => 'แก้ราคาขายน้ำหนักเกิน — แทนราคาจาก API ทันทีทุกส่วน (Check Rate / Rate Book / Public API)',
                 'zone_prices' => 'ตั้ง Zone ของแต่ละประเทศ (UPS / DHL) และราคาตาม Zone ที่ใช้เป็น {ZONE_PRICE} ในสูตร Fixed Charges / Mark-up',
                 'charge_names' => 'ตั้งชื่อแสดงของ Charge Code (เช่น BASE → ค่าขนส่ง) — มีผลทุกหน้าและใบเสร็จ / ใบกำกับภาษีที่ออกใหม่',

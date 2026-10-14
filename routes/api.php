@@ -58,6 +58,7 @@ use App\Http\Controllers\RateBookController;
 use App\Http\Controllers\TrackingSyncController;
 use App\Http\Controllers\WeightMarkupController;
 use App\Http\Controllers\HeavyRateController;
+use App\Http\Controllers\CustomerDisplayController;
 use App\Http\Controllers\UpsTrackingController;
 use App\Http\Controllers\UserController;
 use Illuminate\Http\Request;
@@ -336,6 +337,10 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
             Route::delete('weight-markups', [WeightMarkupController::class, 'destroy']);
         });
     });
+    // Customer Display (2nd screen) settings — read by the settings page and by Create Shipment when it
+    // opens the display; changed only with the edit permission.
+    Route::middleware('perm:config.customer_display,shipment.customer_display')->get('customer-display/settings', [CustomerDisplayController::class, 'show']);
+    Route::middleware('perm:config.customer_display_edit')->put('customer-display/settings', [CustomerDisplayController::class, 'update']);
     // Heavy Weight sell rates (71 kg+ priced by staff instead of the carrier) — own view / edit permissions.
     Route::middleware('perm:config.heavy_rates')->group(function () {
         Route::get('heavy-rates', [HeavyRateController::class, 'show']);
