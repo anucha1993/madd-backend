@@ -46,6 +46,23 @@ class ShipmentFieldRulesTest extends TestCase
         $this->putJson('/api/shipment-field-rules', ['rules' => ['UPS' => []]])->assertForbidden();
     }
 
+    public function test_form_labels_can_be_renamed_and_reset(): void
+    {
+        $this->as(['config.shipment_fields']);
+        $label = fn ($res, $key) => collect($res->json('fields'))->firstWhere('key', $key);
+
+        $res = $this->putJson('/api/shipment-field-rules', ['rules' => [], 'labels' => ['destination.contact_name' => 'ชื่อผู้รับ', 'destination.city' => 'เมือง / City']])->assertOk();
+        $this->assertSame('ชื่อผู้รับ', $label($res, 'destination.contact_name')['form_label']);
+        $this->assertSame('Contact Name', $label($res, 'destination.contact_name')['default_form_label']);
+        $this->assertSame('เมือง / City', $label($res, 'destination.city')['form_label']);   // label-only field
+        $this->assertFalse($label($res, 'destination.city')['requirable']);
+
+        // A label-only field can't be made required; blank label = back to the default.
+        $this->putJson('/api/shipment-field-rules', ['rules' => ['UPS' => ['destination.city']]])->assertStatus(422);
+        $res = $this->putJson('/api/shipment-field-rules', ['rules' => [], 'labels' => ['destination.contact_name' => '']])->assertOk();
+        $this->assertSame('Contact Name', $label($res, 'destination.contact_name')['form_label']);
+    }
+
     public function test_booking_is_rejected_until_the_carriers_fields_are_filled(): void
     {
         app(\App\Services\ShipmentFieldRules::class)->save(['DHL' => ['destination.email', 'packages.*.description'], 'UPS' => []]);
