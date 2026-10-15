@@ -10,7 +10,8 @@ use Illuminate\Support\Collection;
 /**
  * Heavy Weight sell rates (/config/heavy-rates): from the first band's weight up (71 kg), the sell
  * price is staff's own THB per kg × chargeable weight — by band × zone (the destination's UPS / DHL
- * zone from /config/countries; a zone without its own price uses the band's default). It replaces
+ * zone from /config/countries; a country can have its own special price, beating its zone; a zone
+ * without its own price uses the band's default). It replaces
  * the charge lines picked per carrier (replacedCodes — by default freight + fuel); every other line
  * (remote area, demand surcharge …) stays at its normal sell price, everywhere quotes are priced
  * (ChargeMarkupService).
@@ -45,10 +46,17 @@ class HeavyRateService
             return null;
         }
 
+        // Country (a special price for one destination) > zone > the band's default.
         $zone = $this->zone($carrier, $countryIso2);
         $rates = $band->rates ?? [];
+        $countryRate = $countryIso2 ? ($rates['country:'.strtoupper($countryIso2)] ?? null) : null;
         $zoneRate = $zone !== null ? ($rates['zone:'.$zone] ?? null) : null;
-        $rate = is_numeric($zoneRate) ? (float) $zoneRate : (is_numeric($rates['all'] ?? null) ? (float) $rates['all'] : null);
+        [$rate, $scope] = match (true) {
+            is_numeric($countryRate) => [(float) $countryRate, 'ราคาพิเศษ '.strtoupper($countryIso2)],
+            is_numeric($zoneRate) => [(float) $zoneRate, "Zone {$zone}"],
+            is_numeric($rates['all'] ?? null) => [(float) $rates['all'], 'ทุก Zone'],
+            default => [null, null],
+        };
         if ($rate === null || $rate <= 0) {
             return null; // no price set → the carrier's own quote, as before
         }
@@ -58,7 +66,7 @@ class HeavyRateService
             'amount' => round($rate * $weight, 2),
             'weight' => $weight,
             'band' => self::bandLabel($band->min_weight, $band->max_weight),
-            'scope' => is_numeric($zoneRate) ? "Zone {$zone}" : 'ทุก Zone',
+            'scope' => $scope,
             'zone' => $zone,
         ];
     }

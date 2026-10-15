@@ -58,6 +58,8 @@ use App\Http\Controllers\RateBookController;
 use App\Http\Controllers\TrackingSyncController;
 use App\Http\Controllers\WeightMarkupController;
 use App\Http\Controllers\HeavyRateController;
+use App\Http\Controllers\ChargeLineOrderController;
+use App\Http\Controllers\ShipmentFormLayoutController;
 use App\Http\Controllers\CustomerDisplayController;
 use App\Http\Controllers\UpsTrackingController;
 use App\Http\Controllers\UserController;
@@ -82,6 +84,8 @@ Route::post('public/v1/web/hit', [PageViewController::class, 'store'])->middlewa
 Route::get('public/v1/web/stats', [PublicStatsController::class, 'show'])->middleware('api.web:view');
 // AI: a visitor's sentence → rate-quote form values (no prices). Own per-IP / per-day caps.
 Route::post('public/v1/web/ai-parse', [PublicAiAssistController::class, 'parse'])->middleware('api.web:rates');
+// Customer Display banner images — the display page has no login.
+Route::get('customer-display/media/{id}', [CustomerDisplayController::class, 'media'])->whereNumber('id');
 
 // Every authenticated route also passes through `record.scope` (a Shipment/Receipt/Pickup bound
 // from the URL outside the user's data scope 404s). `perm:` keys come from
@@ -201,6 +205,9 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
     });
     Route::get('shipment-field-rules', [ShipmentFieldRuleController::class, 'index'])->middleware('perm:shipment.create,config.shipment_fields');
     Route::put('shipment-field-rules', [ShipmentFieldRuleController::class, 'update'])->middleware('perm:config.shipment_fields');
+    // Ship From / Ship To field order + width — read by the booking form, arranged by admins only.
+    Route::get('shipment-form-layout', [ShipmentFormLayoutController::class, 'show'])->middleware('perm:shipment.create,config.shipment_layout');
+    Route::put('shipment-form-layout', [ShipmentFormLayoutController::class, 'update'])->middleware('perm:config.shipment_layout');
     Route::post('shipments/{shipment}/void', [ShipmentController::class, 'void'])->middleware('perm:shipment.void');
     Route::post('shipments/{shipment}/unvoid', [ShipmentController::class, 'unvoid'])->middleware('perm:shipment.unvoid');
     Route::post('shipments/{shipment}/carrier-cancel-notified', [ShipmentController::class, 'markCarrierCancelNotified'])->middleware('perm:shipment.cancel_notified');
@@ -341,6 +348,7 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
     // opens the display; changed only with the edit permission.
     Route::middleware('perm:config.customer_display,shipment.customer_display')->get('customer-display/settings', [CustomerDisplayController::class, 'show']);
     Route::middleware('perm:config.customer_display_edit')->put('customer-display/settings', [CustomerDisplayController::class, 'update']);
+    Route::middleware('perm:config.customer_display_edit')->post('customer-display/media', [CustomerDisplayController::class, 'uploadMedia']);
     // Heavy Weight sell rates (71 kg+ priced by staff instead of the carrier) — own view / edit permissions.
     Route::middleware('perm:config.heavy_rates')->group(function () {
         Route::get('heavy-rates', [HeavyRateController::class, 'show']);
@@ -357,7 +365,10 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
 
     // Display names only (no markup values) — every screen that renders charge lines needs them.
     Route::get('charge-display-names', [ChargeDisplayNameController::class, 'index']);
+    // Order of charge lines on a quote — same audience as the names.
+    Route::get('charge-line-order', [ChargeLineOrderController::class, 'index']);
     Route::middleware('perm:config.charge_names')->group(function () {
+        Route::put('charge-line-order', [ChargeLineOrderController::class, 'update']);
         Route::post('charge-display-names', [ChargeDisplayNameController::class, 'store']);
         Route::put('charge-codes/{charge_code}/display-name', [ChargeDisplayNameController::class, 'update']);
     });

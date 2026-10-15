@@ -135,6 +135,18 @@ class HeavyRateTest extends TestCase
         $this->assertEquals(1000, $run->rows()->where('weight', 5)->first()->sell); // light points still quoted
     }
 
+    public function test_a_country_special_price_beats_its_zone(): void
+    {
+        $this->putJson('/api/heavy-rates', ['carrier' => 'UPS', 'bands' => [
+            ['min_weight' => 71, 'max_weight' => null, 'rates' => ['all' => 150, 'zone:5' => 160, 'country:US' => 200]],
+        ]])->assertOk()->assertJsonPath('bands.0.rates.country:US', 200);
+
+        $us = $this->quote(80, 'US');                                                   // US: own price
+        $this->assertSame(16000.0 + 200.0, $us['negotiated']);
+        $this->assertSame('71+ kg · ราคาพิเศษ US', collect($us['chargeBreakdown'])->firstWhere('code', 'HEAVY_RATE')['markupNote']);
+        $this->assertSame(12000.0 + 200.0, $this->quote(80, 'SG')['negotiated']);      // others: zone / default
+    }
+
     public function test_view_and_edit_are_separate_permissions(): void
     {
         $body = ['carrier' => 'UPS', 'bands' => [['min_weight' => 71, 'max_weight' => null, 'rates' => ['all' => 100]]]];
@@ -152,6 +164,6 @@ class HeavyRateTest extends TestCase
             ['min_weight' => 301, 'max_weight' => null, 'rates' => []],
         ]])->assertStatus(422);
         $this->putJson('/api/heavy-rates', ['carrier' => 'UPS', 'bands' => [['min_weight' => 71, 'max_weight' => null, 'rates' => ['all' => 'abc']]]])->assertStatus(422);
-        $this->putJson('/api/heavy-rates', ['carrier' => 'UPS', 'bands' => [['min_weight' => 71, 'max_weight' => null, 'rates' => ['country:US' => 1]]]])->assertStatus(422);
+        $this->putJson('/api/heavy-rates', ['carrier' => 'UPS', 'bands' => [['min_weight' => 71, 'max_weight' => null, 'rates' => ['country:USA' => 1]]]])->assertStatus(422);
     }
 }

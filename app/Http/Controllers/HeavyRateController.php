@@ -77,7 +77,7 @@ class HeavyRateController extends Controller
                 return response()->json(['message' => "ช่วง {$band['min_weight']}: ทับกับช่วงก่อนหน้า"], 422);
             }
             foreach (array_keys($band['rates']) as $key) {
-                if (! preg_match('/^(all|zone:[A-Z0-9-]{1,10})$/', (string) $key)) {
+                if (! preg_match('/^(all|zone:[A-Z0-9-]{1,10}|country:[A-Z]{2})$/', (string) $key)) {
                     return response()->json(['message' => "คอลัมน์ไม่ถูกต้อง: {$key}"], 422);
                 }
             }
