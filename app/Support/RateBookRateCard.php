@@ -60,9 +60,9 @@ class RateBookRateCard
 
     // ---- UPS SAVE ----------------------------------------------------------------------------
 
-    public static function upsSave(Worksheet $sheet, Collection $rows, array $columns, string $note): void
+    public static function upsSave(Worksheet $sheet, Collection $rows, array $columns, string $note, string $title = 'SAVE'): void
     {
-        $sheet->setTitle('SAVE');
+        $sheet->setTitle(mb_substr($title, 0, 31));
         $box = $rows->where('package_type', 'box');
         $lastCol = Coordinate::stringFromColumnIndex(1 + count($columns));
         $lines = self::lines($box);
@@ -149,9 +149,9 @@ class RateBookRateCard
 
     // ---- UPS DOC / DHL DOC ---------------------------------------------------------------------
 
-    public static function upsDoc(Worksheet $sheet, Collection $rows, array $columns, string $note, string $year): void
+    public static function upsDoc(Worksheet $sheet, Collection $rows, array $columns, string $note, string $year, string $title = 'DOC'): void
     {
-        $sheet->setTitle('DOC');
+        $sheet->setTitle(mb_substr($title, 0, 31));
         $zones = array_values(array_filter($columns, fn ($c) => ! $c['extra']));
         $doc = $rows->where('package_type', 'document');
         $lastCol = Coordinate::stringFromColumnIndex(1 + count($zones));
@@ -196,9 +196,9 @@ class RateBookRateCard
         self::widths($sheet, count($zones), 13);
     }
 
-    public static function dhlDoc(Worksheet $sheet, Collection $rows, array $columns, string $note, string $year): void
+    public static function dhlDoc(Worksheet $sheet, Collection $rows, array $columns, string $note, string $year, string $title = 'DOC'): void
     {
-        $sheet->setTitle('DOC');
+        $sheet->setTitle(mb_substr($title, 0, 31));
         $doc = $rows->where('package_type', 'document');
         $lastCol = Coordinate::stringFromColumnIndex(1 + count($columns));
 
@@ -226,9 +226,9 @@ class RateBookRateCard
 
     // ---- DHL SELLING ---------------------------------------------------------------------------
 
-    public static function dhlSelling(Worksheet $sheet, Collection $rows, array $columns, string $note): void
+    public static function dhlSelling(Worksheet $sheet, Collection $rows, array $columns, string $note, string $title = 'SELLING'): void
     {
-        $sheet->setTitle('SELLING');
+        $sheet->setTitle(mb_substr($title, 0, 31));
         $box = $rows->where('package_type', 'box');
         $lastCol = Coordinate::stringFromColumnIndex(1 + count($columns));
         self::dhlHeader($sheet, 1, $columns, $lastCol, 'CCCCCC');

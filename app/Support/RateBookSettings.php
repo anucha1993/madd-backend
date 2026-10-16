@@ -173,6 +173,17 @@ class RateBookSettings
             $merged['carriers'][$carrier] = [
                 'enabled' => (bool) ($saved['enabled'] ?? $default['enabled']),
                 'service_codes' => array_merge($default['service_codes'], array_filter($saved['service_codes'] ?? [])),
+                // The main service's name on the rate table (e.g. UPS 65 = "Saver").
+                'service_label' => (string) (($saved['service_label'] ?? '') !== '' ? $saved['service_label'] : $default['service_label']),
+                // More services priced in the same book, each with its own weight bands (e.g. UPS 08 "Eco").
+                'extra_services' => array_values(array_map(fn ($s) => [
+                    'code' => strtoupper(trim((string) ($s['code'] ?? ''))),
+                    'label' => trim((string) ($s['label'] ?? '')),
+                    'bands' => [
+                        'document' => array_values($s['bands']['document'] ?? []),
+                        'box' => array_values($s['bands']['box'] ?? []),
+                    ],
+                ], $saved['extra_services'] ?? $default['extra_services'])),
                 'bands' => [
                     'document' => $saved['bands']['document'] ?? $default['bands']['document'],
                     'box' => $saved['bands']['box'] ?? $default['bands']['box'],
@@ -193,6 +204,16 @@ class RateBookSettings
         $ups = self::accountId('UPS', '0279v4');
         $dhl = self::accountId('DHL', null);
         $band = fn ($min, $max, $step, $accountId) => ['min' => $min, 'max' => $max, 'step' => $step, 'account_id' => $accountId];
+        $upsBox = [
+            $band(0.1, 5, 0.5, $ax),
+            $band(5.01, 10, 0.5, $ax),
+            $band(10.01, 20, 1, $ups),
+            $band(20.01, 44, null, $ups),
+            $band(44.01, 70, null, $ups),
+            $band(70.01, 99, null, $ups),
+            $band(99.01, 299, null, $ups),
+            $band(299.01, null, null, $ups),
+        ];
 
         return [
             'enabled' => false,
@@ -205,6 +226,9 @@ class RateBookSettings
                 'UPS' => [
                     'enabled' => true,
                     'service_codes' => ['document' => '65', 'box' => '65'],
+                    'service_label' => 'Saver',
+                    // Worldwide Expedited, shown as "Eco" — boxes only (UPS has no Expedited for documents).
+                    'extra_services' => [['code' => '08', 'label' => 'Eco', 'bands' => ['document' => [], 'box' => $upsBox]]],
                     'account_rules' => [],
                     // Destinations priced apart from their zone in the rate file (SAVE: 1 2 JP AU 3 4 5 USA PR 6 …).
                     'extra_columns' => [
@@ -215,22 +239,15 @@ class RateBookSettings
                     'zone_labels' => [],
                     'bands' => [
                         'document' => [$band(0.01, 5, 0.5, $ax)],
-                        'box' => [
-                            $band(0.1, 5, 0.5, $ax),
-                            $band(5.01, 10, 0.5, $ax),
-                            $band(10.01, 20, 1, $ups),
-                            $band(20.01, 44, null, $ups),
-                            $band(44.01, 70, null, $ups),
-                            $band(70.01, 99, null, $ups),
-                            $band(99.01, 299, null, $ups),
-                            $band(299.01, null, null, $ups),
-                        ],
+                        'box' => $upsBox,
                     ],
                 ],
                 'DHL' => [
                     'enabled' => true,
                     // DHL Express Worldwide: D = documents, P = non-documents.
                     'service_codes' => ['document' => 'D', 'box' => 'P'],
+                    'service_label' => 'Express Worldwide',
+                    'extra_services' => [],
                     // Zone 7 from 14 kg is cheaper on the second DHL account.
                     'account_rules' => [['zone' => '7', 'min_weight' => 14, 'account_id' => self::accountId('DHL', '566833742', false)]],
                     'extra_columns' => [self::extraColumn('AU NZ', 'AU', 'Sydney', '2000', 'NSW', '3')],
@@ -247,6 +264,50 @@ class RateBookSettings
                 ],
             ],
         ];
+    }
+
+    /**
+     * Every service a carrier's book prices: the main one (its own code per document / box) first,
+     * then the extra services — each with its label, codes and weight bands.
+     *
+     * @return list<array{key: string, label: string, main: bool, codes: array{document: string, box: string}, bands: array}>
+     */
+    public static function services(array $settings, string $carrier): array
+    {
+        $c = $settings['carriers'][$carrier] ?? [];
+        $services = [[
+            'key' => 'main',
+            'label' => (string) ($c['service_label'] ?? ($carrier === 'UPS' ? 'Saver' : 'Express Worldwide')),
+            'main' => true,
+            'codes' => ['document' => (string) ($c['service_codes']['document'] ?? ''), 'box' => (string) ($c['service_codes']['box'] ?? '')],
+            'bands' => $c['bands'] ?? ['document' => [], 'box' => []],
+        ]];
+        foreach ($c['extra_services'] ?? [] as $i => $s) {
+            if (($s['code'] ?? '') === '') {
+                continue;
+            }
+            $services[] = [
+                'key' => 'extra'.$i,
+                'label' => ($s['label'] ?? '') !== '' ? $s['label'] : $s['code'],
+                'main' => false,
+                'codes' => ['document' => $s['code'], 'box' => $s['code']],
+                'bands' => $s['bands'] ?? ['document' => [], 'box' => []],
+            ];
+        }
+
+        return $services;
+    }
+
+    /** The service a stored row belongs to (rows of an extra service carry its code; the rest are the main one). */
+    public static function serviceOf(array $services, ?string $serviceCode): array
+    {
+        foreach ($services as $s) {
+            if (! $s['main'] && $serviceCode !== null && in_array($serviceCode, $s['codes'], true)) {
+                return $s;
+            }
+        }
+
+        return $services[0];
     }
 
     private static function extraColumn(string $label, string $iso2, string $city, string $postcode, string $state, string $after): array

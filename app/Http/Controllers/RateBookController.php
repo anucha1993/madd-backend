@@ -60,6 +60,16 @@ class RateBookController extends Controller
             'carriers.*.bands.*.*.max' => ['nullable', 'numeric', 'min:0'],
             'carriers.*.bands.*.*.step' => ['nullable', 'numeric', 'min:0.1'],
             'carriers.*.bands.*.*.account_id' => ['nullable', 'integer', 'exists:agent_accounts,id'],
+            'carriers.*.service_label' => ['nullable', 'string', 'max:40'],
+            'carriers.*.extra_services' => ['nullable', 'array', 'max:5'],
+            'carriers.*.extra_services.*.code' => ['required', 'string', 'max:10'],
+            'carriers.*.extra_services.*.label' => ['required', 'string', 'max:40'],
+            'carriers.*.extra_services.*.bands.document' => ['present', 'array'],
+            'carriers.*.extra_services.*.bands.box' => ['present', 'array'],
+            'carriers.*.extra_services.*.bands.*.*.min' => ['required', 'numeric', 'min:0'],
+            'carriers.*.extra_services.*.bands.*.*.max' => ['nullable', 'numeric', 'min:0'],
+            'carriers.*.extra_services.*.bands.*.*.step' => ['nullable', 'numeric', 'min:0.1'],
+            'carriers.*.extra_services.*.bands.*.*.account_id' => ['nullable', 'integer', 'exists:agent_accounts,id'],
             'carriers.*.account_rules' => ['present', 'array'],
             'carriers.*.account_rules.*.zone' => ['required', 'string', 'max:20'],
             'carriers.*.account_rules.*.min_weight' => ['required', 'numeric', 'min:0'],
@@ -81,13 +91,26 @@ class RateBookController extends Controller
         ]);
 
         foreach ($data['carriers'] as $carrier => $carrierSettings) {
-            foreach ($carrierSettings['bands'] as $packageType => $bands) {
-                foreach ($bands as $band) {
-                    if (isset($band['max']) && $band['max'] !== null && (float) $band['max'] <= (float) $band['min']) {
-                        return response()->json(['message' => "{$carrier} {$packageType}: น้ำหนักสูงสุดต้องมากกว่าต่ำสุด ({$band['min']})"], 422);
-                    }
-                    if (! empty($band['step']) && ($band['max'] ?? null) === null) {
-                        return response()->json(['message' => "{$carrier} {$packageType}: ช่วงที่ไม่มีน้ำหนักสูงสุดต้องแสดงเป็นราคาต่อ kg"], 422);
+            $bandSets = ['' => $carrierSettings['bands']];
+            $mainCodes = array_map('strtoupper', array_values($carrierSettings['service_codes']));
+            foreach ($carrierSettings['extra_services'] ?? [] as $service) {
+                $code = strtoupper(trim($service['code']));
+                // A row is told apart by its service code — an extra one can't reuse the main one's.
+                if (in_array($code, $mainCodes, true)) {
+                    return response()->json(['message' => "{$carrier}: บริการเพิ่ม {$service['label']} ใช้ Service code {$code} ซ้ำกับบริการหลัก"], 422);
+                }
+                $mainCodes[] = $code;
+                $bandSets[" {$service['label']}"] = $service['bands'];
+            }
+            foreach ($bandSets as $serviceName => $bandsByType) {
+                foreach ($bandsByType as $packageType => $bands) {
+                    foreach ($bands as $band) {
+                        if (isset($band['max']) && $band['max'] !== null && (float) $band['max'] <= (float) $band['min']) {
+                            return response()->json(['message' => "{$carrier}{$serviceName} {$packageType}: น้ำหนักสูงสุดต้องมากกว่าต่ำสุด ({$band['min']})"], 422);
+                        }
+                        if (! empty($band['step']) && ($band['max'] ?? null) === null) {
+                            return response()->json(['message' => "{$carrier}{$serviceName} {$packageType}: ช่วงที่ไม่มีน้ำหนักสูงสุดต้องแสดงเป็นราคาต่อ kg"], 422);
+                        }
                     }
                 }
             }
@@ -158,6 +181,11 @@ class RateBookController extends Controller
 
         return response()->json([
             'vat_percent' => $rateBookRun->settings['vat_percent'] ?? 7,
+            // The services this run priced (main first) — rows belong to one by their service_code.
+            'services' => collect(RateBookSettings::services($rateBookRun->settings ?? [], $carrier))
+                ->map(fn ($s) => ['key' => $s['key'], 'label' => $s['label'], 'main' => $s['main'], 'codes' => array_values(array_unique($s['codes']))])
+                ->filter(fn ($s) => $s['main'] || $rows->contains(fn ($r) => in_array($r->service_code, $s['codes'], true)))
+                ->values(),
             // Price columns in rate-card order (zones + extras like JP / AU / USA PR), only those this run priced.
             'columns' => collect(RateBookSettings::columns($rateBookRun->settings ?? [], $carrier))
                 ->filter(fn ($c) => $rows->contains('zone', $c['key']))

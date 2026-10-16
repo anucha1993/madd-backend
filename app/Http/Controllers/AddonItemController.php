@@ -30,6 +30,8 @@ class AddonItemController extends Controller
             // Which Create Shipment box Product Type(s) this item applies to — null/empty = all.
             'product_types' => ['nullable', 'array'],
             'product_types.*' => ['required', 'string', 'in:SILVER,NON_SILVER,OTHER'],
+            // Insurance: for a Box (default) or a Document package.
+            'package_type' => ['nullable', 'in:box,document'],
             'price_type' => ['required', 'in:FIXED,MANUAL,PERCENT,API_COST'],
             'price' => ['nullable', 'required_if:price_type,FIXED,PERCENT', 'numeric', 'min:0'],
             // Extra % on top of whatever price_type already computes — available regardless of
@@ -40,6 +42,8 @@ class AddonItemController extends Controller
             'status' => ['boolean'],
             'note' => ['nullable', 'string', 'max:255'],
         ]);
+
+        $data['package_type'] ??= 'box';
 
         return response()->json(AddonItem::create($data)->load('category'), 201);
     }
@@ -55,6 +59,7 @@ class AddonItemController extends Controller
             'customer_types.*' => ['required', 'string', 'max:20'],
             'product_types' => ['nullable', 'array'],
             'product_types.*' => ['required', 'string', 'in:SILVER,NON_SILVER,OTHER'],
+            'package_type' => ['nullable', 'in:box,document'],
             'price_type' => ['sometimes', 'required', 'in:FIXED,MANUAL,PERCENT,API_COST'],
             'price' => ['nullable', 'required_if:price_type,FIXED,PERCENT', 'numeric', 'min:0'],
             'markup_percent' => ['nullable', 'numeric', 'min:0'],
@@ -64,6 +69,9 @@ class AddonItemController extends Controller
             'note' => ['nullable', 'string', 'max:255'],
         ]);
 
+        if (array_key_exists('package_type', $data)) {
+            $data['package_type'] ??= 'box';
+        }
         $addonItem->update($data);
 
         return $addonItem->load('category');

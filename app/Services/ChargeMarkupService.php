@@ -10,9 +10,10 @@ use App\Models\ZonePrice;
 class ChargeMarkupService
 {
     /**
-     * These codes carry the carrier's own real cost (used only as a cost reference — see
-     * ShippingController/shipment UI) and must never be fixed-overridden or marked up here.
-     * 'IB' is DHL's document-only Extended Liability service (see DhlRateService). Public so
+     * The carrier's own insurance lines — never part of Freight (the booking form nets them out).
+     * A Fixed Charge on one sets the insurance's sell price (read by the carrier-own Insurance
+     * Add-on); Mark-up rules never touch them (the Add-on has its own Markup %). The real cost
+     * stays in costBreakdown. 'IB' is DHL's document-only Extended Liability service (see DhlRateService). Public so
      * other consumers of a shipment's `rate_quote.chargeBreakdown` (e.g. ReceiptController's
      * suggested line items) can also exclude these from a real customer-facing sell total —
      * their actual sell price is billed separately via the Insurance Add-on line instead.
@@ -152,12 +153,16 @@ class ChargeMarkupService
             $markupTotal = 0.0;
             $breakdown = array_map(function ($line) use ($accountOverrides, $accountRules, $valuesFor, $formulaContext, &$delta, &$markupTotal) {
                 $code = $line['code'] ?? null;
-                if ($code === null || in_array($code, self::COST_ONLY_CODES, true)) {
+                if ($code === null) {
                     return $line;
                 }
-
+                // The carrier's own insurance lines (COST_ONLY_CODES) take a Fixed Charge — that
+                // becomes the insurance's sell price (its carrier-own Insurance Add-on reads this
+                // line) — but never a Mark-up rule: insurance markup is the Add-on's own Markup %.
+                // They stay out of Freight either way (the booking form nets them out).
+                $isCostOnly = in_array($code, self::COST_ONLY_CODES, true);
                 $override = $accountOverrides?->get($code);
-                $rule = $accountRules?->get($code);
+                $rule = $isCostOnly ? null : $accountRules?->get($code);
                 if (! $override && ! $rule) {
                     return $line;
                 }

@@ -68,12 +68,22 @@ class RateBookTest extends TestCase
         $this->assertSame('Zone 6 US CA MX', RateBookSettings::columns($settings, 'DHL')[1]['label']);
 
         $weights = collect(RateBookService::points($settings))
-            ->where('carrier', 'UPS')->where('package_type', 'box')->pluck('weight')->all();
+            ->where('carrier', 'UPS')->where('package_type', 'box')->where('service_code', '65')->pluck('weight')->values()->all();
         $this->assertSame(0.5, $weights[0]);
         $this->assertSame(10.0, $weights[19]);                   // every 0.5 kg up to 10
         $this->assertSame([11.0, 12.0], array_slice($weights, 20, 2)); // whole kg above 10
         $this->assertSame(20.0, $weights[29]);
         $this->assertSame([21.0, 45.0, 71.0, 100.0, 300.0], array_slice($weights, 30)); // then per kg
+
+        // Worldwide Expedited ("Eco") is priced too — boxes only, its own bands (same as Saver by default).
+        $services = RateBookSettings::services($settings, 'UPS');
+        $this->assertSame(['Saver', 'Eco'], array_column($services, 'label'));
+        $echo = collect(RateBookService::points($settings))->where('carrier', 'UPS')->where('service_code', '08');
+        $this->assertSame(['box'], $echo->pluck('package_type')->unique()->values()->all());
+        $this->assertSame($weights, $echo->pluck('weight')->values()->all());
+        $this->assertSame('Eco', RateBookSettings::serviceOf($services, '08')['label']);
+        $this->assertSame('Saver', RateBookSettings::serviceOf($services, '65')['label']);
+        $this->assertSame('Saver', RateBookSettings::serviceOf($services, null)['label']); // older rows
 
         // DHL zone 7 switches account from 14 kg.
         $rules = $settings['carriers']['DHL']['account_rules'];

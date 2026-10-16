@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['addon_category_id', 'name', 'carriers', 'customer_types', 'product_types', 'price_type', 'price', 'markup_percent', 'trigger_type', 'always_show', 'status', 'note'])]
+#[Fillable(['addon_category_id', 'name', 'carriers', 'customer_types', 'product_types', 'package_type', 'price_type', 'price', 'markup_percent', 'trigger_type', 'always_show', 'status', 'note'])]
 class AddonItem extends Model
 {
     use Auditable;

@@ -53,8 +53,9 @@ class RateBookService
             if (! $carrierSettings || empty($carrierSettings['enabled'])) {
                 continue;
             }
+            foreach (RateBookSettings::services($settings, $carrier) as $service) {
             foreach (RateBookSettings::PACKAGE_TYPES as $packageType) {
-                foreach ($carrierSettings['bands'][$packageType] ?? [] as $band) {
+                foreach ($service['bands'][$packageType] ?? [] as $band) {
                     $min = (float) $band['min'];
                     $max = isset($band['max']) && $band['max'] !== '' ? (float) $band['max'] : null;
                     $label = self::bandLabel($min, $max);
@@ -79,10 +80,11 @@ class RateBookService
                             'weight' => $weight,
                             'is_per_kg' => $step === null,
                             'account_id' => isset($band['account_id']) ? (int) $band['account_id'] : null,
-                            'service_code' => (string) $carrierSettings['service_codes'][$packageType],
+                            'service_code' => (string) $service['codes'][$packageType],
                         ];
                     }
                 }
+            }
             }
         }
 

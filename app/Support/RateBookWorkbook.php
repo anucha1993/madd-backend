@@ -94,18 +94,33 @@ class RateBookWorkbook
         $spreadsheet->removeSheetByIndex(0);
         $spreadsheet->getDefaultStyle()->getFont()->setName('Calibri')->setSize(10);
 
-        // Rate cards first (what gets sent out), then one calc sheet per column, as in the rate files.
-        if ($carrier === 'UPS') {
-            RateBookRateCard::upsSave($spreadsheet->createSheet(), $rows, $columns, $note);
-            RateBookRateCard::upsDoc($spreadsheet->createSheet(), $rows, $columns, $note, $when->format('Y'));
-            foreach ($columns as $column) {
-                self::upsZone($spreadsheet->createSheet(), $column, $rows->where('zone', $column['key']), $note);
+        // Rate cards first (what gets sent out), then one calc sheet per column, as in the rate files —
+        // for the main service (SAVE / DOC, SELLING / DOC), then each extra service under its own name
+        // (e.g. "ECO", calc sheets "ECO 1" …).
+        $services = RateBookSettings::services($run->settings ?? [], $carrier);
+        foreach ($services as $service) {
+            $serviceRows = $rows->filter(fn ($r) => RateBookSettings::serviceOf($services, $r->service_code)['key'] === $service['key'])->values();
+            if (! $service['main'] && $serviceRows->isEmpty()) {
+                continue;
             }
-        } else {
-            RateBookRateCard::dhlSelling($spreadsheet->createSheet(), $rows, $columns, $note);
-            RateBookRateCard::dhlDoc($spreadsheet->createSheet(), $rows, $columns, $note, $when->format('Y'));
-            foreach ($columns as $column) {
-                self::dhlZone($spreadsheet->createSheet(), $column, $rows->where('zone', $column['key']), $note);
+            $name = $service['main'] ? null : mb_strtoupper(mb_substr($service['label'], 0, 20));
+            $hasDoc = $serviceRows->contains('package_type', 'document');
+            if ($carrier === 'UPS') {
+                RateBookRateCard::upsSave($spreadsheet->createSheet(), $serviceRows, $columns, $note, $name ?? 'SAVE');
+                if ($service['main'] || $hasDoc) {
+                    RateBookRateCard::upsDoc($spreadsheet->createSheet(), $serviceRows, $columns, $note, $when->format('Y'), $name ? "{$name} DOC" : 'DOC');
+                }
+                foreach ($columns as $column) {
+                    self::upsZone($spreadsheet->createSheet(), $column, $serviceRows->where('zone', $column['key']), $note, $name);
+                }
+            } else {
+                RateBookRateCard::dhlSelling($spreadsheet->createSheet(), $serviceRows, $columns, $note, $name ?? 'SELLING');
+                if ($service['main'] || $hasDoc) {
+                    RateBookRateCard::dhlDoc($spreadsheet->createSheet(), $serviceRows, $columns, $note, $when->format('Y'), $name ? "{$name} DOC" : 'DOC');
+                }
+                foreach ($columns as $column) {
+                    self::dhlZone($spreadsheet->createSheet(), $column, $serviceRows->where('zone', $column['key']), $note, $name);
+                }
             }
         }
         self::zoneListSheet($spreadsheet->createSheet(), $carrier, $run);
@@ -118,9 +133,9 @@ class RateBookWorkbook
 
 
     /** Like the sample's zone sheets "1".."9". */
-    private static function upsZone(Worksheet $sheet, array $column, Collection $rows, string $note): void
+    private static function upsZone(Worksheet $sheet, array $column, Collection $rows, string $note, ?string $service = null): void
     {
-        $sheet->setTitle(mb_substr($column['key'], 0, 31));
+        $sheet->setTitle(mb_substr(($service ? "{$service} " : '').$column['key'], 0, 31));
         $zone = $column['extra'] ? $column['label'] : $column['key'];
         $columns = self::upsColumns();
         foreach ($columns as [$letter, $header]) {
@@ -170,9 +185,9 @@ class RateBookWorkbook
 
 
     /** Like the sample's zone sheets "1".."9". */
-    private static function dhlZone(Worksheet $sheet, array $column, Collection $rows, string $note): void
+    private static function dhlZone(Worksheet $sheet, array $column, Collection $rows, string $note, ?string $service = null): void
     {
-        $sheet->setTitle(mb_substr($column['key'], 0, 31));
+        $sheet->setTitle(mb_substr(($service ? "{$service} " : '').$column['key'], 0, 31));
         $zone = $column['label'];
         $columns = self::dhlColumns();
         $r = self::dhlTitles($sheet, 'M', $note);
