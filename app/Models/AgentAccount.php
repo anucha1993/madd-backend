@@ -16,7 +16,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'client_id', 'client_secret',
     'basic_auth_username', 'basic_auth_password',
     'status', 'mode', 'is_api_enabled',
-    'rate_min_weight', 'rate_max_weight',
+    'rate_min_weight', 'rate_max_weight', 'service_weight_ranges',
 ])]
 #[Hidden(['client_secret', 'basic_auth_password'])]
 class AgentAccount extends Model
@@ -32,6 +32,7 @@ class AgentAccount extends Model
             'is_api_enabled' => 'boolean',
             'rate_min_weight' => 'float',
             'rate_max_weight' => 'float',
+            'service_weight_ranges' => 'array',
             'client_secret' => CarrierSecret::class,
             'basic_auth_password' => CarrierSecret::class,
         ];
@@ -53,13 +54,58 @@ class AgentAccount extends Model
     }
 
     /**
-     * Whether Check Rate asks this account for a shipment of this chargeable weight — its own
-     * weight range (/config/agent-accounts, e.g. ax3173 = 0-10 kg); no range = every weight.
+     * Whether Check Rate asks this account at all for a shipment of this chargeable weight: its own
+     * range (/config/agent-accounts, e.g. ax3173 = 0-10 kg) or any service's own range covers it.
      */
     public function quotesWeight(float $weight): bool
     {
-        return ($this->rate_min_weight === null || $weight >= $this->rate_min_weight - 0.005)
-            && ($this->rate_max_weight === null || $weight <= $this->rate_max_weight + 0.005);
+        return self::inRange($weight, $this->rate_min_weight, $this->rate_max_weight)
+            || collect($this->serviceRanges())->contains(fn ($r) => self::inRange($weight, $r['min'], $r['max']));
+    }
+
+    /**
+     * Whether one service of this account is offered at this weight: the service's own range
+     * (e.g. UPS 08 Expedited 10.01–70 kg), else the account's range — no range = every weight.
+     */
+    public function quotesService(?string $serviceCode, float $weight): bool
+    {
+        $range = collect($this->serviceRanges())->first(fn ($r) => strcasecmp($r['service_code'], (string) $serviceCode) === 0);
+
+        return $range
+            ? self::inRange($weight, $range['min'], $range['max'])
+            : self::inRange($weight, $this->rate_min_weight, $this->rate_max_weight);
+    }
+
+    /**
+     * Drops quotes for services this account doesn't offer at this weight (errors are kept so a
+     * failing account still shows up).
+     *
+     * @param  iterable<self>  $accounts
+     */
+    public static function filterQuotesByWeight(array $results, iterable $accounts, float $weight): array
+    {
+        $byId = collect($accounts)->keyBy('id');
+
+        return array_values(array_filter($results, function ($r) use ($byId, $weight) {
+            $account = $byId->get($r['accountId'] ?? null);
+
+            return ! empty($r['error']) || ! $account || $account->quotesService($r['serviceCode'] ?? null, $weight);
+        }));
+    }
+
+    /** @return list<array{service_code: string, min: ?float, max: ?float}> */
+    public function serviceRanges(): array
+    {
+        return array_values(array_map(fn ($r) => [
+            'service_code' => (string) ($r['service_code'] ?? ''),
+            'min' => isset($r['min']) && $r['min'] !== '' ? (float) $r['min'] : null,
+            'max' => isset($r['max']) && $r['max'] !== '' ? (float) $r['max'] : null,
+        ], $this->service_weight_ranges ?? []));
+    }
+
+    private static function inRange(float $weight, ?float $min, ?float $max): bool
+    {
+        return ($min === null || $weight >= $min - 0.005) && ($max === null || $weight <= $max + 0.005);
     }
 
     /**

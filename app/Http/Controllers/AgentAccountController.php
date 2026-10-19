@@ -39,8 +39,14 @@ class AgentAccountController extends Controller
             'is_api_enabled' => ['boolean'],
             'rate_min_weight' => ['nullable', 'numeric', 'min:0'],
             'rate_max_weight' => ['nullable', 'numeric', 'min:0'],
+            // Per-service ranges (e.g. 08 Expedited 10.01–70); a service not listed uses the range above.
+            'service_weight_ranges' => ['nullable', 'array', 'max:20'],
+            'service_weight_ranges.*.service_code' => ['required', 'string', 'max:10', 'distinct'],
+            'service_weight_ranges.*.min' => ['nullable', 'numeric', 'min:0'],
+            'service_weight_ranges.*.max' => ['nullable', 'numeric', 'min:0'],
         ]);
 
+        $data = self::normaliseServiceRanges($data);
         $this->assertWeightRange($data);
         $account = AgentAccount::create($data);
 
@@ -67,6 +73,11 @@ class AgentAccountController extends Controller
             'is_api_enabled' => ['boolean'],
             'rate_min_weight' => ['nullable', 'numeric', 'min:0'],
             'rate_max_weight' => ['nullable', 'numeric', 'min:0'],
+            // Per-service ranges (e.g. 08 Expedited 10.01–70); a service not listed uses the range above.
+            'service_weight_ranges' => ['nullable', 'array', 'max:20'],
+            'service_weight_ranges.*.service_code' => ['required', 'string', 'max:10', 'distinct'],
+            'service_weight_ranges.*.min' => ['nullable', 'numeric', 'min:0'],
+            'service_weight_ranges.*.max' => ['nullable', 'numeric', 'min:0'],
         ]);
 
         // Blank secret fields mean "leave unchanged", not "clear the value".
@@ -76,7 +87,8 @@ class AgentAccountController extends Controller
             }
         }
 
-        $this->assertWeightRange($data + $agentAccount->only(['rate_min_weight', 'rate_max_weight']));
+        $data = self::normaliseServiceRanges($data);
+        $this->assertWeightRange($data + $agentAccount->only(['rate_min_weight', 'rate_max_weight', 'service_weight_ranges']));
         $agentAccount->update($data);
 
         return $agentAccount->load('agent');
@@ -191,13 +203,33 @@ class AgentAccountController extends Controller
         }
     }
 
-    /** Check Rate weight range: max (if any) must be above min (if any). */
+    /** Codes upper-cased ("p" = DHL "P"); an empty list is stored as null (= the account's range for all). */
+    private static function normaliseServiceRanges(array $data): array
+    {
+        if (array_key_exists('service_weight_ranges', $data)) {
+            $ranges = array_map(fn ($r) => [
+                'service_code' => strtoupper(trim((string) $r['service_code'])),
+                'min' => isset($r['min']) ? (float) $r['min'] : null,
+                'max' => isset($r['max']) ? (float) $r['max'] : null,
+            ], $data['service_weight_ranges'] ?? []);
+            $data['service_weight_ranges'] = $ranges ?: null;
+        }
+
+        return $data;
+    }
+
+    /** Check Rate weight ranges: max (if any) must be above min (if any) — the account's and each service's. */
     private function assertWeightRange(array $data): void
     {
         $min = $data['rate_min_weight'] ?? null;
         $max = $data['rate_max_weight'] ?? null;
         if ($min !== null && $max !== null && (float) $max <= (float) $min) {
             throw \Illuminate\Validation\ValidationException::withMessages(['rate_max_weight' => 'น้ำหนักสูงสุดต้องมากกว่าน้ำหนักต่ำสุด']);
+        }
+        foreach ($data['service_weight_ranges'] ?? [] as $i => $range) {
+            if (isset($range['min'], $range['max']) && (float) $range['max'] <= (float) $range['min']) {
+                throw \Illuminate\Validation\ValidationException::withMessages(["service_weight_ranges.{$i}.max" => "Service {$range['service_code']}: น้ำหนักสูงสุดต้องมากกว่าน้ำหนักต่ำสุด"]);
+            }
         }
     }
 }

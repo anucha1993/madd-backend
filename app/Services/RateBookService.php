@@ -93,6 +93,28 @@ class RateBookService
         return $points;
     }
 
+    /**
+     * The account to price a point with under the Check Rate weight ranges: the chosen one if it
+     * offers this service at this weight, else another API account of the same carrier that does
+     * (one with its own range for the service first), else false. No chosen account → unchanged.
+     */
+    public static function offeringAccount($accounts, array $point, ?int $accountId): int|false|null
+    {
+        $code = (string) $point['service_code'];
+        $weight = (float) $point['weight'];
+        $chosen = $accountId !== null ? $accounts->get($accountId) : null;
+        if (! $chosen || $chosen->quotesService($code, $weight)) {
+            return $accountId;
+        }
+        $other = $accounts
+            ->filter(fn ($a) => $a->id !== $chosen->id && $a->status && $a->is_api_enabled
+                && $a->agent?->agent_code === $point['carrier'] && $a->quotesService($code, $weight))
+            ->sortBy(fn ($a) => [collect($a->serviceRanges())->contains(fn ($r) => strcasecmp($r['service_code'], $code) === 0) ? 0 : 1, $a->id])
+            ->first();
+
+        return $other ? $other->id : false;
+    }
+
     /** A zone rule (e.g. DHL zone 7 from 14 kg → another account) beats the band's own account. */
     public static function accountFor(array $rules, string $zone, float $weight, ?int $bandAccountId): ?int
     {
@@ -147,6 +169,15 @@ class RateBookService
         foreach ($points as $point) {
             foreach ($columnsOf($point) as $column) {
                 $accountId = self::accountFor($settings['carriers'][$point['carrier']]['account_rules'] ?? [], $column['zone'], $point['weight'], $point['account_id']);
+                // Same Check Rate weight ranges as /shipment/create (/config/agent-accounts, per account
+                // and per service): another account of the carrier if this one doesn't offer it, or no
+                // price at all when none does — Create Shipment wouldn't show one either.
+                $accountId = self::offeringAccount($accounts, $point, $accountId);
+                if ($accountId === false) {
+                    $done++;
+
+                    continue;
+                }
                 $row = $this->quotePoint($point, $column['key'], $column['address'], $accounts->get($accountId));
                 if ($row['error'] !== null && self::isTransient($row['error'])) {
                     // Network blip (DNS / timeout / carrier 5xx) — one more try before giving up on the point.

@@ -82,4 +82,56 @@ class AccountWeightRangeTest extends TestCase
         $this->putJson("/api/agent-accounts/{$this->ax}", ['rate_max_weight' => 0])->assertStatus(422);  // not above the saved min… 0
         $this->putJson("/api/agent-accounts/{$this->ax}", ['rate_min_weight' => null, 'rate_max_weight' => null])->assertOk();
     }
+
+    /** Services Check Rate returned for this box weight (the fake UPS quotes Saver + Expedited for every account). */
+    private function quotedServices(float $weight): array
+    {
+        $this->mock(UpsRateService::class, function ($m) {
+            $m->shouldReceive('serviceLabels')->andReturn(['65' => 'Saver', '08' => 'Expedited']);
+            $m->shouldReceive('quoteAccounts')->andReturnUsing(fn ($accounts) => collect($accounts)->flatMap(fn ($a) => [
+                ['carrier' => 'UPS', 'accountId' => $a['id'], 'username' => $a['username_acc'], 'serviceCode' => '65', 'negotiated' => 100, 'chargeBreakdown' => [], 'error' => null],
+                ['carrier' => 'UPS', 'accountId' => $a['id'], 'username' => $a['username_acc'], 'serviceCode' => '08', 'negotiated' => 90, 'chargeBreakdown' => [], 'error' => null],
+            ])->all());
+        });
+        $this->mock(DhlRateService::class, fn ($m) => $m->shouldReceive('quoteAccounts')->andReturn([]));
+
+        $results = $this->postJson('/api/shipping/check-rate', [
+            'origin_postcode' => '10110', 'origin_city' => 'Bangkok', 'origin_address' => '1 Sukhumvit',
+            'destination_country' => 'US', 'destination_city' => 'New York',
+            'packages' => [['weight' => $weight, 'length' => 10, 'width' => 10, 'height' => 10, 'quantity' => 1]],
+        ])->assertOk()->json('results');
+
+        return collect($results)->map(fn ($r) => $r['username'].':'.$r['serviceCode'])->sort()->values()->all();
+    }
+
+    public function test_a_service_with_its_own_range_is_only_offered_in_it(): void
+    {
+        // 0279v4: every service from 10.01 kg, but Expedited only 10.01–70.
+        $this->putJson('/api/agent-accounts/'.AgentAccount::where('username_acc', '0279v4')->value('id'), [
+            'service_weight_ranges' => [['service_code' => '08', 'min' => 10.01, 'max' => 70]],
+        ])->assertOk()->assertJsonPath('service_weight_ranges.0.service_code', '08');
+
+        $this->assertSame(['0279v4:08', '0279v4:65'], $this->quotedServices(30));
+    }
+
+    public function test_outside_its_range_the_service_is_dropped(): void
+    {
+        AgentAccount::where('username_acc', '0279v4')->update(['service_weight_ranges' => json_encode([['service_code' => '08', 'min' => 10.01, 'max' => 40]])]);
+        $this->assertSame(['0279v4:65'], $this->quotedServices(50)); // Saver still follows the account's 10.01+
+    }
+
+    public function test_a_service_range_can_reach_beyond_the_account_range(): void
+    {
+        // ax3173 is 0–10 kg, but its Expedited may also quote 10.01–70 (the account is then asked too).
+        AgentAccount::whereKey($this->ax)->update(['service_weight_ranges' => json_encode([['service_code' => '08', 'min' => 10.01, 'max' => 70]])]);
+        $this->assertSame(['0279v4:08', '0279v4:65', 'ax3173:08'], $this->quotedServices(30));
+    }
+
+    public function test_service_ranges_are_validated(): void
+    {
+        $this->putJson("/api/agent-accounts/{$this->ax}", ['service_weight_ranges' => [['service_code' => '08', 'min' => 70, 'max' => 10]]])->assertStatus(422);
+        $this->putJson("/api/agent-accounts/{$this->ax}", ['service_weight_ranges' => [['service_code' => '08'], ['service_code' => '08']]])->assertStatus(422);
+        $this->putJson("/api/agent-accounts/{$this->ax}", ['service_weight_ranges' => [['service_code' => 'p', 'min' => 5]]])->assertOk()->assertJsonPath('service_weight_ranges.0.service_code', 'P');
+        $this->putJson("/api/agent-accounts/{$this->ax}", ['service_weight_ranges' => []])->assertOk()->assertJsonPath('service_weight_ranges', null);
+    }
 }

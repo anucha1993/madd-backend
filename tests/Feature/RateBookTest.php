@@ -286,4 +286,30 @@ class RateBookTest extends TestCase
         $half = $find(900.0) ? (int) preg_replace('/\D/', '', $find(900.0)) : 0;
         $this->assertArrayHasKey("C{$half}:D{$half}", $save->getMergeCells());
     }
+
+    public function test_the_book_follows_the_agent_account_check_rate_ranges(): void
+    {
+        $this->mock(UpsRateService::class, fn ($m) => $m->shouldReceive('quoteAccounts')->andReturnUsing(fn ($accounts, $shipment, $codes) => [[
+            'carrier' => 'UPS', 'accountId' => $accounts[0]['id'], 'serviceCode' => $codes[0], 'negotiated' => 1000, 'chargeBreakdown' => [], 'error' => null,
+        ]]));
+        $this->mock(DhlRateService::class, fn ($m) => $m->shouldReceive('quoteAccounts')->andReturn([]));
+        DB::table('agent_accounts')->update(['is_api_enabled' => true]);
+        // 0279v4 (Eco's band account) offers Expedited only 10.01–70; ax3173 is 0–10 kg but its
+        // Expedited goes from 70.01 kg.
+        \App\Models\AgentAccount::whereKey($this->ups)->update(['service_weight_ranges' => [['service_code' => '08', 'min' => 10.01, 'max' => 70]]]);
+        \App\Models\AgentAccount::whereKey($this->ax)->update(['rate_min_weight' => 0, 'rate_max_weight' => 10, 'service_weight_ranges' => [['service_code' => '08', 'min' => 70.01, 'max' => 299]]]);
+
+        $run = RateBookRun::create(['status' => 'running', 'trigger' => 'manual', 'settings' => RateBookSettings::get()]);
+        app(RateBookService::class)->run($run);
+        $this->assertNotSame('failed', $run->refresh()->status);
+
+        $eco = $run->rows()->where('service_code', '08')->get()->groupBy(fn ($r) => (string) (float) $r->weight)->map(fn ($g) => $g->pluck('account_username')->unique()->values()->all());
+        $this->assertSame(['0279v4'], $eco['25']);   // in 0279v4's 10.01–70
+        $this->assertSame(['0279v4'], $eco['45']);
+        $this->assertSame(['ax3173'], $eco['71']);   // → the account that offers it there
+        $this->assertSame(['ax3173'], $eco['100']);
+        $this->assertArrayNotHasKey('300', $eco);    // nobody offers Expedited at 300 kg → no price
+        // Saver keeps its own accounts.
+        $this->assertSame(['0279v4'], $run->rows()->where('service_code', '65')->where('weight', 300)->pluck('account_username')->unique()->values()->all());
+    }
 }

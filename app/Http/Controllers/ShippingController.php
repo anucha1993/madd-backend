@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AgentAccount;
 use App\Services\AccessService;
 use App\Services\ChargeMarkupService;
 use App\Services\DhlRateService;
@@ -174,7 +175,9 @@ class ShippingController extends Controller
             $quoteShipment,
         );
 
-        $results = $this->chargeMarkupService->applyToResults([...$upsResults, ...$dhlResults, ...$limitResults], $shipment['packages'], $shipment['to']['country']);
+        // Only the services each account offers at this weight (per-service Check Rate ranges).
+        $quoted = AgentAccount::filterQuotesByWeight([...$upsResults, ...$dhlResults], $accounts, $billedWeight);
+        $results = $this->chargeMarkupService->applyToResults([...$quoted, ...$limitResults], $shipment['packages'], $shipment['to']['country']);
 
         // Full quote stays server-side (booking reads cost from it by quoteId); the browser only
         // gets what this user's Role may see — e.g. front-counter staff get the sell price and

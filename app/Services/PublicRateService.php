@@ -88,6 +88,8 @@ class PublicRateService
             ),
         ];
 
+        // Only the services each account offers at this weight (per-service Check Rate ranges).
+        $results = \App\Models\AgentAccount::filterQuotesByWeight($results, $accounts, $billedWeight);
         $ok = array_values(array_filter($results, fn ($r) => empty($r['error'])));
         if (! $ok && $results) {
             SystemAlert::record('public_api', "Public Rate API ({$client->name}): ไม่ได้ราคาจาก Carrier เลย", [
