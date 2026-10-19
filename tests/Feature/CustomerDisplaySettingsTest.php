@@ -68,4 +68,21 @@ class CustomerDisplaySettingsTest extends TestCase
         $this->actingWith(['shipment.create']);
         $this->getJson('/api/customer-display/settings')->assertForbidden();
     }
+
+    public function test_a_display_on_another_computer_gets_the_state_by_its_key(): void
+    {
+        $key = str_repeat('aB3', 10).'xy'; // 32 chars
+        $this->actingWith(['shipment.create']);
+        $this->putJson("/api/customer-display/live/{$key}", ['state' => ['stage' => 'idle']])->assertForbidden();
+
+        $this->actingWith(['shipment.customer_display']);
+        $v = $this->putJson("/api/customer-display/live/{$key}", ['state' => ['stage' => 'quotes', 'total' => ['amount' => 1200]]])->assertOk()->json('v');
+
+        // The display has no login.
+        $this->app['auth']->forgetGuards();
+        $this->getJson("/api/customer-display/live/{$key}")->assertOk()->assertJsonPath('state.total.amount', 1200)->assertJsonPath('v', $v);
+        $this->getJson("/api/customer-display/live/{$key}?v={$v}")->assertNoContent(); // nothing newer
+        $this->getJson('/api/customer-display/live/'.str_repeat('z', 32))->assertNoContent();
+        $this->getJson('/api/customer-display/live/short')->assertNotFound(); // keys must be 32 chars
+    }
 }

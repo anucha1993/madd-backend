@@ -5,14 +5,19 @@ namespace App\Http\Controllers;
 use App\Models\Role;
 use App\Models\User;
 use App\Services\AuditLogger;
+use App\Support\RoleHierarchy;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 
 class UserController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        return User::with('branches:id,name,code,nickname', 'roles:id,key,name,is_super_admin')->orderBy('name')->get();
+        $actor = $request->user();
+
+        // `manageable` = the caller ranks strictly above this user (or is Super Admin).
+        return User::with('branches:id,name,code,nickname', 'roles:id,key,name,is_super_admin,level')->orderBy('name')->get()
+            ->each(fn (User $u) => $u->setAttribute('manageable', RoleHierarchy::canManageUser($actor, $u)));
     }
 
     public function store(Request $request)
@@ -51,6 +56,7 @@ class UserController extends Controller
 
     public function update(Request $request, User $user)
     {
+        abort_unless(RoleHierarchy::canManageUser($request->user(), $user), 403, 'แก้ไขผู้ใช้ที่ระดับ Role เท่ากับหรือสูงกว่าตัวเองไม่ได้');
         $data = $request->validate([
             'name' => ['sometimes', 'required', 'string', 'max:255'],
             'username' => ['sometimes', 'required', 'string', 'max:255', 'unique:users,username,' . $user->id],
@@ -98,6 +104,7 @@ class UserController extends Controller
         if ($this->isSuperAdmin($user) && ! $this->isSuperAdmin($request->user())) {
             return response()->json(['message' => 'เฉพาะ Super Admin เท่านั้นที่ลบผู้ใช้ Super Admin ได้'], 403);
         }
+        abort_unless(RoleHierarchy::canManageUser($request->user(), $user), 403, 'ลบผู้ใช้ที่ระดับ Role เท่ากับหรือสูงกว่าตัวเองไม่ได้');
 
         $user->delete();
 
@@ -110,6 +117,13 @@ class UserController extends Controller
      */
     private function assertCanAssignRoles(Request $request, array $roleIds, ?User $target): void
     {
+        // Only Roles ranked below the caller can be handed out.
+        $actor = $request->user();
+        foreach (Role::whereIn('id', $roleIds)->where('is_super_admin', false)->get() as $role) {
+            if (! RoleHierarchy::canManageRole($actor, $role)) {
+                throw ValidationException::withMessages(['role_ids' => "กำหนด Role \"{$role->name}\" ไม่ได้ — ระดับเท่ากับหรือสูงกว่าตัวเอง"]);
+            }
+        }
         $superRoleIds = Role::where('is_super_admin', true)->pluck('id')->all();
         $grantsSuper = (bool) array_intersect($roleIds, $superRoleIds);
         $hadSuper = $target && $this->isSuperAdmin($target);

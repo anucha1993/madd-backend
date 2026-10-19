@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 
 /** See the create_column_profiles_table migration / ColumnProfileController. */
-#[Fillable(['page_key', 'name', 'columns', 'group_of', 'role_ids', 'sort_order'])]
+#[Fillable(['page_key', 'name', 'columns', 'group_of', 'headers', 'role_ids', 'sort_order'])]
 class ColumnProfile extends Model
 {
     use Auditable;
@@ -17,6 +17,7 @@ class ColumnProfile extends Model
         return [
             'columns' => 'array',
             'group_of' => 'array',
+            'headers' => 'array',
             'role_ids' => 'array',
         ];
     }

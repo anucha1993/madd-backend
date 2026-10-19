@@ -312,10 +312,14 @@ class AccessControlTest extends TestCase
         $user->roles()->sync([$manager->id]);
         Sanctum::actingAs($user);
 
-        $this->putJson("/api/roles/{$manager->id}", ['is_super_admin' => true])->assertOk()->assertJsonPath('is_super_admin', false);
+        // Own Role = same level → can't be edited at all (let alone promoted to Super Admin).
+        $this->putJson("/api/roles/{$manager->id}", ['is_super_admin' => true])->assertForbidden();
+        $this->assertFalse($manager->fresh()->is_super_admin);
 
         $adminRoleId = Role::where('key', 'admin')->value('id');
-        $this->putJson("/api/users/{$user->id}", ['role_ids' => [$adminRoleId]])->assertUnprocessable();
+        // Editing yourself is blocked outright (same level), so no self-promotion either.
+        $this->putJson("/api/users/{$user->id}", ['role_ids' => [$adminRoleId]])->assertForbidden();
+        $this->assertFalse($user->roles()->where('id', $adminRoleId)->exists());
     }
 
     public function test_last_super_admin_cannot_be_demoted(): void

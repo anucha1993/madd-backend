@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
  * A configurable Role — what it can grant is defined in config/permissions.php, see
  * AccessService for how a user's Roles combine.
  */
-#[Fillable(['key', 'name', 'description', 'is_super_admin', 'permissions', 'field_access', 'data_scopes'])]
+#[Fillable(['key', 'name', 'description', 'is_super_admin', 'level', 'permissions', 'field_access', 'data_scopes'])]
 class Role extends Model
 {
     use Auditable;
@@ -20,6 +20,7 @@ class Role extends Model
     {
         return [
             'is_super_admin' => 'boolean',
+            'level' => 'integer',
             'is_system' => 'boolean',
             'permissions' => 'array',
             'field_access' => 'array',

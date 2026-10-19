@@ -94,6 +94,8 @@ class CriticalFixesTest extends TestCase
         $dhl = Shipment::create(['agent_account_id' => $accountId, 'carrier' => 'DHL', 'service_code' => 'P', 'status' => 'booked', 'tracking_number' => '5437367191', 'origin' => [], 'destination' => [], 'packages' => [], 'waybill_storage_key' => 'shipments/waybill/5437367191.pdf']);
 
         Sanctum::actingAs($this->user(['shipment.view']));
+        $this->getJson("/api/shipments/{$dhl->id}")->assertForbidden(); // the detail page has its own permission
+        Sanctum::actingAs($this->user(['shipment.view', 'shipment.detail']));
         $this->getJson("/api/shipments/{$dhl->id}")->assertOk();
         $this->getJson("/api/shipments/{$dhl->id}/label")->assertForbidden();
         $this->getJson("/api/shipments/{$dhl->id}/waybill/original")->assertForbidden();

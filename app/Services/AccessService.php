@@ -225,7 +225,9 @@ class AccessService
 
         return [
             'is_super_admin' => $isSuperAdmin,
-            'roles' => $roles->map(fn (Role $r) => ['id' => $r->id, 'key' => $r->key, 'name' => $r->name])->values()->all(),
+            // Role hierarchy rank (see RoleHierarchy) — Super Admin above any level.
+            'level' => $isSuperAdmin ? PHP_INT_MAX : (int) ($roles->max('level') ?? 0),
+            'roles' => $roles->map(fn (Role $r) => ['id' => $r->id, 'key' => $r->key, 'name' => $r->name, 'level' => (int) $r->level])->values()->all(),
             'permissions' => $permissions,
             'fields' => $fields,
             'scopes' => $scopes,

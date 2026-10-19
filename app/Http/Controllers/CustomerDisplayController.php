@@ -4,11 +4,42 @@ namespace App\Http\Controllers;
 
 use App\Support\CustomerDisplaySettings;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 /** /config/customer-display — what the customer-facing 2nd screen shows (see CustomerDisplaySettings). */
 class CustomerDisplayController extends Controller
 {
+    // A display on ANOTHER computer can't hear the BroadcastChannel — Create Shipment then relays
+    // the same whitelisted DisplayState (sell side only) through here, under a random 32-char key
+    // the display was opened with (/customer-display?k=…). The key is the only access control on
+    // the read side, so it must stay unguessable; states expire after 12 hours.
+    public const LIVE_KEY = '[A-Za-z0-9]{32}';
+
+    private const LIVE_TTL = 43200;
+
+    public function pushLive(Request $request, string $key)
+    {
+        $data = $request->validate(['state' => ['required', 'array']]);
+        $json = json_encode($data['state'], JSON_UNESCAPED_UNICODE);
+        abort_if(strlen($json) > 200_000, 413, 'Display state too large');
+        $version = (int) (microtime(true) * 1000);
+        Cache::put("customer_display_live:{$key}", ['v' => $version, 'state' => $json], self::LIVE_TTL);
+
+        return response()->json(['v' => $version]);
+    }
+
+    /** Public (the display has no login): the latest state, or 204 if nothing newer than ?v=. */
+    public function live(Request $request, string $key)
+    {
+        $live = Cache::get("customer_display_live:{$key}");
+        if (! $live || (int) $request->query('v', 0) >= $live['v']) {
+            return response()->noContent();
+        }
+
+        return response()->json(['v' => $live['v'], 'state' => json_decode($live['state'], true)]);
+    }
+
     public function show()
     {
         return response()->json(CustomerDisplaySettings::get());

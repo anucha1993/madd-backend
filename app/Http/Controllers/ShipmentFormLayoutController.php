@@ -31,10 +31,13 @@ class ShipmentFormLayoutController extends Controller
             'fields.*.key' => ['required', 'string', 'max:60', 'distinct'],
             'fields.*.width' => ['required', 'in:full,half'],
         ]);
-        $all = self::stored();
-        $before = $all[$data['section']];
-        $all[$data['section']] = array_map(fn ($f) => ['key' => $f['key'], 'width' => $f['width']], $data['fields']);
-        IntegrationSetting::set(self::KEY, json_encode($all));
+        $before = [];
+        $all = IntegrationSetting::mutateJson(self::KEY, function (array $all) use ($data, &$before) {
+            $before = $all[$data['section']] ?? [];
+            $all[$data['section']] = array_map(fn ($f) => ['key' => $f['key'], 'width' => $f['width']], $data['fields']);
+
+            return $all;
+        }) + array_fill_keys(self::SECTIONS, []);
         if ($before !== $all[$data['section']]) {
             $audit->record('updated', 'shipment_form_layout', [$data['section'] => ['old' => $before, 'new' => $all[$data['section']]]], 'Create Shipment form layout');
         }

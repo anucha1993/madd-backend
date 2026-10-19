@@ -59,6 +59,8 @@ use App\Http\Controllers\TrackingSyncController;
 use App\Http\Controllers\WeightMarkupController;
 use App\Http\Controllers\HeavyRateController;
 use App\Http\Controllers\ChargeLineOrderController;
+use App\Http\Controllers\NavLabelController;
+use App\Http\Controllers\FinanceReportController;
 use App\Http\Controllers\ShipmentFormLayoutController;
 use App\Http\Controllers\CustomerDisplayController;
 use App\Http\Controllers\UpsTrackingController;
@@ -86,6 +88,8 @@ Route::get('public/v1/web/stats', [PublicStatsController::class, 'show'])->middl
 Route::post('public/v1/web/ai-parse', [PublicAiAssistController::class, 'parse'])->middleware('api.web:rates');
 // Customer Display banner images — the display page has no login.
 Route::get('customer-display/media/{id}', [CustomerDisplayController::class, 'media'])->whereNumber('id');
+// A customer display on another computer polls this (~1/s) — see CustomerDisplayController::live().
+Route::get('customer-display/live/{key}', [CustomerDisplayController::class, 'live'])->where('key', CustomerDisplayController::LIVE_KEY)->middleware('throttle:240,1');
 
 // Every authenticated route also passes through `record.scope` (a Shipment/Receipt/Pickup bound
 // from the URL outside the user's data scope 404s). `perm:` keys come from
@@ -201,10 +205,14 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
         Route::get('shipments/{shipment}/waybill', [ShipmentController::class, 'waybill'])->middleware('perm:shipment.waybill');
         Route::get('shipments/{shipment}/waybill/original', [ShipmentController::class, 'originalWaybill'])->middleware('perm:shipment.waybill_original');
         Route::get('shipments/{shipment}/commercial-invoice', [ShipmentController::class, 'commercialInvoice'])->middleware('perm:shipment.invoice');
-        Route::get('shipments/{shipment}', [ShipmentController::class, 'show']);
+        // The detail page — its own permission, like the menu (lib/access.ts).
+        Route::get('shipments/{shipment}', [ShipmentController::class, 'show'])->middleware('perm:shipment.detail');
     });
     Route::get('shipment-field-rules', [ShipmentFieldRuleController::class, 'index'])->middleware('perm:shipment.create,config.shipment_fields');
     Route::put('shipment-field-rules', [ShipmentFieldRuleController::class, 'update'])->middleware('perm:config.shipment_fields');
+    // Sidebar menu names — read by everyone, renamed by a Super Admin only (checked in the controller).
+    Route::get('nav-labels', [NavLabelController::class, 'show']);
+    Route::put('nav-labels', [NavLabelController::class, 'update']);
     // Ship From / Ship To field order + width — read by the booking form, arranged by admins only.
     Route::get('shipment-form-layout', [ShipmentFormLayoutController::class, 'show'])->middleware('perm:shipment.create,config.shipment_layout');
     Route::put('shipment-form-layout', [ShipmentFormLayoutController::class, 'update'])->middleware('perm:config.shipment_layout');
@@ -348,6 +356,7 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
     // opens the display; changed only with the edit permission.
     Route::middleware('perm:config.customer_display,shipment.customer_display')->get('customer-display/settings', [CustomerDisplayController::class, 'show']);
     Route::middleware('perm:config.customer_display_edit')->put('customer-display/settings', [CustomerDisplayController::class, 'update']);
+    Route::middleware('perm:shipment.customer_display')->put('customer-display/live/{key}', [CustomerDisplayController::class, 'pushLive'])->where('key', CustomerDisplayController::LIVE_KEY);
     Route::middleware('perm:config.customer_display_edit')->post('customer-display/media', [CustomerDisplayController::class, 'uploadMedia']);
     // Heavy Weight sell rates (71 kg+ priced by staff instead of the carrier) — own view / edit permissions.
     Route::middleware('perm:config.heavy_rates')->group(function () {
@@ -404,6 +413,7 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
             Route::post('rate-book/runs/{rateBookRun}/cancel', [RateBookController::class, 'cancel']);
         });
     });
+    Route::get('reports/finance', [FinanceReportController::class, 'index'])->middleware('perm:report.finance');
     Route::middleware('perm:report.key_billing')->group(function () {
         Route::get('key-billing-report', [KeyBillingReportController::class, 'index']);
         Route::get('key-billing-report/export', [KeyBillingReportController::class, 'export']);

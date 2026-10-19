@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Role;
+use App\Support\RoleHierarchy;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -19,21 +20,31 @@ class RoleController extends Controller
         return response()->json(config('permissions'));
     }
 
-    public function index()
+    public function index(Request $request)
     {
-        return Role::withCount('users')->orderByDesc('is_super_admin')->orderBy('id')->get();
+        $actor = $request->user();
+
+        // `manageable` = the caller ranks strictly above it (or is Super Admin) — see RoleHierarchy.
+        return Role::withCount('users')->orderByDesc('is_super_admin')->orderByDesc('level')->orderBy('id')->get()
+            ->each(fn (Role $r) => $r->setAttribute('manageable', RoleHierarchy::canManageRole($actor, $r)));
     }
 
     public function store(Request $request)
     {
-        $role = Role::create($this->validated($request));
+        $data = RoleHierarchy::clampGrants($request->user(), $this->validated($request), null);
+        $this->assertLevelBelowActor($request, (int) ($data['level'] ?? 10));
+        $role = Role::create($data);
 
         return response()->json($role->loadCount('users'), 201);
     }
 
     public function update(Request $request, Role $role)
     {
-        $data = $this->validated($request, $role);
+        abort_unless(RoleHierarchy::canManageRole($request->user(), $role), 403, 'แก้ไข Role ที่ระดับเท่ากับหรือสูงกว่าตัวเองไม่ได้');
+        $data = RoleHierarchy::clampGrants($request->user(), $this->validated($request, $role), $role);
+        if (array_key_exists('level', $data)) {
+            $this->assertLevelBelowActor($request, (int) $data['level']);
+        }
         // The super-admin flag is only ever changed by a super admin — otherwise anyone holding
         // user.roles could promote their own role to unrestricted access.
         if (($data['is_super_admin'] ?? false) !== $role->is_super_admin && ! $this->actorIsSuperAdmin($request)) {
@@ -49,8 +60,9 @@ class RoleController extends Controller
         return $role->loadCount('users');
     }
 
-    public function destroy(Role $role)
+    public function destroy(Request $request, Role $role)
     {
+        abort_unless(RoleHierarchy::canManageRole($request->user(), $role), 403, 'ลบ Role ที่ระดับเท่ากับหรือสูงกว่าตัวเองไม่ได้');
         if ($role->is_super_admin && Role::where('is_super_admin', true)->whereKeyNot($role->id)->doesntExist()) {
             return response()->json(['message' => 'ลบไม่ได้ — ต้องมี Role ที่เป็น Super Admin อย่างน้อย 1 Role'], 422);
         }
@@ -72,6 +84,7 @@ class RoleController extends Controller
             'name' => [$role ? 'sometimes' : 'required', 'string', 'max:100'],
             'description' => ['nullable', 'string', 'max:255'],
             'is_super_admin' => ['boolean'],
+            'level' => ['sometimes', 'integer', 'min:0', 'max:999'],
             'permissions' => ['array'],
             'permissions.*' => ['string'],
             'field_access' => ['array'],
@@ -121,6 +134,15 @@ class RoleController extends Controller
         }
 
         return $data;
+    }
+
+    /** A non-super editor can only create / set Roles ranked below themselves. */
+    private function assertLevelBelowActor(Request $request, int $level): void
+    {
+        $mine = RoleHierarchy::levelOf($request->user());
+        if (! RoleHierarchy::isSuper($request->user()) && $level >= $mine) {
+            throw ValidationException::withMessages(['level' => "ระดับของ Role ต้องต่ำกว่าระดับของคุณ ({$mine})"]);
+        }
     }
 
     private function actorIsSuperAdmin(Request $request): bool

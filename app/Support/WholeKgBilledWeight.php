@@ -79,8 +79,11 @@ final class WholeKgBilledWeight
     }
 
     /**
-     * The smallest whole-cm growth of a box (UPS rounds each side up to a whole cm) whose
-     * volumetric weight, rounded up to 0.5 kg, is exactly $target.
+     * A whole-cm box size (UPS rounds each side up to a whole cm) whose volumetric weight,
+     * rounded up to 0.5 kg, is exactly $target — the smallest change from the real size.
+     * One side growing 1 cm can overshoot the 0.5 kg window on a big box, so sides may also
+     * shrink a little to land in it. This only shapes the quote request; the booking keeps the
+     * real size.
      *
      * @return array{length: int, width: int, height: int}|null
      */
@@ -88,12 +91,16 @@ final class WholeKgBilledWeight
     {
         [$l, $w, $h] = [(int) ceil((float) $row['length']), (int) ceil((float) $row['width']), (int) ceil((float) $row['height'])];
         $best = null;
-        foreach (range(0, 5) as $dl) {
-            foreach (range(0, 5) as $dw) {
-                foreach (range(0, 5) as $dh) {
+        foreach (range(-5, 10) as $dl) {
+            foreach (range(-5, 10) as $dw) {
+                foreach (range(-5, 10) as $dh) {
+                    if (min($l + $dl, $w + $dw, $h + $dh) < 1) {
+                        continue;
+                    }
                     $volume = ($l + $dl) * ($w + $dw) * ($h + $dh);
-                    if (ceil(round($volume / self::VOLUMETRIC_DIVISOR * 2, 6)) / 2 === $target && ($best === null || $volume < $best[0])) {
-                        $best = [$volume, ['length' => $l + $dl, 'width' => $w + $dw, 'height' => $h + $dh]];
+                    $rank = [abs($dl) + abs($dw) + abs($dh), $volume];
+                    if (ceil(round($volume / self::VOLUMETRIC_DIVISOR * 2, 6)) / 2 === $target && ($best === null || $rank < $best[0])) {
+                        $best = [$rank, ['length' => $l + $dl, 'width' => $w + $dw, 'height' => $h + $dh]];
                     }
                 }
             }

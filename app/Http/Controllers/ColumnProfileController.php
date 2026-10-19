@@ -35,7 +35,7 @@ class ColumnProfileController extends Controller
 
         return response()->json([
             'can_manage' => $canManage,
-            'profiles' => $canManage ? $profiles : $profiles->map->only(['id', 'name', 'columns', 'group_of']),
+            'profiles' => $canManage ? $profiles : $profiles->map->only(['id', 'name', 'columns', 'group_of', 'headers']),
             // Only needed by the profile editor's "ใช้ได้กับ Role" picker.
             'roles' => $canManage ? Role::orderBy('id')->get(['id', 'name']) : [],
         ]);
@@ -68,6 +68,9 @@ class ColumnProfileController extends Controller
             'columns' => [$profile ? 'sometimes' : 'required', 'array', 'min:1'],
             'columns.*' => ['string', 'max:100'],
             'group_of' => ['nullable', 'array'],
+            // Custom header names (column id / group id => name).
+            'headers' => ['nullable', 'array'],
+            'headers.*' => ['nullable', 'string', 'max:60'],
             'role_ids' => ['nullable', 'array'],
             'role_ids.*' => ['integer', 'exists:roles,id'],
             'sort_order' => ['nullable', 'integer', 'min:0'],
@@ -78,6 +81,9 @@ class ColumnProfileController extends Controller
         }
         if (array_key_exists('group_of', $data) || ! $profile) {
             $data['group_of'] = $data['group_of'] ?? [];
+        }
+        if (array_key_exists('headers', $data) || ! $profile) {
+            $data['headers'] = array_filter(array_map(fn ($h) => trim((string) $h), $data['headers'] ?? []), fn ($h) => $h !== '');
         }
         if (array_key_exists('role_ids', $data) || ! $profile) {
             $data['role_ids'] = array_values(array_unique(array_map('intval', $data['role_ids'] ?? [])));

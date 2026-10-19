@@ -15,7 +15,7 @@ class ActionPermissionSplitTest extends TestCase
 
     private function as(array $permissions): void
     {
-        $role = Role::create(['key' => 'r'.random_int(1, 99999), 'name' => 'R', 'permissions' => $permissions, 'field_access' => [], 'data_scopes' => ['shipment' => 'all']]);
+        $role = Role::create(['key' => 'r'.random_int(1, 99999), 'name' => 'R', 'level' => 50, 'permissions' => $permissions, 'field_access' => [], 'data_scopes' => ['shipment' => 'all']]);
         $user = User::factory()->create();
         $user->roles()->sync([$role->id]);
         Sanctum::actingAs($user);

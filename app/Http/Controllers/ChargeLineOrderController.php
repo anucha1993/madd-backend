@@ -29,9 +29,11 @@ class ChargeLineOrderController extends Controller
             'lines.*.code' => ['required', 'string', 'max:50', 'distinct'],
             'lines.*.pin' => ['nullable', 'in:top,bottom'],
         ]);
-        $all = self::stored();
-        $all[$data['carrier']] = array_map(fn ($l) => ['code' => (string) $l['code'], 'pin' => $l['pin'] ?? null], $data['lines']);
-        IntegrationSetting::set(self::KEY, json_encode($all));
+        $all = IntegrationSetting::mutateJson(self::KEY, function (array $all) use ($data) {
+            $all[$data['carrier']] = array_map(fn ($l) => ['code' => (string) $l['code'], 'pin' => $l['pin'] ?? null], $data['lines']);
+
+            return $all;
+        }) + ['UPS' => [], 'DHL' => []];
 
         return response()->json($all);
     }

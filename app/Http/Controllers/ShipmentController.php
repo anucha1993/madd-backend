@@ -7,6 +7,7 @@ use App\Models\AddonItem;
 use App\Models\AgentAccount;
 use App\Models\Branch;
 use App\Models\BranchCarrierAccount;
+use App\Models\Country;
 use App\Models\Shipment;
 use App\Models\Supply;
 use App\Models\SystemAlert;
@@ -138,6 +139,10 @@ class ShipmentController extends Controller
         if ($carrier = $request->query('carrier')) {
             $query->where('carrier', $carrier);
         }
+        // Exact shipments (the Issue Receipt page loading the ones picked on My Shipments).
+        if ($ids = $request->query('ids')) {
+            $query->whereIn('id', array_filter(array_map('intval', explode(',', (string) $ids))));
+        }
         if ($status = $request->query('status')) {
             $query->where('status', $status);
         }
@@ -172,7 +177,20 @@ class ShipmentController extends Controller
             $query->where('status', 'booked')->whereDoesntHave('receipts');
         }
 
-        return response()->json($query->paginate(20));
+        $page = $query->paginate(20);
+        // "Zone" column — the zone the carrier quoted (UPS returns it), else the destination's
+        // UPS / DHL zone from /config/countries (DHL quotes carry none).
+        $countries = Country::whereIn('iso2', $page->getCollection()->map(fn ($s) => strtoupper((string) ($s->destination['country'] ?? '')))->filter()->unique())
+            ->get(['iso2', 'ups_zone', 'dhl_zone'])->keyBy('iso2');
+        $page->getCollection()->each(function (Shipment $s) use ($countries) {
+            $quoted = $s->rate_quote['zone'] ?? null;
+            $country = $countries->get(strtoupper((string) ($s->destination['country'] ?? '')));
+            $fromCountry = $country?->{strtolower((string) $s->carrier).'_zone'};
+            $zone = $quoted !== null && $quoted !== '' ? $quoted : $fromCountry;
+            $s->setAttribute('zone', $zone !== null && $zone !== '' ? (string) $zone : null);
+        });
+
+        return response()->json($page);
     }
 
     /**
