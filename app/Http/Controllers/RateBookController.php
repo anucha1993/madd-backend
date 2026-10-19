@@ -70,6 +70,11 @@ class RateBookController extends Controller
             'carriers.*.extra_services.*.bands.*.*.max' => ['nullable', 'numeric', 'min:0'],
             'carriers.*.extra_services.*.bands.*.*.step' => ['nullable', 'numeric', 'min:0.1'],
             'carriers.*.extra_services.*.bands.*.*.account_id' => ['nullable', 'integer', 'exists:agent_accounts,id'],
+            // Its sub-columns: under which main column, priced to which column's destination.
+            'carriers.*.extra_services.*.columns' => ['nullable', 'array', 'max:30'],
+            'carriers.*.extra_services.*.columns.*.under' => ['required', 'string', 'max:20'],
+            'carriers.*.extra_services.*.columns.*.source' => ['required', 'string', 'max:20'],
+            'carriers.*.extra_services.*.columns.*.label' => ['nullable', 'string', 'max:30'],
             'carriers.*.account_rules' => ['present', 'array'],
             'carriers.*.account_rules.*.zone' => ['required', 'string', 'max:20'],
             'carriers.*.account_rules.*.min_weight' => ['required', 'numeric', 'min:0'],
@@ -183,7 +188,11 @@ class RateBookController extends Controller
             'vat_percent' => $rateBookRun->settings['vat_percent'] ?? 7,
             // The services this run priced (main first) — rows belong to one by their service_code.
             'services' => collect(RateBookSettings::services($rateBookRun->settings ?? [], $carrier))
-                ->map(fn ($s) => ['key' => $s['key'], 'label' => $s['label'], 'main' => $s['main'], 'codes' => array_values(array_unique($s['codes']))])
+                ->map(fn ($s) => [
+                    'key' => $s['key'], 'label' => $s['label'], 'main' => $s['main'], 'codes' => array_values(array_unique($s['codes'])),
+                    // Where an extra service's prices sit in the main table (sub-columns).
+                    'columns' => $s['main'] ? [] : RateBookSettings::subColumns($s, RateBookSettings::columns($rateBookRun->settings ?? [], $carrier)),
+                ])
                 ->filter(fn ($s) => $s['main'] || $rows->contains(fn ($r) => in_array($r->service_code, $s['codes'], true)))
                 ->values(),
             // Price columns in rate-card order (zones + extras like JP / AU / USA PR), only those this run priced.

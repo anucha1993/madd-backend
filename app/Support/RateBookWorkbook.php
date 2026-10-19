@@ -95,8 +95,8 @@ class RateBookWorkbook
         $spreadsheet->getDefaultStyle()->getFont()->setName('Calibri')->setSize(10);
 
         // Rate cards first (what gets sent out): SAVE / DOC (UPS), SELLING / DOC (DHL) — an extra
-        // service (e.g. "Eco" = UPS Worldwide Expedited) is a further section INSIDE those sheets,
-        // as in the sample's "ALL" sheet, never a tab of its own. Then the calc sheets per column,
+        // service (e.g. "Eco" = UPS Worldwide Expedited) goes INSIDE those sheets (UPS SAVE: its own
+        // sub-columns next to JP · 5 · 7 · 8 · 9, as on the sample's SAVE), never a tab of its own. Then the calc sheets per column,
         // the main service's ("1", "2" …) followed by each extra service's ("ECO 1" …), like the
         // sample's XPD sheets.
         $services = RateBookSettings::services($run->settings ?? [], $carrier);
@@ -108,7 +108,10 @@ class RateBookWorkbook
         $mainRows = $byService[$main['key']] ?? collect();
         $extras = collect($services)->where('main', false)
             ->filter(fn ($s) => $byService[$s['key']]->isNotEmpty())
-            ->map(fn ($s) => ['label' => $s['label'], 'name' => mb_strtoupper(mb_substr($s['label'], 0, 20)), 'rows' => $byService[$s['key']]])
+            ->map(fn ($s) => [
+                'label' => $s['label'], 'name' => mb_strtoupper(mb_substr($s['label'], 0, 20)), 'rows' => $byService[$s['key']],
+                'sub' => RateBookSettings::subColumns($s, $columns),
+            ])
             ->values()->all();
         $year = $when->format('Y');
         if ($carrier === 'UPS') {
@@ -121,6 +124,10 @@ class RateBookWorkbook
         foreach ([['name' => null, 'rows' => $mainRows], ...$extras] as $service) {
             foreach ($columns as $column) {
                 $zoneRows = $service['rows']->where('zone', $column['key']);
+                // An extra service only has sheets for the columns it's priced for (ECO JP, ECO 7 …).
+                if ($service['name'] !== null && $zoneRows->isEmpty()) {
+                    continue;
+                }
                 if ($carrier === 'UPS') {
                     self::upsZone($spreadsheet->createSheet(), $column, $zoneRows, $note, $service['name']);
                 } else {

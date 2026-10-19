@@ -175,7 +175,8 @@ class RateBookSettings
                 'service_codes' => array_merge($default['service_codes'], array_filter($saved['service_codes'] ?? [])),
                 // The main service's name on the rate table (e.g. UPS 65 = "Saver").
                 'service_label' => (string) (($saved['service_label'] ?? '') !== '' ? $saved['service_label'] : $default['service_label']),
-                // More services priced in the same book, each with its own weight bands (e.g. UPS 08 "Eco").
+                // More services priced in the same book, each with its own weight bands (e.g. UPS 08 "Eco")
+                // and the columns it's priced for — shown as sub-columns of the main table.
                 'extra_services' => array_values(array_map(fn ($s) => [
                     'code' => strtoupper(trim((string) ($s['code'] ?? ''))),
                     'label' => trim((string) ($s['label'] ?? '')),
@@ -183,6 +184,7 @@ class RateBookSettings
                         'document' => array_values($s['bands']['document'] ?? []),
                         'box' => array_values($s['bands']['box'] ?? []),
                     ],
+                    'columns' => self::serviceColumns($s['columns'] ?? null, $carrier, (string) ($s['code'] ?? '')),
                 ], $saved['extra_services'] ?? $default['extra_services'])),
                 'bands' => [
                     'document' => $saved['bands']['document'] ?? $default['bands']['document'],
@@ -227,8 +229,20 @@ class RateBookSettings
                     'enabled' => true,
                     'service_codes' => ['document' => '65', 'box' => '65'],
                     'service_label' => 'Saver',
-                    // Worldwide Expedited, shown as "Eco" — boxes only (UPS has no Expedited for documents).
-                    'extra_services' => [['code' => '08', 'label' => 'Eco', 'bands' => ['document' => [], 'box' => $upsBox]]],
+                    // Worldwide Expedited, shown as "Eco" — boxes only (UPS has no Expedited for documents),
+                    // from 25 kg, in its own sub-columns next to JP · 5 (US/CA) · 7 · 8 · 9, like the
+                    // UPS SAMPLE SAVE sheet.
+                    'extra_services' => [[
+                        'code' => '08', 'label' => 'Eco',
+                        'bands' => ['document' => [], 'box' => [
+                            $band(24.01, 44, null, $ups),
+                            $band(44.01, 70, null, $ups),
+                            $band(70.01, 99, null, $ups),
+                            $band(99.01, 299, null, $ups),
+                            $band(299.01, null, null, $ups),
+                        ]],
+                        'columns' => self::UPS_ECO_COLUMNS,
+                    ]],
                     'account_rules' => [],
                     // Destinations priced apart from their zone in the rate file (SAVE: 1 2 JP AU 3 4 5 USA PR 6 …).
                     'extra_columns' => [
@@ -270,7 +284,7 @@ class RateBookSettings
      * Every service a carrier's book prices: the main one (its own code per document / box) first,
      * then the extra services — each with its label, codes and weight bands.
      *
-     * @return list<array{key: string, label: string, main: bool, codes: array{document: string, box: string}, bands: array}>
+     * @return list<array{key: string, label: string, main: bool, codes: array{document: string, box: string}, bands: array, columns: array}>
      */
     public static function services(array $settings, string $carrier): array
     {
@@ -281,6 +295,7 @@ class RateBookSettings
             'main' => true,
             'codes' => ['document' => (string) ($c['service_codes']['document'] ?? ''), 'box' => (string) ($c['service_codes']['box'] ?? '')],
             'bands' => $c['bands'] ?? ['document' => [], 'box' => []],
+            'columns' => [],
         ]];
         foreach ($c['extra_services'] ?? [] as $i => $s) {
             if (($s['code'] ?? '') === '') {
@@ -292,6 +307,8 @@ class RateBookSettings
                 'main' => false,
                 'codes' => ['document' => $s['code'], 'box' => $s['code']],
                 'bands' => $s['bands'] ?? ['document' => [], 'box' => []],
+                // [] = priced for every column.
+                'columns' => $s['columns'] ?? [],
             ];
         }
 
@@ -308,6 +325,54 @@ class RateBookSettings
         }
 
         return $services[0];
+    }
+
+    /**
+     * Eco's columns in the UPS SAMPLE SAVE sheet: each sits under a main column (`under`) and is
+     * priced to the destination of `source` (Eco/US CA under zone 5 is priced to the US).
+     */
+    public const UPS_ECO_COLUMNS = [
+        ['under' => 'JP', 'source' => 'JP', 'label' => 'Eco JP'],
+        ['under' => '5', 'source' => 'USA PR', 'label' => 'Eco/US CA'],
+        ['under' => '7', 'source' => '7', 'label' => 'Eco'],
+        ['under' => '8', 'source' => '8', 'label' => 'Eco'],
+        ['under' => '9', 'source' => '9', 'label' => 'Eco'],
+    ];
+
+    /**
+     * An extra service's columns: list of under / source / label. Never saved → UPS Expedited
+     * ("08") gets the sample's; anything else every column ([] = all, each under itself).
+     */
+    private static function serviceColumns(?array $columns, string $carrier, string $code): array
+    {
+        if ($columns === null) {
+            return $carrier === 'UPS' && strtoupper(trim($code)) === '08' ? self::UPS_ECO_COLUMNS : [];
+        }
+
+        return array_values(array_filter(array_map(fn ($c) => [
+            'under' => trim((string) ($c['under'] ?? '')),
+            'source' => trim((string) ($c['source'] ?? ($c['under'] ?? ''))),
+            'label' => trim((string) ($c['label'] ?? '')),
+        ], $columns), fn ($c) => $c['under'] !== '' && $c['source'] !== ''));
+    }
+
+    /**
+     * An extra service's sub-columns in the main table: its own list, or (none set) one under
+     * every column, priced to that column.
+     *
+     * @return list<array{under: string, source: string, label: string}>
+     */
+    public static function subColumns(array $service, array $columns): array
+    {
+        $keys = array_column($columns, 'key');
+        $list = ! empty($service['columns'])
+            ? $service['columns']
+            : array_map(fn ($k) => ['under' => $k, 'source' => $k, 'label' => ''], $keys);
+
+        return array_values(array_map(
+            fn ($c) => ['under' => (string) $c['under'], 'source' => (string) $c['source'], 'label' => ($c['label'] ?? '') !== '' ? $c['label'] : $service['label']],
+            array_filter($list, fn ($c) => in_array((string) $c['under'], $keys, true) && in_array((string) $c['source'], $keys, true)),
+        ));
     }
 
     private static function extraColumn(string $label, string $iso2, string $city, string $postcode, string $state, string $after): array

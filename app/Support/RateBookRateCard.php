@@ -20,9 +20,10 @@ use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
  *  DHL "SELLING" — Shipment Weight(Kg) × Zone 1 … Zone 9 (+ AU NZ), shaded every other column.
  *  DHL "DOC"  — "DHL - DOCUMENT RATE": documents by zone, then the COUNTRY list.
  *
- * Extra services (e.g. UPS Worldwide Expedited, "Eco") are not tabs of their own: each one is
- * added as a further section under the main service on the same sheet — the way the sample's
- * "ALL" sheet lists Expedited below Saver. $extras = list of ['label' => 'Eco', 'rows' => …].
+ * Extra services (e.g. UPS Worldwide Expedited, "Eco") are not tabs of their own. On UPS SAVE they
+ * are sub-columns of the same table, next to the columns they're priced for (JP | Eco JP,
+ * 5 | Eco/US CA, 7 | Eco …) exactly like the sample's SAVE sheet; elsewhere a further section on the
+ * same sheet. $extras = list of ['label' => 'Eco', 'rows' => …, 'sub' => RateBookSettings::subColumns()].
  */
 class RateBookRateCard
 {
@@ -67,7 +68,40 @@ class RateBookRateCard
     public static function upsSave(Worksheet $sheet, Collection $rows, array $columns, string $note, string $title = 'SAVE', array $extras = []): void
     {
         $sheet->setTitle(mb_substr($title, 0, 31));
-        $lastCol = Coordinate::stringFromColumnIndex(1 + count($columns));
+        $box = $rows->where('package_type', 'box');
+        $lines = self::lines($box);
+
+        // Physical layout: every main column, followed by the extra services' sub-columns that sit
+        // under it (e.g. JP | Eco JP, 5 | Eco/US CA, 7 | Eco …) — one table, as on the sample's SAVE.
+        $groups = [];
+        $c = 2;
+        foreach ($columns as $column) {
+            $subs = [];
+            foreach ($extras as $extra) {
+                $extraLines = [];
+                foreach (self::lines($extra['rows']->where('package_type', 'box')) as $l) {
+                    $extraLines[($l['rate'] ? 'r:' : 'k:').$l['label']] = $l;
+                }
+                foreach ($extra['sub'] ?? [] as $sub) {
+                    if ($sub['under'] === $column['key']) {
+                        $subs[] = ['col' => 0, 'label' => $sub['label'], 'source' => $sub['source'], 'rows' => $extra['rows']->where('package_type', 'box'), 'lines' => $extraLines];
+                    }
+                }
+            }
+            $group = ['column' => $column, 'col' => $c, 'subs' => []];
+            foreach ($subs as $sub) {
+                $sub['col'] = ++$c;
+                $group['subs'][] = $sub;
+            }
+            $group['last'] = $c;
+            $groups[] = $group;
+            $c++;
+        }
+        $lastIndex = $c - 1;
+        $lastCol = Coordinate::stringFromColumnIndex($lastIndex);
+        $letter = fn (int $i) => Coordinate::stringFromColumnIndex($i);
+        $subLine = fn (array $sub, array $line) => $sub['lines'][($line['rate'] ? 'r:' : 'k:').$line['label']] ?? null;
+
         // The rate file's pages.
         $pages = [
             ['title' => 'UPS Regular Express Saver', 'test' => fn ($l) => ! $l['rate'] && $l['kg'] <= 10],
@@ -76,87 +110,115 @@ class RateBookRateCard
             ['title' => 'Saver', 'test' => fn ($l) => ! $l['rate'] && $l['kg'] > 45],
             ['title' => 'Saver', 'test' => fn ($l) => $l['rate']],
         ];
-        $sections = [['rows' => $rows, 'pages' => $pages]];
-        // Each extra service below: its step weights, then its per-kg bands, under its own name.
-        foreach ($extras as $extra) {
-            $sections[] = ['rows' => $extra['rows'], 'pages' => [
-                ['title' => $extra['label'], 'test' => fn ($l) => ! $l['rate']],
-                ['title' => $extra['label'], 'test' => fn ($l) => $l['rate']],
-            ]];
-        }
 
         $r = 2;
-        foreach ($sections as $section) {
-            $box = $section['rows']->where('package_type', 'box');
-            $lines = self::lines($box);
-            foreach ($section['pages'] as $page) {
-                $pageLines = array_values(array_filter($lines, $page['test']));
-                if (! $pageLines) {
-                    continue;
-                }
-                // Title bar: name centred, carrier at the right edge.
-                if ($page['title'] && count($columns) >= 2) {
-                    $sheet->setCellValue("B{$r}", $page['title']);
-                    $sheet->mergeCells('B'.$r.':'.Coordinate::stringFromColumnIndex(count($columns))."{$r}");
-                    $sheet->getStyle("B{$r}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-                } elseif ($page['title']) {
-                    $sheet->setCellValue("A{$r}", $page['title']); // one column: no room between
-                }
-                $sheet->setCellValue("{$lastCol}{$r}", 'UPS');
-                $sheet->getStyle("A{$r}:{$lastCol}{$r}")->getFont()->setBold(true)->setSize(18);
-                $r++;
-
-                self::upsHeader($sheet, $r, $columns, $lastCol);
-                $r += 2;
-                $start = $r;
-                foreach ($pageLines as $line) {
-                    if (! $line['rate'] && $line['kg'] == 31) {
-                        $sheet->setCellValue("A{$r}", '**for each box weighing 31 kgs and up , 1,200 THB is applied for  AHC ( Additional Handling Charge ) ');
-                        $sheet->getStyle("A{$r}")->getFont()->setBold(true);
-                        $r++;
-                    }
-                    $sheet->setCellValue("A{$r}", $line['label']);
-                    self::priceCells($sheet, $r, 2, $columns, $box, $line);
-                    if (! $line['rate'] && $line['kg'] == 5) {
-                        $sheet->getStyle("A{$r}:{$lastCol}{$r}")->getBorders()->getBottom()->setBorderStyle(Border::BORDER_MEDIUM);
-                    }
-                    $r++;
-                }
-                self::grid($sheet, "A{$start}:{$lastCol}".($r - 1));
-                $sheet->getStyle("A{$start}:A".($r - 1))->getNumberFormat()->setFormatCode('0.0');
-                $sheet->getStyle("B{$start}:{$lastCol}".($r - 1))->getNumberFormat()->setFormatCode('#,##0');
-                self::shadeExtras($sheet, $start, $r - 1, 2, $columns);
-                $sheet->getStyle("A".($r - 1).":{$lastCol}".($r - 1))->getBorders()->getBottom()->setBorderStyle(Border::BORDER_MEDIUM);
-                if (! empty($page['after'])) {
-                    $r++;
-                    $sheet->setCellValue("A{$r}", $page['after']);
-                    $sheet->getStyle("A{$r}")->getFont()->setBold(true);
-                }
-                $r += 3;
+        foreach ($pages as $page) {
+            $pageLines = array_values(array_filter($lines, $page['test']));
+            if (! $pageLines) {
+                continue;
             }
+            // Sub-columns only on pages where the extra service has prices (Eco: from 25 kg);
+            // elsewhere each main price spans its whole group, like the sample.
+            $split = collect($groups)->contains(fn ($g) => collect($g['subs'])->contains(fn ($s) => collect($pageLines)->contains(fn ($l) => $subLine($s, $l) !== null)));
+
+            // Title bar: name centred, carrier at the right edge.
+            if ($page['title'] && $lastIndex >= 3) {
+                $sheet->setCellValue("B{$r}", $page['title']);
+                $sheet->mergeCells("B{$r}:".$letter($lastIndex - 1).$r);
+                $sheet->getStyle("B{$r}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+            } elseif ($page['title']) {
+                $sheet->setCellValue("A{$r}", $page['title']); // too narrow to sit between
+            }
+            $sheet->setCellValue("{$lastCol}{$r}", 'UPS');
+            $sheet->getStyle("A{$r}:{$lastCol}{$r}")->getFont()->setBold(true)->setSize(18);
+            $r++;
+
+            self::upsHeader($sheet, $r, $groups, $lastCol, $split);
+            $r += 2;
+            $start = $r;
+            foreach ($pageLines as $line) {
+                if (! $line['rate'] && $line['kg'] == 31) {
+                    $sheet->setCellValue("A{$r}", '**for each box weighing 31 kgs and up , 1,200 THB is applied for  AHC ( Additional Handling Charge ) ');
+                    $sheet->getStyle("A{$r}")->getFont()->setBold(true);
+                    $r++;
+                }
+                $sheet->setCellValue("A{$r}", $line['label']);
+                foreach ($groups as $g) {
+                    self::priceCell($sheet, $letter($g['col']).$r, $box, $line, $g['column']['key']);
+                    if (! $split) {
+                        if ($g['last'] > $g['col']) {
+                            $sheet->mergeCells($letter($g['col']).$r.':'.$letter($g['last']).$r);
+                        }
+
+                        continue;
+                    }
+                    foreach ($g['subs'] as $sub) {
+                        $extraLine = $subLine($sub, $line);
+                        if ($extraLine !== null) {
+                            self::priceCell($sheet, $letter($sub['col']).$r, $sub['rows'], $extraLine, $sub['source']);
+                        }
+                    }
+                }
+                if (! $line['rate'] && $line['kg'] == 5) {
+                    $sheet->getStyle("A{$r}:{$lastCol}{$r}")->getBorders()->getBottom()->setBorderStyle(Border::BORDER_MEDIUM);
+                }
+                $r++;
+            }
+            self::grid($sheet, "A{$start}:{$lastCol}".($r - 1));
+            $sheet->getStyle("A{$start}:A".($r - 1))->getNumberFormat()->setFormatCode('0.0');
+            $sheet->getStyle("B{$start}:{$lastCol}".($r - 1))->getNumberFormat()->setFormatCode('#,##0');
+            foreach ($groups as $g) {
+                if ($g['column']['extra']) {
+                    self::fill($sheet, $letter($g['col']).$start.':'.$letter($g['col']).($r - 1), self::GREY);
+                }
+            }
+            $sheet->getStyle("A".($r - 1).":{$lastCol}".($r - 1))->getBorders()->getBottom()->setBorderStyle(Border::BORDER_MEDIUM);
+            if (! empty($page['after'])) {
+                $r++;
+                $sheet->setCellValue("A{$r}", $page['after']);
+                $sheet->getStyle("A{$r}")->getFont()->setBold(true);
+            }
+            $r += 3;
         }
         $sheet->setCellValue("A{$r}", '*800 THB or 30 THB / Kg may be charged for Remoted Area Depending on Destination Postal code or city');
         $sheet->setCellValue('A'.($r + 1), $note);
         $sheet->getStyle('A'.($r + 1))->getFont()->setSize(8)->getColor()->setRGB('808080');
 
         $sheet->getColumnDimension('A')->setWidth(10);
-        for ($c = 2; $c <= 1 + count($columns); $c++) {
-            $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($c))->setWidth(9.5);
+        for ($c = 2; $c <= $lastIndex; $c++) {
+            $sheet->getColumnDimension($letter($c))->setWidth(9.5);
         }
     }
 
-    private static function upsHeader(Worksheet $sheet, int $r, array $columns, string $lastCol): void
+    /**
+     * Two header rows. A group with sub-columns on a split page: its name across the group, then
+     * "Saver" | "Eco JP" … under it; otherwise each name spans both rows (and its whole group).
+     */
+    private static function upsHeader(Worksheet $sheet, int $r, array $groups, string $lastCol, bool $split): void
     {
+        $letter = fn (int $i) => Coordinate::stringFromColumnIndex($i);
         $sheet->setCellValue("A{$r}", "Weight /\n Zone");
         $sheet->mergeCells("A{$r}:A".($r + 1));
-        foreach ($columns as $i => $column) {
-            $col = Coordinate::stringFromColumnIndex(2 + $i);
-            $sheet->setCellValue("{$col}{$r}", $column['extra'] ? str_replace(' ', "\n", $column['label']) : (int) $column['key']);
-            $sheet->mergeCells("{$col}{$r}:{$col}".($r + 1));
+        foreach ($groups as $g) {
+            $column = $g['column'];
+            $first = $letter($g['col']);
+            $last = $letter($g['last']);
+            $sheet->setCellValue("{$first}{$r}", $column['extra'] ? str_replace(' ', "\n", $column['label']) : (int) $column['key']);
+            if ($split && $g['subs']) {
+                $sheet->mergeCells("{$first}{$r}:{$last}{$r}");
+                $sheet->setCellValue($first.($r + 1), 'Saver');
+                foreach ($g['subs'] as $sub) {
+                    $sheet->setCellValue($letter($sub['col']).($r + 1), $sub['label']);
+                }
+                $sheet->getStyle("{$first}".($r + 1).":{$last}".($r + 1))->getFont()->setSize(9);
+            } else {
+                $sheet->mergeCells("{$first}{$r}:{$last}".($r + 1));
+            }
         }
         $range = "A{$r}:{$lastCol}".($r + 1);
         $style = $sheet->getStyle($range);
-        $style->getFont()->setBold(true)->setSize(14);
+        $style->getFont()->setBold(true);
+        $sheet->getStyle("A{$r}:{$lastCol}{$r}")->getFont()->setSize(14);
         $style->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER)->setVertical(Alignment::VERTICAL_CENTER)->setWrapText(true);
         $sheet->getStyle("A{$r}")->getFont()->setSize(9);
         self::fill($sheet, $range, self::GREY);
@@ -330,21 +392,25 @@ class RateBookRateCard
     /** SELLING (VAT incl.) of one line for every column; "ERROR" where the carrier gave no rate. */
     private static function priceCells(Worksheet $sheet, int $r, int $firstCol, array $columns, Collection $typeRows, array $line): void
     {
-        $byColumn = $typeRows->filter(fn ($row) => $row->band_label.'|'.$row->weight === $line['source'])->keyBy('zone');
         foreach ($columns as $i => $column) {
-            $row = $byColumn->get($column['key']);
-            $cell = Coordinate::stringFromColumnIndex($firstCol + $i).$r;
-            if ($row === null) {
-                continue;
-            }
-            if ($row->error) {
-                $sheet->setCellValue($cell, 'ERROR');
-                $sheet->getComment($cell)->getText()->createText($row->error);
-
-                continue;
-            }
-            $sheet->setCellValue($cell, round((float) $row->sell * $line['mult'], 2));
+            self::priceCell($sheet, Coordinate::stringFromColumnIndex($firstCol + $i).$r, $typeRows, $line, $column['key']);
         }
+    }
+
+    /** One column's SELLING for a line; "ERROR" (reason in a comment) where the carrier gave no rate. */
+    private static function priceCell(Worksheet $sheet, string $cell, Collection $typeRows, array $line, string $columnKey): void
+    {
+        $row = $typeRows->first(fn ($row) => $row->band_label.'|'.$row->weight === $line['source'] && (string) $row->zone === $columnKey);
+        if ($row === null) {
+            return;
+        }
+        if ($row->error) {
+            $sheet->setCellValue($cell, 'ERROR');
+            $sheet->getComment($cell)->getText()->createText($row->error);
+
+            return;
+        }
+        $sheet->setCellValue($cell, round((float) $row->sell * $line['mult'], 2));
     }
 
     /** Countries of each zone under the table, like the rate files' COUNTRY block. */

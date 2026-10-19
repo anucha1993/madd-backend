@@ -81,6 +81,8 @@ class RateBookService
                             'is_per_kg' => $step === null,
                             'account_id' => isset($band['account_id']) ? (int) $band['account_id'] : null,
                             'service_code' => (string) $service['codes'][$packageType],
+                            // An extra service is priced only for its own columns (by `source`), [] = all.
+                            'columns' => array_values(array_unique(array_column($service['columns'] ?? [], 'source'))),
                         ];
                     }
                 }
@@ -132,14 +134,18 @@ class RateBookService
         foreach (RateBookSettings::CARRIERS as $carrier) {
             $columnsByCarrier[$carrier] = RateBookSettings::columns($settings, $carrier);
         }
-        $total = collect($points)->sum(fn ($p) => count($columnsByCarrier[$p['carrier']]));
+        $columnsOf = fn (array $point) => array_values(array_filter(
+            $columnsByCarrier[$point['carrier']],
+            fn ($c) => empty($point['columns']) || in_array($c['key'], $point['columns'], true),
+        ));
+        $total = collect($points)->sum(fn ($p) => count($columnsOf($p)));
         $run->update(['total_points' => $total, 'started_at' => $run->started_at ?? now()]);
 
         $accounts = AgentAccount::with('agent')->get()->keyBy('id');
         $done = 0;
         $errors = 0;
         foreach ($points as $point) {
-            foreach ($columnsByCarrier[$point['carrier']] as $column) {
+            foreach ($columnsOf($point) as $column) {
                 $accountId = self::accountFor($settings['carriers'][$point['carrier']]['account_rules'] ?? [], $column['zone'], $point['weight'], $point['account_id']);
                 $row = $this->quotePoint($point, $column['key'], $column['address'], $accounts->get($accountId));
                 if ($row['error'] !== null && self::isTransient($row['error'])) {
