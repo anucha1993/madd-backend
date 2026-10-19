@@ -94,32 +94,37 @@ class RateBookWorkbook
         $spreadsheet->removeSheetByIndex(0);
         $spreadsheet->getDefaultStyle()->getFont()->setName('Calibri')->setSize(10);
 
-        // Rate cards first (what gets sent out), then one calc sheet per column, as in the rate files —
-        // for the main service (SAVE / DOC, SELLING / DOC), then each extra service under its own name
-        // (e.g. "ECO", calc sheets "ECO 1" …).
+        // Rate cards first (what gets sent out): SAVE / DOC (UPS), SELLING / DOC (DHL) — an extra
+        // service (e.g. "Eco" = UPS Worldwide Expedited) is a further section INSIDE those sheets,
+        // as in the sample's "ALL" sheet, never a tab of its own. Then the calc sheets per column,
+        // the main service's ("1", "2" …) followed by each extra service's ("ECO 1" …), like the
+        // sample's XPD sheets.
         $services = RateBookSettings::services($run->settings ?? [], $carrier);
+        $byService = [];
         foreach ($services as $service) {
-            $serviceRows = $rows->filter(fn ($r) => RateBookSettings::serviceOf($services, $r->service_code)['key'] === $service['key'])->values();
-            if (! $service['main'] && $serviceRows->isEmpty()) {
-                continue;
-            }
-            $name = $service['main'] ? null : mb_strtoupper(mb_substr($service['label'], 0, 20));
-            $hasDoc = $serviceRows->contains('package_type', 'document');
-            if ($carrier === 'UPS') {
-                RateBookRateCard::upsSave($spreadsheet->createSheet(), $serviceRows, $columns, $note, $name ?? 'SAVE');
-                if ($service['main'] || $hasDoc) {
-                    RateBookRateCard::upsDoc($spreadsheet->createSheet(), $serviceRows, $columns, $note, $when->format('Y'), $name ? "{$name} DOC" : 'DOC');
-                }
-                foreach ($columns as $column) {
-                    self::upsZone($spreadsheet->createSheet(), $column, $serviceRows->where('zone', $column['key']), $note, $name);
-                }
-            } else {
-                RateBookRateCard::dhlSelling($spreadsheet->createSheet(), $serviceRows, $columns, $note, $name ?? 'SELLING');
-                if ($service['main'] || $hasDoc) {
-                    RateBookRateCard::dhlDoc($spreadsheet->createSheet(), $serviceRows, $columns, $note, $when->format('Y'), $name ? "{$name} DOC" : 'DOC');
-                }
-                foreach ($columns as $column) {
-                    self::dhlZone($spreadsheet->createSheet(), $column, $serviceRows->where('zone', $column['key']), $note, $name);
+            $byService[$service['key']] = $rows->filter(fn ($r) => RateBookSettings::serviceOf($services, $r->service_code)['key'] === $service['key'])->values();
+        }
+        $main = collect($services)->firstWhere('main', true);
+        $mainRows = $byService[$main['key']] ?? collect();
+        $extras = collect($services)->where('main', false)
+            ->filter(fn ($s) => $byService[$s['key']]->isNotEmpty())
+            ->map(fn ($s) => ['label' => $s['label'], 'name' => mb_strtoupper(mb_substr($s['label'], 0, 20)), 'rows' => $byService[$s['key']]])
+            ->values()->all();
+        $year = $when->format('Y');
+        if ($carrier === 'UPS') {
+            RateBookRateCard::upsSave($spreadsheet->createSheet(), $mainRows, $columns, $note, 'SAVE', $extras);
+            RateBookRateCard::upsDoc($spreadsheet->createSheet(), $mainRows, $columns, $note, $year, 'DOC', $extras);
+        } else {
+            RateBookRateCard::dhlSelling($spreadsheet->createSheet(), $mainRows, $columns, $note, 'SELLING', $extras);
+            RateBookRateCard::dhlDoc($spreadsheet->createSheet(), $mainRows, $columns, $note, $year, 'DOC', $extras);
+        }
+        foreach ([['name' => null, 'rows' => $mainRows], ...$extras] as $service) {
+            foreach ($columns as $column) {
+                $zoneRows = $service['rows']->where('zone', $column['key']);
+                if ($carrier === 'UPS') {
+                    self::upsZone($spreadsheet->createSheet(), $column, $zoneRows, $note, $service['name']);
+                } else {
+                    self::dhlZone($spreadsheet->createSheet(), $column, $zoneRows, $note, $service['name']);
                 }
             }
         }

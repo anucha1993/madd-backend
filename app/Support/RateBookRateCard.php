@@ -19,6 +19,10 @@ use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
  *  UPS "DOC"  — "UPS-DOCUMENT": envelope + documents by zone, then the COUNTRY list.
  *  DHL "SELLING" — Shipment Weight(Kg) × Zone 1 … Zone 9 (+ AU NZ), shaded every other column.
  *  DHL "DOC"  — "DHL - DOCUMENT RATE": documents by zone, then the COUNTRY list.
+ *
+ * Extra services (e.g. UPS Worldwide Expedited, "Eco") are not tabs of their own: each one is
+ * added as a further section under the main service on the same sheet — the way the sample's
+ * "ALL" sheet lists Expedited below Saver. $extras = list of ['label' => 'Eco', 'rows' => …].
  */
 class RateBookRateCard
 {
@@ -60,12 +64,10 @@ class RateBookRateCard
 
     // ---- UPS SAVE ----------------------------------------------------------------------------
 
-    public static function upsSave(Worksheet $sheet, Collection $rows, array $columns, string $note, string $title = 'SAVE'): void
+    public static function upsSave(Worksheet $sheet, Collection $rows, array $columns, string $note, string $title = 'SAVE', array $extras = []): void
     {
         $sheet->setTitle(mb_substr($title, 0, 31));
-        $box = $rows->where('package_type', 'box');
         $lastCol = Coordinate::stringFromColumnIndex(1 + count($columns));
-        $lines = self::lines($box);
         // The rate file's pages.
         $pages = [
             ['title' => 'UPS Regular Express Saver', 'test' => fn ($l) => ! $l['rate'] && $l['kg'] <= 10],
@@ -74,50 +76,64 @@ class RateBookRateCard
             ['title' => 'Saver', 'test' => fn ($l) => ! $l['rate'] && $l['kg'] > 45],
             ['title' => 'Saver', 'test' => fn ($l) => $l['rate']],
         ];
+        $sections = [['rows' => $rows, 'pages' => $pages]];
+        // Each extra service below: its step weights, then its per-kg bands, under its own name.
+        foreach ($extras as $extra) {
+            $sections[] = ['rows' => $extra['rows'], 'pages' => [
+                ['title' => $extra['label'], 'test' => fn ($l) => ! $l['rate']],
+                ['title' => $extra['label'], 'test' => fn ($l) => $l['rate']],
+            ]];
+        }
 
         $r = 2;
-        foreach ($pages as $page) {
-            $pageLines = array_values(array_filter($lines, $page['test']));
-            if (! $pageLines) {
-                continue;
-            }
-            // Title bar: name centred, carrier at the right edge.
-            if ($page['title']) {
-                $sheet->setCellValue("B{$r}", $page['title']);
-                $sheet->mergeCells('B'.$r.':'.Coordinate::stringFromColumnIndex(count($columns))."{$r}");
-                $sheet->getStyle("B{$r}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-            }
-            $sheet->setCellValue("{$lastCol}{$r}", 'UPS');
-            $sheet->getStyle("A{$r}:{$lastCol}{$r}")->getFont()->setBold(true)->setSize(18);
-            $r++;
+        foreach ($sections as $section) {
+            $box = $section['rows']->where('package_type', 'box');
+            $lines = self::lines($box);
+            foreach ($section['pages'] as $page) {
+                $pageLines = array_values(array_filter($lines, $page['test']));
+                if (! $pageLines) {
+                    continue;
+                }
+                // Title bar: name centred, carrier at the right edge.
+                if ($page['title'] && count($columns) >= 2) {
+                    $sheet->setCellValue("B{$r}", $page['title']);
+                    $sheet->mergeCells('B'.$r.':'.Coordinate::stringFromColumnIndex(count($columns))."{$r}");
+                    $sheet->getStyle("B{$r}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+                } elseif ($page['title']) {
+                    $sheet->setCellValue("A{$r}", $page['title']); // one column: no room between
+                }
+                $sheet->setCellValue("{$lastCol}{$r}", 'UPS');
+                $sheet->getStyle("A{$r}:{$lastCol}{$r}")->getFont()->setBold(true)->setSize(18);
+                $r++;
 
-            self::upsHeader($sheet, $r, $columns, $lastCol);
-            $r += 2;
-            $start = $r;
-            foreach ($pageLines as $line) {
-                if (! $line['rate'] && $line['kg'] == 31) {
-                    $sheet->setCellValue("A{$r}", '**for each box weighing 31 kgs and up , 1,200 THB is applied for  AHC ( Additional Handling Charge ) ');
-                    $sheet->getStyle("A{$r}")->getFont()->setBold(true);
+                self::upsHeader($sheet, $r, $columns, $lastCol);
+                $r += 2;
+                $start = $r;
+                foreach ($pageLines as $line) {
+                    if (! $line['rate'] && $line['kg'] == 31) {
+                        $sheet->setCellValue("A{$r}", '**for each box weighing 31 kgs and up , 1,200 THB is applied for  AHC ( Additional Handling Charge ) ');
+                        $sheet->getStyle("A{$r}")->getFont()->setBold(true);
+                        $r++;
+                    }
+                    $sheet->setCellValue("A{$r}", $line['label']);
+                    self::priceCells($sheet, $r, 2, $columns, $box, $line);
+                    if (! $line['rate'] && $line['kg'] == 5) {
+                        $sheet->getStyle("A{$r}:{$lastCol}{$r}")->getBorders()->getBottom()->setBorderStyle(Border::BORDER_MEDIUM);
+                    }
                     $r++;
                 }
-                $sheet->setCellValue("A{$r}", $line['label']);
-                self::priceCells($sheet, $r, 2, $columns, $box, $line);
-                if (! $line['rate'] && $line['kg'] == 5) {
-                    $sheet->getStyle("A{$r}:{$lastCol}{$r}")->getBorders()->getBottom()->setBorderStyle(Border::BORDER_MEDIUM);
+                self::grid($sheet, "A{$start}:{$lastCol}".($r - 1));
+                $sheet->getStyle("A{$start}:A".($r - 1))->getNumberFormat()->setFormatCode('0.0');
+                $sheet->getStyle("B{$start}:{$lastCol}".($r - 1))->getNumberFormat()->setFormatCode('#,##0');
+                self::shadeExtras($sheet, $start, $r - 1, 2, $columns);
+                $sheet->getStyle("A".($r - 1).":{$lastCol}".($r - 1))->getBorders()->getBottom()->setBorderStyle(Border::BORDER_MEDIUM);
+                if (! empty($page['after'])) {
+                    $r++;
+                    $sheet->setCellValue("A{$r}", $page['after']);
+                    $sheet->getStyle("A{$r}")->getFont()->setBold(true);
                 }
-                $r++;
+                $r += 3;
             }
-            self::grid($sheet, "A{$start}:{$lastCol}".($r - 1));
-            $sheet->getStyle("A{$start}:A".($r - 1))->getNumberFormat()->setFormatCode('0.0');
-            $sheet->getStyle("B{$start}:{$lastCol}".($r - 1))->getNumberFormat()->setFormatCode('#,##0');
-            self::shadeExtras($sheet, $start, $r - 1, 2, $columns);
-            $sheet->getStyle("A".($r - 1).":{$lastCol}".($r - 1))->getBorders()->getBottom()->setBorderStyle(Border::BORDER_MEDIUM);
-            if (! empty($page['after'])) {
-                $r++;
-                $sheet->setCellValue("A{$r}", $page['after']);
-                $sheet->getStyle("A{$r}")->getFont()->setBold(true);
-            }
-            $r += 3;
         }
         $sheet->setCellValue("A{$r}", '*800 THB or 30 THB / Kg may be charged for Remoted Area Depending on Destination Postal code or city');
         $sheet->setCellValue('A'.($r + 1), $note);
@@ -149,7 +165,7 @@ class RateBookRateCard
 
     // ---- UPS DOC / DHL DOC ---------------------------------------------------------------------
 
-    public static function upsDoc(Worksheet $sheet, Collection $rows, array $columns, string $note, string $year, string $title = 'DOC'): void
+    public static function upsDoc(Worksheet $sheet, Collection $rows, array $columns, string $note, string $year, string $title = 'DOC', array $extras = []): void
     {
         $sheet->setTitle(mb_substr($title, 0, 31));
         $zones = array_values(array_filter($columns, fn ($c) => ! $c['extra']));
@@ -188,6 +204,7 @@ class RateBookRateCard
                 $r++;
             }
         }
+        $r = self::docSections($sheet, $r, $zones, $extras, 'UPS %s Documents', 2);
         self::grid($sheet, "A{$start}:{$lastCol}".($r - 1));
         $sheet->getStyle("B{$start}:{$lastCol}".($r - 1))->getNumberFormat()->setFormatCode('#,##0');
         $r = self::countryBlock($sheet, $r, $zones, 'UPS', false);
@@ -196,7 +213,7 @@ class RateBookRateCard
         self::widths($sheet, count($zones), 13);
     }
 
-    public static function dhlDoc(Worksheet $sheet, Collection $rows, array $columns, string $note, string $year, string $title = 'DOC'): void
+    public static function dhlDoc(Worksheet $sheet, Collection $rows, array $columns, string $note, string $year, string $title = 'DOC', array $extras = []): void
     {
         $sheet->setTitle(mb_substr($title, 0, 31));
         $doc = $rows->where('package_type', 'document');
@@ -214,6 +231,7 @@ class RateBookRateCard
             self::priceCells($sheet, $r, 2, $columns, $doc, $line);
             $r++;
         }
+        $r = self::docSections($sheet, $r, $columns, $extras, 'DHL %s', 2);
         self::grid($sheet, "A3:{$lastCol}".($r - 1));
         $sheet->getStyle("A3:A".($r - 1))->getNumberFormat()->setFormatCode('0.0');
         $sheet->getStyle("B3:{$lastCol}".($r - 1))->getNumberFormat()->setFormatCode('#,##0.00');
@@ -226,7 +244,7 @@ class RateBookRateCard
 
     // ---- DHL SELLING ---------------------------------------------------------------------------
 
-    public static function dhlSelling(Worksheet $sheet, Collection $rows, array $columns, string $note, string $title = 'SELLING'): void
+    public static function dhlSelling(Worksheet $sheet, Collection $rows, array $columns, string $note, string $title = 'SELLING', array $extras = []): void
     {
         $sheet->setTitle(mb_substr($title, 0, 31));
         $box = $rows->where('package_type', 'box');
@@ -234,15 +252,36 @@ class RateBookRateCard
         self::dhlHeader($sheet, 1, $columns, $lastCol, 'CCCCCC');
 
         $r = 2;
-        foreach (self::lines($box) as $line) {
-            $sheet->setCellValue("A{$r}", $line['rate'] ? $line['label'].' KG (ต่อ KG)' : $line['label']);
-            self::priceCells($sheet, $r, 2, $columns, $box, $line);
-            $r++;
+        $sections = [['label' => null, 'box' => $box]];
+        foreach ($extras as $extra) {
+            $sections[] = ['label' => $extra['label'], 'box' => $extra['rows']->where('package_type', 'box')];
         }
-        self::grid($sheet, "A2:{$lastCol}".($r - 1));
-        $sheet->getStyle("A2:A".($r - 1))->getNumberFormat()->setFormatCode('0.0');
-        $sheet->getStyle("B2:{$lastCol}".($r - 1))->getNumberFormat()->setFormatCode('#,##0.00');
-        self::shadeAlternate($sheet, 2, $r - 1, $columns);
+        foreach ($sections as $section) {
+            $sectionLines = self::lines($section['box']);
+            if (! $sectionLines) {
+                continue;
+            }
+            if ($section['label'] !== null) {
+                // An extra service under the main one: a gap, its name, then its own header row.
+                $r += 2;
+                $sheet->setCellValue("A{$r}", "DHL {$section['label']}");
+                $sheet->mergeCells("A{$r}:{$lastCol}{$r}");
+                $sheet->getStyle("A{$r}")->getFont()->setBold(true)->setSize(14);
+                $r++;
+                self::dhlHeader($sheet, $r, $columns, $lastCol, 'CCCCCC');
+                $r++;
+            }
+            $start = $r;
+            foreach ($sectionLines as $line) {
+                $sheet->setCellValue("A{$r}", $line['rate'] ? $line['label'].' KG (ต่อ KG)' : $line['label']);
+                self::priceCells($sheet, $r, 2, $columns, $section['box'], $line);
+                $r++;
+            }
+            self::grid($sheet, "A{$start}:{$lastCol}".($r - 1));
+            $sheet->getStyle("A{$start}:A".($r - 1))->getNumberFormat()->setFormatCode('0.0');
+            $sheet->getStyle("B{$start}:{$lastCol}".($r - 1))->getNumberFormat()->setFormatCode('#,##0.00');
+            self::shadeAlternate($sheet, $start, $r - 1, $columns);
+        }
         $sheet->setCellValue('A'.($r + 1), '*For each box weighing  26 Kgs and up, 1,200 THB is applied for overweight charge.');
         $sheet->getStyle('A'.($r + 1))->getFont()->setBold(true);
         $sheet->setCellValue('A'.($r + 2), $note);
@@ -263,6 +302,30 @@ class RateBookRateCard
     }
 
     // ---- shared --------------------------------------------------------------------------------
+
+    /** Extra services' documents under the main ones: a bold name row, then their lines. */
+    private static function docSections(Worksheet $sheet, int $r, array $columns, array $extras, string $heading, int $firstCol): int
+    {
+        $lastCol = Coordinate::stringFromColumnIndex($firstCol + count($columns) - 1);
+        foreach ($extras as $extra) {
+            $doc = $extra['rows']->where('package_type', 'document');
+            $lines = self::lines($doc);
+            if (! $lines) {
+                continue;
+            }
+            $sheet->setCellValue("A{$r}", sprintf($heading, $extra['label']));
+            $sheet->mergeCells("A{$r}:{$lastCol}{$r}");
+            $sheet->getStyle("A{$r}")->getFont()->setBold(true);
+            $r++;
+            foreach ($lines as $line) {
+                $sheet->setCellValue("A{$r}", $line['label']);
+                self::priceCells($sheet, $r, $firstCol, $columns, $doc, $line);
+                $r++;
+            }
+        }
+
+        return $r;
+    }
 
     /** SELLING (VAT incl.) of one line for every column; "ERROR" where the carrier gave no rate. */
     private static function priceCells(Worksheet $sheet, int $r, int $firstCol, array $columns, Collection $typeRows, array $line): void

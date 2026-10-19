@@ -225,4 +225,42 @@ class RateBookTest extends TestCase
             ->assertJsonPath('columns.0.country', 'Singapore');
         $this->getJson("/api/rate-book/runs/{$run->id}/rows?carrier=DHL")->assertOk()->assertJsonPath('rows.0.error', 'boom');
     }
+
+    public function test_eco_is_a_section_of_the_save_sheet_not_a_tab(): void
+    {
+        $run = RateBookRun::create(['status' => 'success', 'trigger' => 'manual', 'settings' => RateBookSettings::get(), 'started_at' => now(), 'finished_at' => now()]);
+        $row = fn ($code, $weight, $sell, $band = '0.10-5.00 kg', $perKg = false) => collect(['1', '2', '3'])->each(fn ($zone) => $run->rows()->create([
+            'carrier' => 'UPS', 'package_type' => 'box', 'zone' => $zone, 'country_iso2' => 'SG', 'service_code' => $code,
+            'band_label' => $band, 'weight' => $weight, 'is_per_kg' => $perKg, 'sell' => $zone === '1' ? $sell : $sell + 1, 'markup' => 0,
+        ]));
+        $row('65', 0.5, 1001);   // Saver
+        $row('08', 1, 777);      // Eco = Worldwide Expedited
+        $row('08', 21, 55, '20.01-44.00 kg', true);
+
+        $book = \App\Support\RateBookWorkbook::build($run, 'UPS');
+        $names = $book->getSheetNames();
+        $this->assertSame(['SAVE', 'DOC'], array_slice($names, 0, 2));
+        $this->assertNotContains('ECO', $names);       // no rate-card tab of its own
+        $this->assertContains('ECO 1', $names);
+        $this->assertNotContains('ECO DOC', $names);        // its calc sheet, like the sample's XPD sheets
+
+        $save = $book->getSheetByName('SAVE');
+        $cells = [];
+        foreach ($save->getRowIterator() as $r) {
+            foreach ($r->getCellIterator() as $c) {
+                if ($c->getValue() !== null) {
+                    $cells[$c->getCoordinate()] = $c->getValue();
+                }
+            }
+        }
+        $ecoTitle = array_search('Eco', $cells, true);
+        $saverPrice = array_search(1001.0, $cells, true);
+        $this->assertNotFalse($ecoTitle, 'SAVE sheet has an "Eco" section');
+        $this->assertNotFalse($saverPrice);
+        // Below the Saver prices, with Eco's own prices under it.
+        $rowOf = fn ($coord) => (int) preg_replace('/\D/', '', $coord);
+        $this->assertGreaterThan($rowOf($saverPrice), $rowOf($ecoTitle));
+        $this->assertGreaterThan($rowOf($ecoTitle), $rowOf(array_search(777.0, $cells, true)));
+        $this->assertContains(55.0 * 25, $cells); // per-kg band listed kg by kg (25 kg)
+    }
 }
