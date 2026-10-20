@@ -89,6 +89,7 @@ class PublicRateService
         ];
 
         // Only the services each account offers at this weight (per-service Check Rate ranges).
+        $results = app(MinChargeQuoter::class)->apply($results, $accounts, $quoteShipment, $billedWeight, $allowed);
         $results = \App\Models\AgentAccount::filterQuotesByWeight($results, $accounts, $billedWeight);
         $ok = array_values(array_filter($results, fn ($r) => empty($r['error'])));
         if (! $ok && $results) {

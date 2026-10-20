@@ -134,4 +134,45 @@ class AccountWeightRangeTest extends TestCase
         $this->putJson("/api/agent-accounts/{$this->ax}", ['service_weight_ranges' => [['service_code' => 'p', 'min' => 5]]])->assertOk()->assertJsonPath('service_weight_ranges.0.service_code', 'P');
         $this->putJson("/api/agent-accounts/{$this->ax}", ['service_weight_ranges' => []])->assertOk()->assertJsonPath('service_weight_ranges', null);
     }
+
+    public function test_under_its_range_a_service_with_a_minimum_charge_is_priced_at_it(): void
+    {
+        // 0279v4: Expedited 25.01–70, below that sold as 25 kg.
+        $this->putJson('/api/agent-accounts/'.AgentAccount::where('username_acc', '0279v4')->value('id'), [
+            'service_weight_ranges' => [['service_code' => '08', 'min' => 25.01, 'max' => 70, 'min_charge' => 25]],
+        ])->assertOk()->assertJsonPath('service_weight_ranges.0.min_charge', 25);
+
+        $asked = [];
+        $this->mock(UpsRateService::class, function ($m) use (&$asked) {
+            $m->shouldReceive('serviceLabels')->andReturn(['65' => 'Saver', '08' => 'Expedited']);
+            // Price = 100 THB per kg asked, so the weight each quote was made at shows in the price.
+            $m->shouldReceive('quoteAccounts')->andReturnUsing(function ($accounts, $shipment, $codes) use (&$asked) {
+                $kg = array_sum(array_map(fn ($p) => $p['weight'] * ($p['quantity'] ?? 1), $shipment['packages']));
+                $asked[] = [implode(',', $codes), $kg];
+
+                return collect($accounts)->flatMap(fn ($a) => collect($codes)->map(fn ($c) => [
+                    'carrier' => 'UPS', 'accountId' => $a['id'], 'username' => $a['username_acc'], 'serviceCode' => (string) $c,
+                    'negotiated' => $kg * 100, 'billedWeight' => $kg, 'chargeBreakdown' => [], 'error' => null,
+                ]))->all();
+            });
+        });
+        $this->mock(DhlRateService::class, fn ($m) => $m->shouldReceive('quoteAccounts')->andReturn([]));
+
+        $results = collect($this->postJson('/api/shipping/check-rate', [
+            'origin_postcode' => '10110', 'origin_city' => 'Bangkok', 'origin_address' => '1 Sukhumvit',
+            'destination_country' => 'US', 'destination_city' => 'New York',
+            'packages' => [['weight' => 15, 'length' => 10, 'width' => 10, 'height' => 10, 'quantity' => 1]],
+        ])->assertOk()->json('results'))->keyBy('serviceCode');
+
+        $this->assertEquals(1500, $results['65']['negotiated']);       // Saver at the real 15 kg
+        $this->assertEquals(2500, $results['08']['negotiated']);       // Expedited sold as 25 kg
+        $this->assertEquals(25, $results['08']['minChargeWeight']);
+        $this->assertContainsEquals(['08', 25], $asked);                     // asked again at 25 kg for 08 only
+    }
+
+    public function test_a_minimum_charge_needs_a_range_start_and_fits_under_its_end(): void
+    {
+        $this->putJson("/api/agent-accounts/{$this->ax}", ['service_weight_ranges' => [['service_code' => '08', 'max' => 70, 'min_charge' => 25]]])->assertStatus(422);
+        $this->putJson("/api/agent-accounts/{$this->ax}", ['service_weight_ranges' => [['service_code' => '08', 'min' => 25.01, 'max' => 30, 'min_charge' => 40]]])->assertStatus(422);
+    }
 }

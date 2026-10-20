@@ -230,7 +230,7 @@ class AiController extends Controller
         // or markup figure it was never given.
         $okResults = array_map(
             fn ($r) => $this->access->sanitizeRateQuote($request->user(), $r),
-            $this->chargeMarkupService->applyToResults(array_values(array_filter(\App\Models\AgentAccount::filterQuotesByWeight([...$upsResults, ...$dhlResults], $accounts, $billedWeight), fn ($r) => empty($r['error']))), $shipment['packages'], $shipment['to']['country']),
+            $this->chargeMarkupService->applyToResults(array_values(array_filter(\App\Models\AgentAccount::filterQuotesByWeight(app(\App\Services\MinChargeQuoter::class)->apply([...$upsResults, ...$dhlResults], $accounts, $quoteShipment, $billedWeight, $allowedServiceCodes), $accounts, $billedWeight), fn ($r) => empty($r['error']))), $shipment['packages'], $shipment['to']['country']),
         );
         usort($okResults, fn ($a, $b) => ($a['negotiated'] ?? $a['published'] ?? PHP_INT_MAX) <=> ($b['negotiated'] ?? $b['published'] ?? PHP_INT_MAX));
 

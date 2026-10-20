@@ -175,8 +175,10 @@ class ShippingController extends Controller
             $quoteShipment,
         );
 
-        // Only the services each account offers at this weight (per-service Check Rate ranges).
-        $quoted = AgentAccount::filterQuotesByWeight([...$upsResults, ...$dhlResults], $accounts, $billedWeight);
+        // Only the services each account offers at this weight (per-service Check Rate ranges) — a
+        // service under its range with a minimum charge is priced at that weight instead.
+        $quoted = app(\App\Services\MinChargeQuoter::class)->apply([...$upsResults, ...$dhlResults], $accounts, $quoteShipment, $billedWeight, $allowedServiceCodesByAccountId);
+        $quoted = AgentAccount::filterQuotesByWeight($quoted, $accounts, $billedWeight);
         $results = $this->chargeMarkupService->applyToResults([...$quoted, ...$limitResults], $shipment['packages'], $shipment['to']['country']);
 
         // Full quote stays server-side (booking reads cost from it by quoteId); the browser only

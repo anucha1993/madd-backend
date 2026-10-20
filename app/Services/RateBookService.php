@@ -178,11 +178,17 @@ class RateBookService
 
                     continue;
                 }
+                // Under the service's range with a minimum charge → priced at that weight.
+                $minCharge = $accountId ? $accounts->get($accountId)?->minChargeFor((string) $point['service_code'], (float) $point['weight']) : null;
+                if ($minCharge !== null) {
+                    $point['quote_weight'] = $minCharge;
+                }
                 $row = $this->quotePoint($point, $column['key'], $column['address'], $accounts->get($accountId));
+                unset($point['quote_weight']);
                 if ($row['error'] !== null && self::isTransient($row['error'])) {
                     // Network blip (DNS / timeout / carrier 5xx) — one more try before giving up on the point.
                     sleep(app()->runningUnitTests() ? 0 : 3);
-                    $row = $this->quotePoint($point, $column['key'], $column['address'], $accounts->get($accountId));
+                    $row = $this->quotePoint($minCharge !== null ? ['quote_weight' => $minCharge] + $point : $point, $column['key'], $column['address'], $accounts->get($accountId));
                 }
                 RateBookRow::create(['rate_book_run_id' => $run->id] + $row);
                 usleep(app()->runningUnitTests() ? 0 : self::PAUSE_MICROSECONDS);
@@ -238,11 +244,13 @@ class RateBookService
             }
 
             $isDocument = $point['package_type'] === 'document';
-            $pieces = $isDocument ? 1 : max(1, (int) ceil($point['weight'] / self::MAX_PIECE_KG));
+            // The weight asked of the carrier: the point's own, or a minimum charge above it.
+            $quoteWeight = (float) ($point['quote_weight'] ?? $point['weight']);
+            $pieces = $isDocument ? 1 : max(1, (int) ceil($quoteWeight / self::MAX_PIECE_KG));
             // Split into whole-kg boxes (e.g. 41 kg = 14 + 14 + 13): carriers round each box up to
             // 0.5 kg, so 3 × 13.67 would be billed as 42 kg.
-            $base = $pieces > 1 ? floor($point['weight'] / $pieces) : $point['weight'];
-            $heavier = $pieces > 1 ? (int) round($point['weight'] - $base * $pieces) : 0;
+            $base = $pieces > 1 ? floor($quoteWeight / $pieces) : $quoteWeight;
+            $heavier = $pieces > 1 ? (int) round($quoteWeight - $base * $pieces) : 0;
             $box = fn (float $weight, int $quantity) => [
                 'weight' => $weight,
                 'quantity' => $quantity,

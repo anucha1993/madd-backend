@@ -60,7 +60,7 @@ class AgentAccount extends Model
     public function quotesWeight(float $weight): bool
     {
         return self::inRange($weight, $this->rate_min_weight, $this->rate_max_weight)
-            || collect($this->serviceRanges())->contains(fn ($r) => self::inRange($weight, $r['min'], $r['max']));
+            || collect($this->serviceRanges())->contains(fn ($r) => self::inRange($weight, $r['min'], $r['max']) || self::belowWithMinCharge($weight, $r));
     }
 
     /**
@@ -72,8 +72,25 @@ class AgentAccount extends Model
         $range = collect($this->serviceRanges())->first(fn ($r) => strcasecmp($r['service_code'], (string) $serviceCode) === 0);
 
         return $range
-            ? self::inRange($weight, $range['min'], $range['max'])
+            ? self::inRange($weight, $range['min'], $range['max']) || self::belowWithMinCharge($weight, $range)
             : self::inRange($weight, $this->rate_min_weight, $this->rate_max_weight);
+    }
+
+    /**
+     * The weight a service is PRICED at when the shipment is under its range but the range has a
+     * minimum charge (e.g. Expedited 25.01–70, min charge 25 → a 10 kg shipment is sold as 25 kg;
+     * the booking still sends 10 kg). Null = priced at its own weight.
+     */
+    public function minChargeFor(?string $serviceCode, float $weight): ?float
+    {
+        $range = collect($this->serviceRanges())->first(fn ($r) => strcasecmp($r['service_code'], (string) $serviceCode) === 0);
+
+        return $range && self::belowWithMinCharge($weight, $range) ? $range['min_charge'] : null;
+    }
+
+    private static function belowWithMinCharge(float $weight, array $range): bool
+    {
+        return $range['min_charge'] !== null && $range['min'] !== null && $weight < $range['min'] - 0.005;
     }
 
     /**
@@ -89,17 +106,28 @@ class AgentAccount extends Model
         return array_values(array_filter($results, function ($r) use ($byId, $weight) {
             $account = $byId->get($r['accountId'] ?? null);
 
-            return ! empty($r['error']) || ! $account || $account->quotesService($r['serviceCode'] ?? null, $weight);
+            if (! empty($r['error']) || ! $account) {
+                return true;
+            }
+            // Under a min-charge range only the min-charge quote may be sold (MinChargeQuoter) —
+            // never the real-weight price, even if the re-quote failed.
+            if ($account->minChargeFor($r['serviceCode'] ?? null, $weight) !== null && empty($r['minChargeWeight'])) {
+                return false;
+            }
+
+            return $account->quotesService($r['serviceCode'] ?? null, $weight);
         }));
     }
 
-    /** @return list<array{service_code: string, min: ?float, max: ?float}> */
+    /** @return list<array{service_code: string, min: ?float, max: ?float, min_charge: ?float}> */
     public function serviceRanges(): array
     {
         return array_values(array_map(fn ($r) => [
             'service_code' => (string) ($r['service_code'] ?? ''),
             'min' => isset($r['min']) && $r['min'] !== '' ? (float) $r['min'] : null,
             'max' => isset($r['max']) && $r['max'] !== '' ? (float) $r['max'] : null,
+            // Under `min`: still sold, priced at this weight (null = not sold under the range).
+            'min_charge' => isset($r['min_charge']) && $r['min_charge'] !== '' ? (float) $r['min_charge'] : null,
         ], $this->service_weight_ranges ?? []));
     }
 

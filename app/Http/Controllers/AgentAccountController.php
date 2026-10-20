@@ -44,6 +44,7 @@ class AgentAccountController extends Controller
             'service_weight_ranges.*.service_code' => ['required', 'string', 'max:10', 'distinct'],
             'service_weight_ranges.*.min' => ['nullable', 'numeric', 'min:0'],
             'service_weight_ranges.*.max' => ['nullable', 'numeric', 'min:0'],
+            'service_weight_ranges.*.min_charge' => ['nullable', 'numeric', 'min:0.01'],
         ]);
 
         $data = self::normaliseServiceRanges($data);
@@ -78,6 +79,7 @@ class AgentAccountController extends Controller
             'service_weight_ranges.*.service_code' => ['required', 'string', 'max:10', 'distinct'],
             'service_weight_ranges.*.min' => ['nullable', 'numeric', 'min:0'],
             'service_weight_ranges.*.max' => ['nullable', 'numeric', 'min:0'],
+            'service_weight_ranges.*.min_charge' => ['nullable', 'numeric', 'min:0.01'],
         ]);
 
         // Blank secret fields mean "leave unchanged", not "clear the value".
@@ -211,6 +213,7 @@ class AgentAccountController extends Controller
                 'service_code' => strtoupper(trim((string) $r['service_code'])),
                 'min' => isset($r['min']) ? (float) $r['min'] : null,
                 'max' => isset($r['max']) ? (float) $r['max'] : null,
+                'min_charge' => isset($r['min_charge']) ? (float) $r['min_charge'] : null,
             ], $data['service_weight_ranges'] ?? []);
             $data['service_weight_ranges'] = $ranges ?: null;
         }
@@ -229,6 +232,12 @@ class AgentAccountController extends Controller
         foreach ($data['service_weight_ranges'] ?? [] as $i => $range) {
             if (isset($range['min'], $range['max']) && (float) $range['max'] <= (float) $range['min']) {
                 throw \Illuminate\Validation\ValidationException::withMessages(["service_weight_ranges.{$i}.max" => "Service {$range['service_code']}: น้ำหนักสูงสุดต้องมากกว่าน้ำหนักต่ำสุด"]);
+            }
+            if (isset($range['min_charge']) && ! isset($range['min'])) {
+                throw \Illuminate\Validation\ValidationException::withMessages(["service_weight_ranges.{$i}.min_charge" => "Service {$range['service_code']}: ราคาขั้นต่ำใช้ได้เมื่อกำหนดน้ำหนักเริ่มต้นของช่วง"]);
+            }
+            if (isset($range['min_charge'], $range['max']) && (float) $range['min_charge'] > (float) $range['max']) {
+                throw \Illuminate\Validation\ValidationException::withMessages(["service_weight_ranges.{$i}.min_charge" => "Service {$range['service_code']}: น้ำหนักขั้นต่ำที่คิดราคาต้องไม่เกินน้ำหนักสูงสุดของช่วง"]);
             }
         }
     }
