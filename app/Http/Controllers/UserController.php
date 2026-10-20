@@ -16,7 +16,7 @@ class UserController extends Controller
         $actor = $request->user();
 
         // `manageable` = the caller ranks strictly above this user (or is Super Admin).
-        return User::with('branches:id,name,code,nickname', 'roles:id,key,name,is_super_admin,level')->orderBy('name')->get()
+        return User::with('branches:id,name,code,nickname', 'homeBranch:id,name,code,nickname', 'roles:id,key,name,is_super_admin,level')->orderBy('name')->get()
             ->each(fn (User $u) => $u->setAttribute('manageable', RoleHierarchy::canManageUser($actor, $u)));
     }
 
@@ -32,6 +32,8 @@ class UserController extends Controller
             'can_access_all_branches' => ['boolean'],
             'branch_ids' => ['array'],
             'branch_ids.*' => ['integer', 'exists:branches,id'],
+            // The user's own branch (Shipments are booked under it); branch_ids = what they may see.
+            'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
         ]);
 
         $branchIds = $data['branch_ids'] ?? [];
@@ -43,15 +45,15 @@ class UserController extends Controller
         $this->syncAudited($user, 'roles', $roleIds);
 
         if (! $user->can_access_all_branches) {
-            $this->syncAudited($user, 'branches', $branchIds);
+            $this->syncAudited($user, 'branches', self::withHomeBranch($branchIds, $user->branch_id));
         }
 
-        return response()->json($user->load('branches:id,name,code,nickname', 'roles:id,key,name,is_super_admin'), 201);
+        return response()->json($user->load('branches:id,name,code,nickname', 'homeBranch:id,name,code,nickname', 'roles:id,key,name,is_super_admin'), 201);
     }
 
     public function show(User $user)
     {
-        return $user->load('branches:id,name,code,nickname', 'roles:id,key,name,is_super_admin');
+        return $user->load('branches:id,name,code,nickname', 'homeBranch:id,name,code,nickname', 'roles:id,key,name,is_super_admin');
     }
 
     public function update(Request $request, User $user)
@@ -67,6 +69,8 @@ class UserController extends Controller
             'can_access_all_branches' => ['boolean'],
             'branch_ids' => ['array'],
             'branch_ids.*' => ['integer', 'exists:branches,id'],
+            // The user's own branch (Shipments are booked under it); branch_ids = what they may see.
+            'branch_id' => ['nullable', 'integer', 'exists:branches,id'],
         ]);
 
         $branchIds = $data['branch_ids'] ?? null;
@@ -88,12 +92,20 @@ class UserController extends Controller
         }
 
         if ($branchIds !== null) {
-            $this->syncAudited($user, 'branches', $user->can_access_all_branches ? [] : $branchIds);
+            $this->syncAudited($user, 'branches', $user->can_access_all_branches ? [] : self::withHomeBranch($branchIds, $user->branch_id));
         } elseif ($user->can_access_all_branches) {
             $this->syncAudited($user, 'branches', []);
+        } elseif ($user->branch_id && ! $user->branches()->whereKey($user->branch_id)->exists()) {
+            $this->syncAudited($user, 'branches', self::withHomeBranch($user->branches()->pluck('branches.id')->all(), $user->branch_id));
         }
 
-        return $user->load('branches:id,name,code,nickname', 'roles:id,key,name,is_super_admin');
+        return $user->load('branches:id,name,code,nickname', 'homeBranch:id,name,code,nickname', 'roles:id,key,name,is_super_admin');
+    }
+
+    /** A user always sees their own branch's data. */
+    private static function withHomeBranch(array $branchIds, ?int $homeBranchId): array
+    {
+        return array_values(array_unique(array_map('intval', $homeBranchId ? [...$branchIds, $homeBranchId] : $branchIds)));
     }
 
     public function destroy(Request $request, User $user)

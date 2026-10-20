@@ -89,6 +89,11 @@ class ShipmentController extends Controller
      */
     private function resolveBranchId(Request $request, ?int $chosen): int
     {
+        // A user with their own branch always books under it (/config/users "สาขา") — what they
+        // may SEE (all / several branches) doesn't change that.
+        if ($home = $request->user()?->branch_id) {
+            return (int) $home;
+        }
         $allowed = self::bookingBranchIds($request->user());
         if ($allowed->count() === 1) {
             return (int) $allowed->first();

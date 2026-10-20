@@ -15,7 +15,7 @@ use Laravel\Sanctum\HasApiTokens;
 
 // users.role (admin/staff) is legacy — access now comes from role_user (see AccessService);
 // the column is kept only because other servers on the shared DB may still read it.
-#[Fillable(['name', 'username', 'email', 'password', 'can_access_all_branches'])]
+#[Fillable(['name', 'username', 'email', 'password', 'can_access_all_branches', 'branch_id'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
@@ -34,6 +34,12 @@ class User extends Authenticatable
             'password' => 'hashed',
             'can_access_all_branches' => 'boolean',
         ];
+    }
+
+    /** The branch this user belongs to — Shipments they book are booked under it. */
+    public function homeBranch(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(Branch::class, 'branch_id');
     }
 
     public function branches(): BelongsToMany
