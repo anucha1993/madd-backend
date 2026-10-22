@@ -312,4 +312,23 @@ class RateBookTest extends TestCase
         // Saver keeps its own accounts.
         $this->assertSame(['0279v4'], $run->rows()->where('service_code', '65')->where('weight', 300)->pluck('account_username')->unique()->values()->all());
     }
+
+    public function test_manual_rate_cards_default_to_sagawa_and_only_settings_holders_edit(): void
+    {
+        $this->actingWith(['report.rate_book']);
+        $card = $this->getJson('/api/rate-book/manual-cards')->assertOk()->json('cards.0');
+        $this->assertSame('SAGAWA', $card['name']);
+        $this->assertSame([0.5, 1150], [(float) $card['steps'][0]['weight'], (int) $card['steps'][0]['price']]);
+        $this->assertSame(1.5, (float) $card['steps'][2]['weight']);
+        $this->assertSame(4160, (int) end($card['steps'])['price']);  // 20 kg
+        $this->assertSame([21, 50, 169], [(int) $card['per_kg'][0]['min'], (int) $card['per_kg'][0]['max'], (int) $card['per_kg'][0]['price']]);
+        $this->assertNull(end($card['per_kg'])['max']);                // 201 kg up
+        $this->putJson('/api/rate-book/manual-cards', ['cards' => []])->assertForbidden();
+
+        $this->actingWith(['report.rate_book', 'report.rate_book_settings']);
+        $card['steps'][0]['price'] = 1200;
+        $this->putJson('/api/rate-book/manual-cards', ['cards' => [$card]])->assertOk()->assertJsonPath('cards.0.steps.0.price', 1200);
+        $card['per_kg'][0]['max'] = 10;
+        $this->putJson('/api/rate-book/manual-cards', ['cards' => [$card]])->assertStatus(422);
+    }
 }

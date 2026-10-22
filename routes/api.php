@@ -404,11 +404,13 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
     // Rate Book shows sell price AND markup (profit) — its own permission, not report.summary.
     Route::middleware('perm:report.rate_book')->group(function () {
         Route::get('rate-book/settings', [RateBookController::class, 'settings']);
+        Route::get('rate-book/manual-cards', [RateBookController::class, 'manualCards']);
         Route::get('rate-book/runs', [RateBookController::class, 'runs']);
         Route::get('rate-book/runs/{rateBookRun}/rows', [RateBookController::class, 'rows']);
         Route::get('rate-book/runs/{rateBookRun}/export', [RateBookController::class, 'export']);
         Route::middleware('perm:report.rate_book_settings')->group(function () {
             Route::put('rate-book/settings', [RateBookController::class, 'updateSettings']);
+            Route::put('rate-book/manual-cards', [RateBookController::class, 'updateManualCards']);
             Route::post('rate-book/sync', [RateBookController::class, 'requestSync']);
             Route::post('rate-book/runs/{rateBookRun}/cancel', [RateBookController::class, 'cancel']);
         });

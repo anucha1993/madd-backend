@@ -41,6 +41,40 @@ class RateBookController extends Controller
         ]);
     }
 
+    /** Hand-typed rate cards (no API, e.g. SAGAWA) — for checking prices only. */
+    public function manualCards()
+    {
+        return response()->json(['cards' => \App\Support\ManualRateCards::get()]);
+    }
+
+    public function updateManualCards(Request $request)
+    {
+        $data = $request->validate([
+            'cards' => ['present', 'array', 'max:10'],
+            'cards.*.name' => ['required', 'string', 'max:40'],
+            'cards.*.key' => ['nullable', 'string', 'max:40'],
+            'cards.*.destination' => ['nullable', 'string', 'max:60'],
+            'cards.*.currency' => ['nullable', 'string', 'max:3'],
+            'cards.*.note' => ['nullable', 'string', 'max:200'],
+            'cards.*.steps' => ['present', 'array', 'max:200'],
+            'cards.*.steps.*.weight' => ['required', 'numeric', 'min:0.01'],
+            'cards.*.steps.*.price' => ['required', 'numeric', 'min:0'],
+            'cards.*.per_kg' => ['present', 'array', 'max:30'],
+            'cards.*.per_kg.*.min' => ['required', 'numeric', 'min:0'],
+            'cards.*.per_kg.*.max' => ['nullable', 'numeric', 'min:0'],
+            'cards.*.per_kg.*.price' => ['required', 'numeric', 'min:0'],
+        ]);
+        foreach ($data['cards'] as $card) {
+            foreach ($card['per_kg'] as $band) {
+                if (isset($band['max']) && (float) $band['max'] < (float) $band['min']) {
+                    return response()->json(['message' => "{$card['name']}: ช่วง {$band['min']}–{$band['max']} kg น้ำหนักสูงสุดต้องไม่น้อยกว่าต่ำสุด"], 422);
+                }
+            }
+        }
+
+        return response()->json(['cards' => \App\Support\ManualRateCards::save($data['cards'])]);
+    }
+
     public function updateSettings(Request $request)
     {
         $data = $request->validate([
