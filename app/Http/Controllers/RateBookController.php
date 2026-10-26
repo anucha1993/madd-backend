@@ -54,6 +54,7 @@ class RateBookController extends Controller
             'cards.*.name' => ['required', 'string', 'max:40'],
             'cards.*.key' => ['nullable', 'string', 'max:40'],
             'cards.*.destination' => ['nullable', 'string', 'max:60'],
+            'cards.*.country' => ['nullable', 'string', 'size:2'],
             'cards.*.currency' => ['nullable', 'string', 'max:3'],
             'cards.*.note' => ['nullable', 'string', 'max:200'],
             'cards.*.steps' => ['present', 'array', 'max:200'],

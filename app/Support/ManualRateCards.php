@@ -21,7 +21,51 @@ final class ManualRateCards
     {
         $saved = json_decode((string) IntegrationSetting::get(self::KEY), true);
 
-        return is_array($saved) ? $saved : self::defaults();
+        // Cards saved before the destination country existed: "Japan" → JP.
+        return array_map(fn ($c) => $c + ['country' => preg_match('/japan/i', (string) ($c['destination'] ?? '')) ? 'JP' : ''],
+            is_array($saved) ? $saved : self::defaults());
+    }
+
+    /**
+     * Check Rate quotes from the cards for this destination — sell prices, quote only (`quoteOnly`):
+     * no account, no quoteId, never bookable (bookings only take UPS / DHL).
+     */
+    public static function quotes(string $countryIso2, float $billedWeight): array
+    {
+        $quotes = [];
+        foreach (self::get() as $card) {
+            if (strcasecmp((string) $card['country'], $countryIso2) !== 0) {
+                continue;
+            }
+            [$price, $weight] = self::price($card, $billedWeight);
+            if ($price === null) {
+                continue;
+            }
+            $quotes[] = [
+                'carrier' => $card['name'], 'accountId' => 0, 'username' => '', 'serviceCode' => $card['key'],
+                'serviceLabel' => $card['name'].' (ราคาตามตาราง)', 'currency' => $card['currency'],
+                'negotiated' => $price, 'published' => $price, 'billedWeight' => $weight, 'billedWeightUnit' => 'KGS',
+                'chargeBreakdown' => [], 'error' => null, 'quoteOnly' => true,
+            ];
+        }
+
+        return $quotes;
+    }
+
+    /**
+     * A card's price for a weight: the next listed step up, else the whole kg × its per-kg band
+     * (same as manualCardPrice() in the frontend). @return array{0: ?float, 1: float} price, weight sold
+     */
+    public static function price(array $card, float $weight): array
+    {
+        $step = collect($card['steps'])->sortBy('weight')->first(fn ($s) => (float) $s['weight'] >= $weight - 1e-9);
+        if ($step) {
+            return [(float) $step['price'], (float) $step['weight']];
+        }
+        $kg = (float) ceil($weight - 1e-9);
+        $band = collect($card['per_kg'])->first(fn ($b) => $kg >= (float) $b['min'] && ($b['max'] === null || $kg <= (float) $b['max']));
+
+        return [$band ? round($kg * (float) $band['price'], 2) : null, $kg];
     }
 
     public static function save(array $cards): array
@@ -30,6 +74,8 @@ final class ManualRateCards
             'key' => strtoupper(preg_replace('/[^A-Za-z0-9]+/', '_', trim((string) ($c['key'] ?? $c['name'])))),
             'name' => trim((string) $c['name']),
             'destination' => trim((string) ($c['destination'] ?? '')),
+            // Shown in Check Rate for shipments to this country (ISO2, e.g. JP); "" = Rate Book only.
+            'country' => strtoupper(trim((string) ($c['country'] ?? ''))),
             'currency' => strtoupper(trim((string) ($c['currency'] ?? 'THB'))) ?: 'THB',
             'note' => trim((string) ($c['note'] ?? '')),
             'steps' => collect($c['steps'] ?? [])->map(fn ($s) => ['weight' => round((float) $s['weight'], 2), 'price' => round((float) $s['price'], 2)])
@@ -60,6 +106,7 @@ final class ManualRateCards
             'key' => 'SAGAWA',
             'name' => 'SAGAWA',
             'destination' => 'Japan',
+            'country' => 'JP',
             'currency' => 'THB',
             'note' => 'Special Rate from Thailand to Japan · START FROM 1-30 JUNE 2026',
             'steps' => array_map(fn ($s) => ['weight' => (float) $s[0], 'price' => (float) $s[1]], $steps),

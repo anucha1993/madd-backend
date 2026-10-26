@@ -181,6 +181,10 @@ class ShippingController extends Controller
         $quoted = AgentAccount::filterQuotesByWeight($quoted, $accounts, $billedWeight);
         $results = $this->chargeMarkupService->applyToResults([...$quoted, ...$limitResults], $shipment['packages'], $shipment['to']['country']);
 
+        // Hand-typed rate cards for this destination (e.g. SAGAWA → Japan) — a price to compare,
+        // never bookable: no quoteId, and bookings only take UPS / DHL.
+        $results = [...$results, ...\App\Support\ManualRateCards::quotes($shipment['to']['country'], $billedWeight)];
+
         // Full quote stays server-side (booking reads cost from it by quoteId); the browser only
         // gets what this user's Role may see — e.g. front-counter staff get the sell price and
         // its breakdown, never the carrier cost / markup formula / raw carrier response.
@@ -189,7 +193,8 @@ class ShippingController extends Controller
             // Lets the booking form warn before a REAL (production) booking — a DHL one can't be
             // cancelled through the API afterwards.
             $result['accountMode'] = $modes[$result['accountId'] ?? 0] ?? null;
-            if (! empty($result['error'])) {
+            // Errors and quote-only prices (hand-typed cards) get no quoteId — nothing to book with.
+            if (! empty($result['error']) || ! empty($result['quoteOnly'])) {
                 return $this->access->sanitizeRateQuote($user, $result);
             }
             $result['quoteId'] = $this->quoteVault->remember($result, $user);
