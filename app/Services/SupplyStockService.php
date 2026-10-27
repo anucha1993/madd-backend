@@ -93,6 +93,34 @@ class SupplyStockService
         }
     }
 
+    /**
+     * The first Packing Supplies line the branch hasn't enough stock for (no stock row = 0),
+     * as a message — null when every line is covered. Checked before a booking reaches the carrier.
+     */
+    public function shortage(array $addonLines, int $branchId): ?string
+    {
+        $wanted = [];
+        $names = [];
+        foreach ($addonLines as $line) {
+            if (! empty($line['supply_id'])) {
+                $id = (int) $line['supply_id'];
+                $wanted[$id] = ($wanted[$id] ?? 0) + (int) round((float) ($line['quantity'] ?? 0));
+                $names[$id] ??= $line['name'] ?? "#{$id}";
+            }
+        }
+        $onHand = SupplyStock::where('branch_id', $branchId)->whereIn('supply_id', array_keys($wanted))->pluck('quantity', 'supply_id');
+        foreach ($wanted as $id => $qty) {
+            $left = (int) ($onHand[$id] ?? 0);
+            if ($qty > $left) {
+                return $left <= 0
+                    ? "\"{$names[$id]}\" Stock หมดที่สาขานี้ — เลือกไม่ได้"
+                    : "\"{$names[$id]}\" เหลือ Stock {$left} ชิ้น แต่เลือกไว้ {$qty} ชิ้น";
+            }
+        }
+
+        return null;
+    }
+
     private function lockedStock(int $supplyId, int $branchId): SupplyStock
     {
         SupplyStock::firstOrCreate(['supply_id' => $supplyId, 'branch_id' => $branchId]);

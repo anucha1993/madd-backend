@@ -492,6 +492,11 @@ class ShipmentController extends Controller
             return response()->json(['error' => $priceError], 422);
         }
         $branchId = $this->resolveBranchId($request, isset($data['branch_id']) ? (int) $data['branch_id'] : null);
+        // Out-of-stock Packing Supplies can't be sold — only a Super Admin may go below zero.
+        if (! $this->access->resolve($request->user())['is_super_admin']
+            && ($stockError = $this->supplyStock->shortage($data['addon_lines'] ?? [], $branchId))) {
+            return response()->json(['error' => $stockError], 422);
+        }
 
         $recordAttributes = [
             'agent_account_id' => $account->id,

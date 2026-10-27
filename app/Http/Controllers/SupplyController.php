@@ -9,10 +9,11 @@ class SupplyController extends Controller
 {
     private const MAX_FEATURED = 6;
 
-    /** `stocks` = balances at the caller's own branches, shown in the booking form. */
+    /** `stocks` = balances at the branches the caller can book under, shown in the booking form. */
     public function index(Request $request)
     {
-        $branchIds = $request->user()?->branches()->pluck('branches.id') ?? collect();
+        $user = $request->user();
+        $branchIds = ShipmentController::bookingBranchIds($user)->push($user?->branch_id)->filter()->unique()->values();
 
         return Supply::with(['weightBand', 'stocks' => fn ($q) => $q->whereIn('branch_id', $branchIds)->select('id', 'supply_id', 'branch_id', 'quantity', 'min_qty', 'max_qty')])
             ->orderBy('name')->get();
