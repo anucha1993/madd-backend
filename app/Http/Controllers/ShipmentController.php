@@ -884,7 +884,9 @@ class ShipmentController extends Controller
                 ->filter(fn ($line) => in_array((string) ($line['code'] ?? ''), $costOnlyCodes, true))
                 ->sum(fn ($line) => (float) ($line['amount'] ?? 0));
             $expectedFreight = (float) ($quote['negotiated'] ?? $quote['published'] ?? 0) - $costOnly;
-            if (abs($expectedFreight - (float) $data['freight_amount']) > $tolerance) {
+            // The form sells freight rounded UP to a whole baht (11,974.59 → 11,975).
+            $sent = (float) $data['freight_amount'];
+            if (abs($expectedFreight - $sent) > $tolerance && abs(ceil(round($expectedFreight, 2)) - $sent) > $tolerance) {
                 return 'ค่าขนส่งไม่ตรงกับใบเสนอราคา กรุณากดเช็คราคาใหม่ก่อนจอง';
             }
         }
