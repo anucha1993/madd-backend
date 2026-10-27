@@ -1741,10 +1741,8 @@ class ShipmentController extends Controller
      */
     private function buildTotalChargesLines(Shipment $shipment): array
     {
-        // Printed documents follow the same field access as the JSON API.
-        if ($this->access->fieldLevel(request()->user(), 'shipment', 'pricing') === 'hidden') {
-            return [];
-        }
+        // Always printed: the waybill is the customer's Shipper's Copy, and this is the SELL price
+        // staff already see at booking — whoever opens it (shipment "pricing" access aside).
         $currency = $shipment->currency ?: 'THB';
 
         return [
