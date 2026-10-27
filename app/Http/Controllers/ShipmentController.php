@@ -242,7 +242,46 @@ class ShipmentController extends Controller
      * ShippingController::checkRate) — every successful call here creates an actual air waybill
      * with the carrier and is NOT reversible from our side.
      */
+    /**
+     * Books a shipment (book()) — every refusal (validation, price, stock, expired quote, the
+     * carrier's own error) is also logged to System Alerts with its reason, so it can be traced
+     * without the staff's screen. Crashes are already logged as 'exception'.
+     */
     public function store(Request $request)
+    {
+        try {
+            $response = $this->book($request);
+        } catch (ValidationException $e) {
+            $this->alertBookingFailure($request, (string) (collect($e->errors())->flatten()->first() ?? $e->getMessage()), ['fields' => array_keys($e->errors())]);
+            throw $e;
+        }
+        $status = $response->getStatusCode();
+        // 409 = the same booking still in progress (a double click); 500 is logged as 'booking_persist'.
+        if ($status >= 400 && ! in_array($status, [409, 500], true)) {
+            $this->alertBookingFailure($request, (string) ($response->getData(true)['error'] ?? "HTTP {$status}"));
+        }
+
+        return $response;
+    }
+
+    private function alertBookingFailure(Request $request, string $reason, array $extra = []): void
+    {
+        $user = $request->user();
+        SystemAlert::record('booking', "จอง Shipment ไม่สำเร็จ: {$reason}", array_filter([
+            'user_id' => $user?->id,
+            'user' => $user?->name,
+            'carrier' => $request->input('carrier'),
+            'agent_account_id' => $request->input('agent_account_id'),
+            'service_code' => $request->input('service_code'),
+            'destination' => $request->input('destination.country'),
+            'branch_id' => $request->input('branch_id') ?? $user?->branch_id,
+            'freight_amount' => $request->input('freight_amount'),
+            'order_total' => $request->input('order_total'),
+            'quote_negotiated' => $request->input('rate_quote.negotiated'),
+        ] + $extra, fn ($v) => $v !== null && $v !== ''));
+    }
+
+    private function book(Request $request): \Illuminate\Http\JsonResponse
     {
         // Field groups with an 'edit' level (billing parties, reference numbers) — see
         // config/permissions.php.
@@ -871,7 +910,8 @@ class ShipmentController extends Controller
                     return "จำนวน \"{$line['name']}\" ต้องเป็นจำนวนเต็ม";
                 }
             }
-            if ($allowed !== null && ! collect($allowed)->contains(fn ($p) => abs($p - (float) $line['unit_price']) <= $tolerance)) {
+            // 0.015: the form's toFixed(2) and PHP's round() can differ by one satang on a .xx5 price.
+            if ($allowed !== null && ! collect($allowed)->contains(fn ($p) => abs($p - (float) $line['unit_price']) <= 0.015)) {
                 return "ราคา \"{$line['name']}\" ไม่ตรงกับราคาที่ตั้งไว้ในระบบ กรุณาโหลดหน้าใหม่แล้วลองอีกครั้ง";
             }
         }

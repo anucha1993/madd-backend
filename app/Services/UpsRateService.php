@@ -251,9 +251,22 @@ class UpsRateService
         if (! empty($item['Code']) && isset(self::CHARGE_CODE_LABELS[$item['Code']])) return self::CHARGE_CODE_LABELS[$item['Code']];
         if (! empty($item['SubType'])) return str_replace('_', ' ', $item['SubType']);
         if (! empty($item['Description'])) return $item['Description'];
-        if (! empty($item['Code']) && isset(self::CHARGE_CODE_LABELS[$item['Code']])) return self::CHARGE_CODE_LABELS[$item['Code']];
+        // UPS often sends only a code (377, 431 …) — name it from our charge code list (/config/charge-names).
+        if (! empty($item['Code']) && ($label = self::codeLabel((string) $item['Code']))) return $label;
 
         return ! empty($item['Code']) ? "Other Charge (code {$item['Code']})" : 'Other Charge';
+    }
+
+    /** @var array<string, string>|null */
+    private static ?array $codeLabels = null;
+
+    /** "LARGE PACKAGE" → "Large Package", as UPS's own names read. */
+    private static function codeLabel(string $code): ?string
+    {
+        self::$codeLabels ??= \App\Models\ChargeCode::where('provider', 'UPS')->whereNotNull('label')->pluck('label', 'code')
+            ->map(fn ($label) => ucwords(strtolower((string) $label)))->all();
+
+        return self::$codeLabels[$code] ?? null;
     }
 
     private function buildBreakdown(?array $baseCharge, ?array $itemizedCharges, string $currency, ?array $serviceOptionsCharge = null, bool $declaredValueSent = false): array
