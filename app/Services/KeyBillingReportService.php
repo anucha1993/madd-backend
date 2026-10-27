@@ -165,7 +165,13 @@ class KeyBillingReportService
         }
 
         $grandTotal = round((float) $shipment->order_total, 2);
-        $paymentCode = strtoupper((string) ($shipment->payment_method ?? ''));
+        // Several methods ("QR,CARD") — the split isn't recorded, so the total goes under the first
+        // one and REMARK names them all.
+        $paymentCodes = array_values(array_filter(array_map(fn ($c) => strtoupper(trim($c)), explode(',', (string) ($shipment->payment_method ?? '')))));
+        $paymentCode = $paymentCodes[0] ?? '';
+        if (count($paymentCodes) > 1) {
+            $remark = trim(($remark ? $remark.' · ' : '').'ชำระหลายช่องทาง: '.implode(', ', $paymentCodes));
+        }
         $payment = [
             'pay_daily' => 0.0, 'pay_cr' => 0.0, 'pay_qr' => 0.0, 'pay_transfer' => 0.0,
             'pay_card' => 0.0, 'pay_chq' => 0.0, 'pay_pending' => 0.0, 'pay_other' => 0.0,

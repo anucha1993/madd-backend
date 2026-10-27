@@ -183,7 +183,7 @@ class ShippingController extends Controller
 
         // Hand-typed rate cards for this destination (e.g. SAGAWA → Japan) — a price to compare,
         // never bookable: no quoteId, and bookings only take UPS / DHL.
-        $results = [...$results, ...\App\Support\ManualRateCards::quotes($shipment['to']['country'], $billedWeight)];
+        $results = [...$results, ...\App\Support\ManualRateCards::quotes($shipment['to']['country'], $billedWeight, $user)];
 
         // Full quote stays server-side (booking reads cost from it by quoteId); the browser only
         // gets what this user's Role may see — e.g. front-counter staff get the sell price and

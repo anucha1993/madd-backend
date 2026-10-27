@@ -64,6 +64,14 @@ class ShipmentController extends Controller
         'ZPL' => 'application/octet-stream',
     ];
 
+    /** Payment method codes as stored: trimmed, de-duplicated, comma-separated ("QR,CARD"); none = null. */
+    public static function paymentMethods(?string $value): ?string
+    {
+        $codes = array_values(array_unique(array_filter(array_map('trim', explode(',', (string) $value)), fn ($c) => $c !== '')));
+
+        return $codes ? implode(',', $codes) : null;
+    }
+
     /**
      * Branches this user may book for: every active branch for "access all branches" users,
      * otherwise their own branches.
@@ -339,7 +347,8 @@ class ShipmentController extends Controller
             // never actually used by the carrier APIs, but must still be saved for the record.
             'customer_type' => ['nullable', 'string', 'max:50'],
             'entity_type' => ['nullable', 'string', 'in:INDIVIDUAL,COMPANY'],
-            'payment_method' => ['nullable', 'string', 'max:50'],
+            // One or more payment method codes, comma-separated ("QR,CARD").
+            'payment_method' => ['nullable', 'string', 'max:255'],
             'bill_transportation_to' => ['nullable', 'string', 'max:50'],
             'bill_duty_tax_to' => ['nullable', 'string', 'max:50'],
             // Required whenever billing isn't to our own Shipper account — UPS's BillReceiver/
@@ -510,7 +519,7 @@ class ShipmentController extends Controller
             'cost_currency' => $rateQuote['currency'] ?? $data['currency'] ?? 'THB',
             'customer_type' => $data['customer_type'] ?? null,
             'entity_type' => $data['entity_type'] ?? null,
-            'payment_method' => $data['payment_method'] ?? null,
+            'payment_method' => self::paymentMethods($data['payment_method'] ?? null),
             'bill_transportation_to' => $data['bill_transportation_to'] ?? null,
             'bill_duty_tax_to' => $data['bill_duty_tax_to'] ?? null,
             'bill_transportation_account_number' => $data['bill_transportation_account_number'] ?? null,

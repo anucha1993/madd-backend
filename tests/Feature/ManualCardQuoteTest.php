@@ -16,11 +16,18 @@ class ManualCardQuoteTest extends TestCase
 {
     use RefreshDatabase;
 
+    private int $ups;
+
+    private int $sgw;
+
     protected function setUp(): void
     {
         parent::setUp();
         $agent = DB::table('agents')->insertGetId(['agent_name' => 'UPS', 'agent_code' => 'UPS', 'created_at' => now(), 'updated_at' => now()]);
-        DB::table('agent_accounts')->insert(['agent_id' => $agent, 'username_acc' => 'u', 'client_id' => 'id', 'client_secret' => 'secret', 'status' => true, 'is_api_enabled' => true, 'created_at' => now(), 'updated_at' => now()]);
+        $this->ups = DB::table('agent_accounts')->insertGetId(['agent_id' => $agent, 'username_acc' => 'u', 'client_id' => 'id', 'client_secret' => 'secret', 'status' => true, 'is_api_enabled' => true, 'created_at' => now(), 'updated_at' => now()]);
+        // SAGAWA's own (non-API) agent account — the card follows it.
+        $sgw = DB::table('agents')->insertGetId(['agent_name' => 'SAGAWA', 'agent_code' => 'SGW', 'created_at' => now(), 'updated_at' => now()]);
+        $this->sgw = DB::table('agent_accounts')->insertGetId(['agent_id' => $sgw, 'username_acc' => 'C326', 'status' => true, 'is_api_enabled' => false, 'created_at' => now(), 'updated_at' => now()]);
         $role = Role::create(['key' => 'r', 'name' => 'R', 'permissions' => ['shipment.create', 'shipment.view'], 'field_access' => [], 'data_scopes' => []]);
         $user = User::factory()->create(['can_access_all_branches' => true]);
         $user->roles()->sync([$role->id]);
@@ -63,5 +70,28 @@ class ManualCardQuoteTest extends TestCase
         $this->assertSame([2810.0, 11.0], ManualRateCards::price($card, 10.2));
         $this->assertSame([21 * 169.0, 21.0], ManualRateCards::price($card, 20.3));
         $this->assertSame([250 * 99.0, 250.0], ManualRateCards::price($card, 250));
+    }
+
+    public function test_who_sees_sagawa_follows_the_branch_and_the_sgw_account(): void
+    {
+        $branch = \App\Models\Branch::create(['name' => 'BLP', 'code' => 'BLP', 'status' => true]);
+        $role = Role::where('key', 'r')->first();
+        $staff = User::factory()->create(['can_access_all_branches' => false, 'branch_id' => $branch->id]);
+        $staff->roles()->sync([$role->id]);
+        $staff->branches()->sync([$branch->id]);
+        Sanctum::actingAs($staff);
+        $sees = fn () => collect($this->checkRate('JP', 3))->contains('carrier', 'SAGAWA');
+
+        // The branch has carrier accounts but not SGW → no SAGAWA.
+        DB::table('branch_carrier_accounts')->insert(['branch_id' => $branch->id, 'agent_account_id' => $this->ups, 'created_at' => now(), 'updated_at' => now()]);
+        $this->assertFalse($sees());
+
+        // SGW C326 ticked for the branch → SAGAWA.
+        DB::table('branch_carrier_accounts')->insert(['branch_id' => $branch->id, 'agent_account_id' => $this->sgw, 'created_at' => now(), 'updated_at' => now()]);
+        $this->assertTrue($sees());
+
+        // The account switched off → nobody.
+        DB::table('agent_accounts')->where('id', $this->sgw)->update(['status' => false]);
+        $this->assertFalse($sees());
     }
 }

@@ -189,8 +189,11 @@ class PickupCollectionTest extends TestCase
         DB::table('branch_carrier_accounts')->insert(['branch_id' => $this->branch->id, 'agent_account_id' => $this->accountId, 'allowed_service_codes' => json_encode(['P']), 'created_at' => now(), 'updated_at' => now()]);
         $resolver = app(\App\Services\QuotableAccountResolver::class);
 
+        // Branch ACCESS alone doesn't restrict quoting — only the user's own branch does.
         $staff = $this->staff();
-        $result = $resolver->forUser($staff);
+        $this->assertEqualsCanonicalizing([$this->accountId, $other], $resolver->forUser($staff)['query']->pluck('id')->all());
+        $staff->update(['branch_id' => $this->branch->id]);
+        $result = $resolver->forUser($staff->fresh());
         $this->assertSame([$this->accountId], $result['query']->pluck('id')->all());
         $this->assertSame(['P'], $result['allowedServiceCodes'][$this->accountId]);
 

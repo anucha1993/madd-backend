@@ -195,7 +195,7 @@ class ManifestReportService
             'zone' => $shipment->rate_quote['zone'] ?? null,
             'weight_act' => round($actWeight, 2),
             'weight_dim' => round($dimWeight, 2),
-            'pay' => $shipment->payment_method,
+            'pay' => $shipment->payment_method ? str_replace(',', ', ', $shipment->payment_method) : null,
             'dest' => $shipment->destination['country'] ?? null,
             'type' => $shipment->customer_type,
             'pkg' => $pkgCount,

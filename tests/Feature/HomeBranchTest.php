@@ -62,4 +62,23 @@ class HomeBranchTest extends TestCase
         Sanctum::actingAs($staff->fresh());
         $this->getJson('/api/me')->assertOk()->assertJsonPath('home_branch.name', 'Banglampoo');
     }
+
+    public function test_check_rate_uses_the_own_branch_carrier_accounts_even_for_all_branch_users(): void
+    {
+        $a = Branch::create(['name' => 'Banglampoo', 'code' => 'BLP', 'status' => true]);
+        $b = Branch::create(['name' => 'Chinatown', 'code' => 'CHN', 'status' => true]);
+        $agent = \Illuminate\Support\Facades\DB::table('agents')->insertGetId(['agent_name' => 'UPS', 'agent_code' => 'UPS', 'created_at' => now(), 'updated_at' => now()]);
+        $acc = fn ($u) => \Illuminate\Support\Facades\DB::table('agent_accounts')->insertGetId(['agent_id' => $agent, 'username_acc' => $u, 'status' => true, 'is_api_enabled' => true, 'created_at' => now(), 'updated_at' => now()]);
+        [$x, $y] = [$acc('x'), $acc('y')];
+        \App\Models\BranchCarrierAccount::create(['branch_id' => $a->id, 'agent_account_id' => $x]);
+        \App\Models\BranchCarrierAccount::create(['branch_id' => $b->id, 'agent_account_id' => $y]);
+        $quotable = fn (User $u) => app(\App\Services\QuotableAccountResolver::class)->forUser($u)['query']->pluck('username_acc')->sort()->values()->all();
+
+        // Sees every branch, belongs to Banglampoo → only Banglampoo's account.
+        $user = User::factory()->create(['can_access_all_branches' => true, 'branch_id' => $a->id]);
+        $this->assertSame(['x'], $quotable($user));
+        // No own branch → as before: "all branches" = every account.
+        $user->update(['branch_id' => null]);
+        $this->assertSame(['x', 'y'], $quotable($user->fresh()));
+    }
 }

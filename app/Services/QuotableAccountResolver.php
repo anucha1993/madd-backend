@@ -13,8 +13,10 @@ use Illuminate\Database\Eloquent\Builder;
  *
  * - Only active accounts with a real API integration (is_api_enabled=false accounts, e.g.
  *   Kerry/Flash, are only ever used when issuing a Receipt manually).
- * - Users without "access all branches" are limited to their branches' assigned accounts
- *   (branches with no assignments configured yet fall back to every active account).
+ * - Accounts / services come from the user's OWN branch (/config/users "สาขา", the branch they
+ *   book under) and its carrier accounts (/branch). The branches a user may SEE (branch access /
+ *   "access all branches") never matter here — they only open other branches' Shipments.
+ *   No own branch → no branch restriction. A branch with no accounts assigned → every account.
  * - Each assignment may restrict which service/product codes are allowed for that account
  *   (BranchCarrierAccount.allowed_service_codes); if the same account is assigned to several of
  *   the user's branches, any unrestricted (null) assignment wins.
@@ -26,7 +28,17 @@ class QuotableAccountResolver
      */
     public function forUser(?User $user): array
     {
-        return $this->forBranches($user && ! $user->can_access_all_branches ? $user->branches()->pluck('branches.id')->all() : null);
+        return $this->forBranches(self::branchIdsFor($user));
+    }
+
+    /** The branches whose carrier accounts this user quotes with (null = no restriction). */
+    public static function branchIdsFor(?User $user): ?array
+    {
+        if (! $user) {
+            return null;
+        }
+        // Only the own branch — never the branches the user may merely view.
+        return $user->branch_id ? [(int) $user->branch_id] : null;
     }
 
     /**

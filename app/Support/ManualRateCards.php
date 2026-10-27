@@ -2,7 +2,10 @@
 
 namespace App\Support;
 
+use App\Models\AgentAccount;
+use App\Models\BranchCarrierAccount;
 use App\Models\IntegrationSetting;
+use App\Models\User;
 
 /**
  * Rate cards typed in by hand for brands with no API (e.g. SAGAWA, Japan only) — shown in the Rate
@@ -28,13 +31,19 @@ final class ManualRateCards
 
     /**
      * Check Rate quotes from the cards for this destination — sell prices, quote only (`quoteOnly`):
-     * no account, no quoteId, never bookable (bookings only take UPS / DHL).
+     * no quoteId, never bookable (bookings only take UPS / DHL). Who sees a card follows its agent
+     * account (e.g. SGW C326): the account must be active, and the user's branches must be allowed
+     * to use it (/branch → carrier accounts) — the same rule as UPS / DHL accounts.
      */
-    public static function quotes(string $countryIso2, float $billedWeight): array
+    public static function quotes(string $countryIso2, float $billedWeight, ?User $user = null): array
     {
         $quotes = [];
         foreach (self::get() as $card) {
             if (strcasecmp((string) $card['country'], $countryIso2) !== 0) {
+                continue;
+            }
+            $accountId = self::accountIdOf($card);
+            if (! $accountId || ! AgentAccount::whereKey($accountId)->where('status', true)->exists() || ! self::userMayUse($user, $accountId)) {
                 continue;
             }
             [$price, $weight] = self::price($card, $billedWeight);
@@ -50,6 +59,31 @@ final class ManualRateCards
         }
 
         return $quotes;
+    }
+
+    /** The card's agent account — set on the card, else the first active SGW (SAGAWA) account. */
+    public static function accountIdOf(array $card): ?int
+    {
+        if (! empty($card['agent_account_id'])) {
+            return (int) $card['agent_account_id'];
+        }
+
+        return AgentAccount::where('status', true)->whereHas('agent', fn ($q) => $q->whereIn('agent_code', ['SGW', 'SAGAWA']))->orderBy('id')->value('id');
+    }
+
+    /**
+     * Same branches as QuotableAccountResolver (the user's own branch first): a branch with no
+     * carrier accounts assigned may use every account, otherwise only the ones assigned to it.
+     */
+    private static function userMayUse(?User $user, int $accountId): bool
+    {
+        $branchIds = \App\Services\QuotableAccountResolver::branchIdsFor($user);
+        if ($branchIds === null) {
+            return true;
+        }
+        $assigned = BranchCarrierAccount::whereIn('branch_id', $branchIds)->pluck('agent_account_id');
+
+        return $assigned->isEmpty() || $assigned->contains($accountId);
     }
 
     /**
@@ -76,6 +110,8 @@ final class ManualRateCards
             'destination' => trim((string) ($c['destination'] ?? '')),
             // Shown in Check Rate for shipments to this country (ISO2, e.g. JP); "" = Rate Book only.
             'country' => strtoupper(trim((string) ($c['country'] ?? ''))),
+            // Who sees it in Check Rate follows this account's branch assignments (null = first SGW account).
+            'agent_account_id' => ! empty($c['agent_account_id']) ? (int) $c['agent_account_id'] : null,
             'currency' => strtoupper(trim((string) ($c['currency'] ?? 'THB'))) ?: 'THB',
             'note' => trim((string) ($c['note'] ?? '')),
             'steps' => collect($c['steps'] ?? [])->map(fn ($s) => ['weight' => round((float) $s['weight'], 2), 'price' => round((float) $s['price'], 2)])
