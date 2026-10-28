@@ -1783,7 +1783,72 @@ class ShipmentController extends Controller
             }
         }
 
-        return $this->streamDocument($storageKey, 'invoice-'.$shipment->tracking_number, 'ใบกำกับสินค้าศุลกากร (Commercial Invoice)');
+        // UPS prints its internal Shipment ID as the "Waybill Number" too — swap in the 1Z tracking.
+        $transform = $shipment->carrier === 'UPS' && $shipment->tracking_number
+            ? fn (string $pdf) => $this->stampUpsInvoiceTracking($pdf, $shipment->tracking_number)
+            : null;
+
+        return $this->streamDocument($storageKey, 'invoice-'.$shipment->tracking_number, 'ใบกำกับสินค้าศุลกากร (Commercial Invoice)', $transform);
+    }
+
+    /**
+     * Writes the tracking number over the "Waybill Number:" value of every UPS invoice page (found
+     * by its text position, so staff-uploaded pages merged after it are left alone). Done when the
+     * file is opened — the stored file stays as UPS sent it. Any failure returns the PDF unchanged.
+     */
+    private function stampUpsInvoiceTracking(string $pdf, string $tracking): string
+    {
+        $tempPath = tempnam(sys_get_temp_dir(), 'ups-invoice-');
+        try {
+            $pages = (new \Smalot\PdfParser\Parser())->parseContent($pdf)->getPages();
+            $spots = array_map(fn ($page) => self::upsWaybillValueSpot($page, $tracking), $pages);
+            if (! array_filter($spots)) {
+                return $pdf;
+            }
+
+            file_put_contents($tempPath, $pdf);
+            $mpdf = new Mpdf(['mode' => 'c']);
+            $pageCount = $mpdf->setSourceFile($tempPath);
+            $mm = 25.4 / 72;
+            for ($page = 1; $page <= $pageCount; $page++) {
+                $templateId = $mpdf->importPage($page);
+                $size = $mpdf->getTemplateSize($templateId);
+                // orientation 'P' — see appendDocumentPagesToMpdf.
+                $mpdf->AddPageByArray(['orientation' => 'P', 'sheet-size' => [$size['width'], $size['height']], 'margin-top' => 0, 'margin-bottom' => 0, 'margin-left' => 0, 'margin-right' => 0]);
+                $mpdf->useTemplate($templateId, 0, 0, $size['width'], $size['height']);
+
+                if ($spot = $spots[$page - 1] ?? null) {
+                    [$x, $baseline] = [$spot[0] * $mm, $size['height'] - $spot[1] * $mm];
+                    $mpdf->SetFillColor(255, 255, 255);
+                    $mpdf->Rect($x - 0.3, $baseline - 2.8, 45, 3.7, 'F');
+                    $mpdf->SetFont('helvetica', '', 9);
+                    $mpdf->SetTextColor(0, 0, 0);
+                    $mpdf->Text($x, $baseline, $tracking);
+                }
+            }
+
+            return $mpdf->Output('', 'S');
+        } catch (\Throwable $e) {
+            report($e);
+
+            return $pdf;
+        } finally {
+            @unlink($tempPath);
+        }
+    }
+
+    /** [x, baseline] in PDF points of the value after "Waybill Number:", or null when absent / already the tracking. */
+    private static function upsWaybillValueSpot(\Smalot\PdfParser\Page $page, string $tracking): ?array
+    {
+        $items = $page->getDataTm();
+        $label = collect($items)->first(fn ($item) => trim($item[1]) === 'Waybill Number:');
+        if (! $label) {
+            return null;
+        }
+        [$labelX, $labelY] = [(float) $label[0][4], (float) $label[0][5]];
+        $value = collect($items)->first(fn ($item) => (float) $item[0][4] > $labelX && abs((float) $item[0][5] - $labelY) < 2 && trim($item[1]) !== 'Waybill Number:');
+
+        return $value && trim($value[1]) !== $tracking ? [(float) $value[0][4], (float) $value[0][5]] : null;
     }
 
     /**
@@ -1824,7 +1889,7 @@ class ShipmentController extends Controller
         };
     }
 
-    private function streamDocument(?string $storageKey, string $filenamePrefix, string $notFoundLabel)
+    private function streamDocument(?string $storageKey, string $filenamePrefix, string $notFoundLabel, ?callable $transformPdf = null)
     {
         if (! $storageKey) {
             return response()->json(['error' => "ไม่มีไฟล์ {$notFoundLabel} สำหรับ shipment นี้"], 404);
@@ -1832,6 +1897,9 @@ class ShipmentController extends Controller
 
         $content = $this->r2Service->download($storageKey);
         $extension = strtolower(pathinfo($storageKey, PATHINFO_EXTENSION));
+        if ($transformPdf && $extension === 'pdf') {
+            $content = $transformPdf($content);
+        }
         $mime = self::LABEL_MIME_TYPES[strtoupper($extension)] ?? 'application/octet-stream';
 
         return response($content, 200, [
