@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Models\Branch;
 use App\Models\SupplySale;
 use Mpdf\Mpdf;
 
@@ -16,12 +15,8 @@ class SupplySalePdfService
      */
     public function render(SupplySale $sale): string
     {
-        $sale->loadMissing('lines', 'branch', 'createdBy:id,name');
-        $html = view('supply-sales.receipt', [
-            'sale' => $sale,
-            'branch' => $sale->branch,
-            'headOffice' => Branch::where('is_head_office', true)->first() ?? $sale->branch,
-        ])->render();
+        $sale->loadMissing('lines', 'createdBy:id,name');
+        $html = view('supply-sales.receipt', ['sale' => $sale])->render();
 
         $measure = $this->mpdf(1000);
         $measure->WriteHTML($html);
