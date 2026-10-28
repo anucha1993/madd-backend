@@ -5,6 +5,7 @@ namespace App\Http\Middleware;
 use App\Models\Pickup;
 use App\Models\Receipt;
 use App\Models\Shipment;
+use App\Models\SupplySale;
 use App\Services\AccessService;
 use Closure;
 use Illuminate\Http\Request;
@@ -22,6 +23,7 @@ class EnsureRecordInScope
         Shipment::class => 'shipment',
         Receipt::class => 'receipt',
         Pickup::class => 'pickup',
+        SupplySale::class => 'supply_sale',
     ];
 
     public function __construct(private AccessService $access)

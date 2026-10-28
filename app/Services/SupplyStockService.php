@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Shipment;
+use App\Models\SupplySale;
 use App\Models\SupplyStock;
 use App\Models\SupplyStockMovement;
 use App\Models\SystemAlert;
@@ -88,6 +89,38 @@ class SupplyStockService
             $this->move((int) $supplyId, $shipment->branch_id, $delta, $delta < 0 ? 'shipment' : 'shipment_return', [
                 'shipment_id' => $shipment->id,
                 'reference' => $shipment->tracking_number,
+                'user_id' => $user?->id,
+            ]);
+        }
+    }
+
+    /**
+     * Same as syncShipment for an over-the-counter sale: issued → −quantity per supply at the
+     * selling branch ('sale'), voided ($active false) → back to 0 ('sale_return').
+     */
+    public function syncSale(SupplySale $sale, bool $active, ?User $user = null): void
+    {
+        $wanted = [];
+        if ($active) {
+            foreach ($sale->lines as $line) {
+                if ($line->supply_id) {
+                    $wanted[$line->supply_id] = ($wanted[$line->supply_id] ?? 0) - $line->quantity;
+                }
+            }
+        }
+        $current = SupplyStockMovement::where('supply_sale_id', $sale->id)
+            ->groupBy('supply_id')
+            ->selectRaw('supply_id, SUM(quantity) as net')
+            ->pluck('net', 'supply_id');
+
+        foreach (collect(array_keys($wanted))->merge($current->keys())->unique() as $supplyId) {
+            $delta = ($wanted[$supplyId] ?? 0) - (int) ($current[$supplyId] ?? 0);
+            if ($delta === 0) {
+                continue;
+            }
+            $this->move((int) $supplyId, $sale->branch_id, $delta, $delta < 0 ? 'sale' : 'sale_return', [
+                'supply_sale_id' => $sale->id,
+                'reference' => $sale->sale_no,
                 'user_id' => $user?->id,
             ]);
         }

@@ -47,7 +47,7 @@ return [
 
         'invoice_lines.*.hs_code' => ['label' => 'HS Code ของทุกรายการ', 'form_label' => 'HS Code', 'group' => 'invoice', 'step' => 3],
         'invoice_lines.*.weight' => ['label' => 'น้ำหนักของทุกรายการ', 'form_label' => 'Weight (kg)', 'group' => 'invoice', 'step' => 3],
-        'commercial_invoice_upload_key' => ['label' => 'ไฟล์ Commercial Invoice แนบ', 'form_label' => 'ไฟล์ Commercial Invoice (เสริม — PDF/JPG/PNG)', 'group' => 'invoice', 'step' => 3],
+        'commercial_invoice_upload_key' => ['label' => 'ไฟล์ Commercial Invoice แนบ', 'form_label' => 'ไฟล์ Commercial Invoice (PDF/JPG/PNG)', 'group' => 'invoice', 'step' => 3],
 
         'payment_method' => ['label' => 'วิธีชำระเงิน', 'form_label' => 'Payment Method', 'group' => 'payment', 'step' => 5],
         'ref_invoice_no' => ['label' => 'Ref: Invoice No.', 'form_label' => 'Ref. Invoice No.', 'group' => 'payment', 'step' => 5],

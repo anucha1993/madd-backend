@@ -7,10 +7,10 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /** One ledger line of supply stock (see the create_supply_stock_tables migration for types). */
-#[Fillable(['supply_id', 'branch_id', 'type', 'quantity', 'balance_after', 'shipment_id', 'reference', 'note', 'user_id', 'created_at'])]
+#[Fillable(['supply_id', 'branch_id', 'type', 'quantity', 'balance_after', 'shipment_id', 'supply_sale_id', 'reference', 'note', 'user_id', 'created_at'])]
 class SupplyStockMovement extends Model
 {
-    public const TYPES = ['receive', 'adjust', 'shipment', 'shipment_return'];
+    public const TYPES = ['receive', 'adjust', 'shipment', 'shipment_return', 'sale', 'sale_return'];
 
     public const UPDATED_AT = null;
 

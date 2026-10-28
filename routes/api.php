@@ -52,6 +52,7 @@ use App\Http\Controllers\ShipmentAnalyticsController;
 use App\Http\Controllers\ShipmentDraftController;
 use App\Http\Controllers\SmtpSettingController;
 use App\Http\Controllers\SupplyController;
+use App\Http\Controllers\SupplySaleController;
 use App\Http\Controllers\SupplyStockController;
 use App\Http\Controllers\ThaiSubdistrictController;
 use App\Http\Controllers\RateBookController;
@@ -318,6 +319,15 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
     });
 
     Route::get('supplies', [SupplyController::class, 'index']);
+
+    // ---- Box / supply sales (over the counter, 80 mm receipt) ----
+    Route::middleware('perm:supply_sale.view')->group(function () {
+        Route::get('supply-sales', [SupplySaleController::class, 'index']);
+        Route::get('supply-sales/{supply_sale}', [SupplySaleController::class, 'show']);
+        Route::get('supply-sales/{supply_sale}/pdf', [SupplySaleController::class, 'pdf'])->middleware('perm:supply_sale.print');
+    });
+    Route::post('supply-sales', [SupplySaleController::class, 'store'])->middleware('perm:supply_sale.create');
+    Route::post('supply-sales/{supply_sale}/void', [SupplySaleController::class, 'void'])->middleware('perm:supply_sale.void');
     Route::get('supply-stock', [SupplyStockController::class, 'index'])->middleware('perm:supply_stock.view');
     Route::get('supply-stock/movements', [SupplyStockController::class, 'movements'])->middleware('perm:supply_stock.view');
     Route::post('supply-stock/receive', [SupplyStockController::class, 'receive'])->middleware('perm:supply_stock.receive');

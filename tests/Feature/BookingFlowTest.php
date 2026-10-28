@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Models\AddonCategory;
+use App\Models\AddonItem;
 use App\Models\Branch;
 use App\Models\Role;
 use App\Models\Shipment;
@@ -35,6 +37,8 @@ class BookingFlowTest extends TestCase
 
     private ?string $carrierError = null;
 
+    private ?array $sentShipment = null;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -48,7 +52,8 @@ class BookingFlowTest extends TestCase
 
         $this->mock(R2Service::class, fn ($m) => $m->shouldReceive('upload')->andReturn(['key' => 'k']));
         $this->mock(DhlShipmentService::class, function ($m) {
-            $m->shouldReceive('createShipment')->andReturnUsing(function () {
+            $m->shouldReceive('createShipment')->andReturnUsing(function (array $account, array $shipment) {
+                $this->sentShipment = $shipment;
                 if ($this->carrierError) {
                     throw new \RuntimeException($this->carrierError);
                 }
@@ -139,6 +144,27 @@ class BookingFlowTest extends TestCase
         SupplyStock::create(['supply_id' => $box->id, 'branch_id' => $this->branch->id, 'quantity' => 3]);
         $this->postJson('/api/shipments', $withBox())->assertOk();
         $this->assertSame(2, SupplyStock::where('supply_id', $box->id)->value('quantity'));
+    }
+
+    /** ICDV is the carrier's insurance even when sold at our own % — UPSC is the only third party. */
+    public function test_carrier_insurance_is_bought_whatever_the_price_type_except_upsc(): void
+    {
+        $category = AddonCategory::create(['name' => 'Insurance', 'sort_order' => 1]);
+        $item = fn (string $name, string $type) => AddonItem::create(['addon_category_id' => $category->id, 'name' => $name, 'carriers' => ['DHL'], 'price_type' => $type, 'price' => $type === 'PERCENT' ? 0.4 : null, 'trigger_type' => 'MANUAL', 'status' => true]);
+        $cases = [[$item('ICDV (Non Silver/Other)', 'PERCENT'), true], [$item('UPSC (UPS, Shop)', 'PERCENT'), false], [$item('DHL (Declared Value)', 'API_COST'), true]];
+
+        foreach ($cases as [$insurance, $expected]) {
+            $payload = $this->payload(['packages' => [['weight' => 25, 'length' => 10, 'width' => 20, 'height' => 30, 'quantity' => 1, 'is_document' => false, 'declared_value' => 5000, 'insured' => true, 'insurance_addon_item_id' => $insurance->id]]]);
+            $this->postJson('/api/shipments', $payload)->assertOk();
+            $this->assertSame($expected, $this->sentShipment['packages'][0]['useCarrierInsurance'], $insurance->name);
+        }
+    }
+
+    public function test_insurance_without_a_declared_value_is_refused(): void
+    {
+        $this->postJson('/api/shipments', $this->payload(['packages' => [['weight' => 25, 'length' => 10, 'width' => 20, 'height' => 30, 'quantity' => 1, 'is_document' => false, 'declared_value' => 0, 'insured' => true]]]))
+            ->assertStatus(422)->assertJsonValidationErrors('packages');
+        $this->assertSame(0, $this->carrierCalls);
     }
 
     public function test_a_double_click_books_only_once(): void

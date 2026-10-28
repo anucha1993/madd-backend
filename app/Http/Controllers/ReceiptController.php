@@ -194,8 +194,6 @@ class ReceiptController extends Controller
             'shipment_ids.*' => ['integer', 'exists:shipments,id'],
             'manual_shipment_refs' => ['nullable', 'array'],
             'manual_shipment_refs.*' => ['string', 'max:100'],
-            // Selling boxes/supplies over the counter — no shipment at all; stock is still adjusted by hand.
-            'no_shipment' => ['boolean'],
             // Defaults to the selected shipments' own branch when omitted — only required when
             // issuing a manual-only receipt with no real shipment to infer it from. Staff may
             // still override it even when real shipments ARE selected (2026-09-25).
@@ -217,7 +215,7 @@ class ReceiptController extends Controller
         ]);
 
         $manualRefs = array_values(array_filter($data['manual_shipment_refs'] ?? []));
-        if (empty($data['shipment_ids']) && empty($manualRefs) && empty($data['no_shipment'])) {
+        if (empty($data['shipment_ids']) && empty($manualRefs)) {
             throw ValidationException::withMessages([
                 'shipment_ids' => 'กรุณาเลือก Shipment หรือระบุเลข Shipment อย่างน้อย 1 รายการ',
             ]);

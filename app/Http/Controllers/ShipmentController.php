@@ -437,13 +437,20 @@ class ShipmentController extends Controller
                 'quantity' => $pkg['quantity'] ?? 1,
                 'isDocument' => (bool) ($pkg['is_document'] ?? false),
                 'declaredValue' => $pkg['declared_value'] ?? null,
-                'useCarrierInsurance' => $insuranceItem?->price_type === 'API_COST',
+                // Not just API_COST: ICDV sold at our own % (PERCENT) is still UPS's insurance.
+                'useCarrierInsurance' => (bool) $insuranceItem?->buysCarrierInsurance(),
                 // Only actually used by DhlShipmentService to build the mandatory
                 // content.exportDeclaration.lineItems block for customs-declarable shipments.
                 'description' => $pkg['description'] ?? null,
                 'productType' => ($pkg['product_type'] ?? null) === 'OTHER' ? ($pkg['product_type_other'] ?? null) : ($pkg['product_type'] ?? null),
             ];
         }, $data['packages']);
+
+        foreach ($data['packages'] as $i => $pkg) {
+            if (! empty($pkg['insured']) && (float) ($pkg['declared_value'] ?? 0) <= 0) {
+                throw ValidationException::withMessages(['packages' => 'กล่อง #'.($i + 1).' ติ๊ก Insurance แล้ว ต้องใส่ Declared Value มากกว่า 0']);
+            }
+        }
 
         if ($limitError = DocumentWeightLimit::error($data['carrier'], $packages) ?? PieceWeightLimit::error($data['carrier'], $packages)) {
             throw ValidationException::withMessages(['packages' => $limitError]);
@@ -701,6 +708,15 @@ class ShipmentController extends Controller
         ]);
 
         $file = $request->file('file');
+        // It's merged after the carrier's invoice at booking (FPDI) — refuse a PDF that can't be
+        // opened now, while staff can still re-save it, rather than lose it after booking.
+        if (strtolower($file->getClientOriginalExtension()) === 'pdf') {
+            try {
+                (new Mpdf())->setSourceFile($file->getRealPath());
+            } catch (\Throwable $e) {
+                return response()->json(['error' => 'ไฟล์ PDF นี้ระบบเปิดรวมกับ Invoice ไม่ได้ (บีบอัดแบบที่ไม่รองรับ) — กรุณาเปิดไฟล์แล้วสั่ง Print → Save as PDF ใหม่ หรืออัปโหลดเป็นรูป JPG/PNG แทน'], 422);
+            }
+        }
         $upload = $this->r2Service->upload(
             'manual-'.$file->getClientOriginalName(),
             $file->get(),
@@ -761,13 +777,31 @@ class ShipmentController extends Controller
         $addedAnyPage = false;
 
         try {
-            if ($carrierBase64) {
-                $addedAnyPage = $this->appendDocumentPagesToMpdf($mpdf, $carrierBase64, $carrierFormat, $tempPaths) || $addedAnyPage;
+            // Each file on its own: one FPDI can't open (e.g. a PDF with compressed cross-reference
+            // streams) is left out instead of losing the whole invoice — the carrier's own invoice
+            // is the one customs needs.
+            $failed = [];
+            foreach (['carrier' => [$carrierBase64, $carrierFormat], 'upload' => [$uploadedInvoice['content'], $uploadedInvoice['format']]] as $source => [$content, $format]) {
+                if (! $content) {
+                    continue;
+                }
+                try {
+                    $addedAnyPage = $this->appendDocumentPagesToMpdf($mpdf, $content, $format, $tempPaths) || $addedAnyPage;
+                } catch (\Throwable $e) {
+                    $failed[$source] = $e->getMessage();
+                }
             }
-            $addedAnyPage = $this->appendDocumentPagesToMpdf($mpdf, $uploadedInvoice['content'], $uploadedInvoice['format'], $tempPaths) || $addedAnyPage;
-
-            if (! $addedAnyPage) {
-                return null;
+            if ($failed) {
+                SystemAlert::record(
+                    'booking_document',
+                    "Shipment {$trackingNumber}: ".(isset($failed['upload']) ? 'ไฟล์ Invoice ที่แนบมา' : 'Invoice ของ Carrier').' รวมเข้า Commercial Invoice ไม่ได้ — เก็บเฉพาะส่วนที่เปิดได้',
+                    ['tracking_number' => $trackingNumber, 'failed' => $failed],
+                    'warning',
+                );
+            }
+            // The carrier's invoice couldn't be merged — keep it exactly as the carrier sent it.
+            if (isset($failed['carrier']) || ! $addedAnyPage) {
+                return $this->uploadShipmentDocument('invoice', $trackingNumber, $carrierBase64, $carrierFormat);
             }
 
             $merged = $mpdf->Output('', 'S');
@@ -1409,6 +1443,7 @@ class ShipmentController extends Controller
         $lineGroups = array_filter([
             $this->buildPaymentOfChargesLines($shipment),
             $trackingLines,
+            $this->buildDeclaredValueLines($shipment),
             $this->buildTotalChargesLines($shipment),
         ]);
 
@@ -1573,6 +1608,7 @@ class ShipmentController extends Controller
             $rightColumnHtml = implode('<div style="height:6mm;"></div>', array_filter([
                 $this->buildPaymentOfChargesHtml($shipment),
                 $trackingHtml,
+                $this->linesToHtml($this->buildDeclaredValueLines($shipment)),
                 $this->buildTotalChargesHtml($shipment),
                 $this->buildTrackingQrHtml($shipment),
             ]));
@@ -1748,6 +1784,24 @@ class ShipmentController extends Controller
         return [
             ['bold' => true, 'text' => 'TOTAL CHARGES'],
             ['bold' => false, 'text' => $currency.' '.number_format((float) $shipment->order_total, 2)],
+        ];
+    }
+
+    /**
+     * DECLARED VALUE line data — the Declared Value staff typed per box at booking (each row's
+     * total for all its boxes), summed. Empty (block left out) when no box declared one.
+     * @return array<int, array{bold: bool, text: string}>
+     */
+    private function buildDeclaredValueLines(Shipment $shipment): array
+    {
+        $total = collect($shipment->packages ?? [])->sum(fn ($pkg) => (float) ($pkg['declared_value'] ?? 0));
+        if ($total <= 0) {
+            return [];
+        }
+
+        return [
+            ['bold' => true, 'text' => 'DECLARED VALUE'],
+            ['bold' => false, 'text' => 'THB '.number_format($total, 2)],
         ];
     }
 

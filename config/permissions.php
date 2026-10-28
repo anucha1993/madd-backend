@@ -253,6 +253,18 @@ return [
             ],
             'scope' => true,
         ],
+        'supply_sale' => [
+            'label' => 'ขายกล่อง / ซัพพลาย (หน้าร้าน)',
+            'category' => 'operations',
+            'actions' => ['view' => 'ดู', 'create' => 'ขาย', 'print' => 'พิมพ์ใบเสร็จ 80mm', 'void' => 'Void'],
+            'action_hints' => [
+                'view' => 'รายการขายกล่อง / ซัพพลายที่ไม่มี Shipment',
+                'create' => 'ขายแล้วตัด Stock ของสาขาที่ขายทันที',
+                'print' => 'ใบเสร็จกระดาษความร้อน 80 mm',
+                'void' => 'ยกเลิกการขาย — คืน Stock ให้สาขา',
+            ],
+            'scope' => true,
+        ],
         'billing_customer' => [
             'label' => 'ลูกค้าใบกำกับภาษี',
             'category' => 'operations',

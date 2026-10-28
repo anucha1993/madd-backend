@@ -113,8 +113,9 @@ class SupplyStockController extends Controller
     }
 
     /**
-     * Per supply × branch for a date range: opening balance, received, used by shipments (net of
-     * void returns), adjustments and closing balance — all derived from the movement ledger.
+     * Per supply × branch for a date range: opening balance, received, used by shipments and
+     * over-the-counter sales (net of void returns), adjustments and closing balance — all derived
+     * from the movement ledger.
      */
     public function report(Request $request)
     {
@@ -188,8 +189,8 @@ class SupplyStockController extends Controller
                     'branch_name' => $branch->name,
                     'opening' => $open,
                     'received' => (int) ($byType['receive'] ?? 0),
-                    'used' => (int) ($byType['shipment'] ?? 0),
-                    'returned' => (int) ($byType['shipment_return'] ?? 0),
+                    'used' => (int) ($byType['shipment'] ?? 0) + (int) ($byType['sale'] ?? 0),
+                    'returned' => (int) ($byType['shipment_return'] ?? 0) + (int) ($byType['sale_return'] ?? 0),
                     'adjusted' => (int) ($byType['adjust'] ?? 0),
                     'min_qty' => $stocks->get($key)?->min_qty,
                     'max_qty' => $stocks->get($key)?->max_qty,
