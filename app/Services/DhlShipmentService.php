@@ -339,6 +339,9 @@ class DhlShipmentService
         // party/account we told DHL to charge (accounts[]/incoterm), in case DHL's own billing
         // later disagrees with what was actually requested.
         $parsed['rawRequest'] = $requestBody;
+        // Uploaded files went inside this same request (documentImages) — DHL rejects the whole
+        // booking otherwise, so reaching this line means DHL received every one of them.
+        $parsed['documentResults'] = array_map(fn () => ['sent' => true, 'document_id' => null, 'error' => null], UpsShipmentService::uploadedInvoices($shipment));
         // Explicit confirmation the request was actually received/accepted (always 2xx here —
         // the throw above already handles non-successful responses) without having to dig
         // through raw_response's nested structure to infer it.

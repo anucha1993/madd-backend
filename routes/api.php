@@ -207,6 +207,7 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
         Route::get('shipments/{shipment}/waybill', [ShipmentController::class, 'waybill'])->middleware('perm:shipment.waybill');
         Route::get('shipments/{shipment}/waybill/original', [ShipmentController::class, 'originalWaybill'])->middleware('perm:shipment.waybill_original');
         Route::get('shipments/{shipment}/commercial-invoice', [ShipmentController::class, 'commercialInvoice'])->middleware('perm:shipment.invoice');
+        Route::get('shipments/{shipment}/invoice-uploads/{number}', [ShipmentController::class, 'invoiceUpload'])->whereNumber('number')->middleware('perm:shipment.invoice');
         // The detail page — its own permission, like the menu (lib/access.ts).
         Route::get('shipments/{shipment}', [ShipmentController::class, 'show'])->middleware('perm:shipment.detail');
     });

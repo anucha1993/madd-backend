@@ -14,7 +14,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[Fillable([
     'agent_account_id', 'branch_id', 'created_by', 'carrier', 'service_code', 'service_label',
     'tracking_number', 'pieces', 'status', 'origin', 'destination', 'packages', 'addon_lines',
-    'invoice_mode', 'invoice_lines', 'export_reason', 'invoice_currency', 'commercial_invoice_upload_keys',
+    'invoice_mode', 'invoice_lines', 'export_reason', 'invoice_currency', 'commercial_invoice_upload_keys', 'invoice_upload_status',
     'freight_amount', 'addon_total', 'order_total', 'currency', 'cost_amount', 'cost_currency',
     'customer_type', 'entity_type', 'payment_method', 'bill_transportation_to', 'bill_duty_tax_to',
     'bill_transportation_account_number', 'bill_transportation_third_party_country', 'bill_transportation_third_party_postal_code',
@@ -46,6 +46,7 @@ class Shipment extends Model
             'addon_lines' => 'array',
             'invoice_lines' => 'array',
             'commercial_invoice_upload_keys' => 'array',
+            'invoice_upload_status' => 'array',
             'raw_response' => 'array',
             'raw_request' => 'array',
             'rate_quote' => 'array',

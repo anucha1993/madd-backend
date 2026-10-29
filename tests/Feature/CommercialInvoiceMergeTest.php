@@ -65,26 +65,31 @@ class CommercialInvoiceMergeTest extends TestCase
     public function test_an_unreadable_upload_is_left_out_and_the_carrier_invoice_kept(): void
     {
         $method = new ReflectionMethod(ShipmentController::class, 'buildCombinedCommercialInvoiceStorageKey');
-        $key = $method->invoke(app(ShipmentController::class), '1ZTEST', base64_encode($this->carrierPdf()), 'PDF', [['content' => base64_encode($this->xrefStreamPdf()), 'format' => 'PDF']]);
+        $failures = [];
+        $key = $method->invokeArgs(app(ShipmentController::class), ['1ZTEST', base64_encode($this->carrierPdf()), 'PDF', [['content' => base64_encode($this->xrefStreamPdf()), 'format' => 'PDF']], &$failures]);
 
         $this->assertNotNull($key);
         $this->assertStringStartsWith('%PDF', $this->uploaded[0]);
-        $alert = SystemAlert::where('source', 'booking_document')->first();
-        $this->assertStringContainsString('1ZTEST', $alert->message);
-        $this->assertArrayHasKey('upload', $alert->context['failed']);
+        // Reported back to the booking (which knows whether the carrier got the file) — not claimed here.
+        $this->assertArrayHasKey('upload', $failures);
+        $this->assertSame(0, SystemAlert::count());
     }
 
-    public function test_an_unreadable_pdf_is_refused_at_upload(): void
+    public function test_any_pdf_is_accepted_at_upload_and_the_original_opens_from_the_shipment(): void
     {
         Sanctum::actingAs(User::factory()->create());
-        $method = new ReflectionMethod(ShipmentController::class, 'uploadCommercialInvoiceFile');
+        $controller = app(ShipmentController::class);
 
         $bad = UploadedFile::fake()->createWithContent('invoice.pdf', $this->xrefStreamPdf());
-        $response = $method->invoke(app(ShipmentController::class), request()->duplicate(files: ['file' => $bad]));
-        $this->assertSame(422, $response->getStatusCode());
-        $this->assertSame([], $this->uploaded);
+        $upload = (new ReflectionMethod(ShipmentController::class, 'uploadCommercialInvoiceFile'))->invoke($controller, request()->duplicate(files: ['file' => $bad]));
+        $this->assertSame(200, $upload->getStatusCode());
+        $this->assertSame($this->xrefStreamPdf(), $this->uploaded[0]);
 
-        $good = UploadedFile::fake()->createWithContent('invoice.pdf', $this->carrierPdf());
-        $this->assertSame(200, $method->invoke(app(ShipmentController::class), request()->duplicate(files: ['file' => $good]))->getStatusCode());
+        $this->mock(R2Service::class, fn ($m) => $m->shouldReceive('download')->with('manual-a.png')->andReturn('PNGDATA'));
+        $shipment = new \App\Models\Shipment(['tracking_number' => '1ZTEST', 'commercial_invoice_upload_keys' => ['manual-x.pdf', 'manual-a.png']]);
+        $response = app(ShipmentController::class)->invoiceUpload($shipment, 2);
+        $this->assertSame('image/png', $response->headers->get('Content-Type'));
+        $this->assertSame('PNGDATA', $response->getContent());
+        $this->assertSame(404, app(ShipmentController::class)->invoiceUpload($shipment, 3)->getStatusCode());
     }
 }

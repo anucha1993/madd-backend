@@ -410,17 +410,19 @@ class UpsShipmentService
      */
     public function createShipment(string $token, array $account, array $shipment, ?string $mode = null): array
     {
-        // Best-effort, one Paperless upload per file: UPS's Paperless Document upload is a
-        // separate, currently-unreliable API (see madd-notes.md) — a failure here must NOT block
-        // the actual booking. The uploaded files still get merged into our own stored Commercial
-        // Invoice PDF (ShipmentController::buildCombinedCommercialInvoiceStorageKey) regardless
-        // of whether UPS accepted them via this endpoint.
+        // One Paperless upload per file. UPS's Paperless Document upload is a separate,
+        // currently-unreliable API (see madd-notes.md) — a failure must NOT block the booking,
+        // but it is recorded per file ($documentResults) and reported as it really happened.
         $shipment['uploadedInvoiceDocumentIds'] = [];
-        foreach (self::uploadedInvoices($shipment) as $upload) {
+        $documentResults = [];
+        foreach (self::uploadedInvoices($shipment) as $i => $upload) {
             try {
-                $shipment['uploadedInvoiceDocumentIds'][] = $this->uploadPaperlessDocument($token, $account, $mode, $upload['content'], $upload['format']);
+                $documentId = $this->uploadPaperlessDocument($token, $account, $mode, $upload['content'], $upload['format']);
+                $shipment['uploadedInvoiceDocumentIds'][] = $documentId;
+                $documentResults[$i] = ['sent' => true, 'document_id' => $documentId, 'error' => null];
             } catch (\Throwable $e) {
                 report($e);
+                $documentResults[$i] = ['sent' => false, 'document_id' => null, 'error' => 'อัปโหลดเข้า UPS Paperless ไม่สำเร็จ: '.mb_substr($e->getMessage(), 0, 200)];
             }
         }
 
@@ -451,13 +453,19 @@ class UpsShipmentService
         // Best-effort, same reasoning as the Upload call above: link the uploaded document to the
         // shipment we just booked so it actually shows the "EDI-IDIS" marking for customs, but
         // never let a failure here undo an otherwise-successful booking.
-        foreach (empty($parsed['trackingNumber']) ? [] : $shipment['uploadedInvoiceDocumentIds'] as $documentId) {
+        foreach ($documentResults as $i => $result) {
+            if (! $result['sent'] || empty($parsed['trackingNumber'])) {
+                continue;
+            }
             try {
-                $this->pushToImageRepository($token, $account, $mode, $documentId, $parsed['trackingNumber']);
+                $this->pushToImageRepository($token, $account, $mode, $result['document_id'], $parsed['trackingNumber']);
             } catch (\Throwable $e) {
                 report($e);
+                // Uploaded to UPS but not attached to this shipment — customs won't see it.
+                $documentResults[$i] = ['sent' => false, 'document_id' => $result['document_id'], 'error' => 'อัปโหลดเข้า UPS แล้ว แต่ผูกกับ Shipment ไม่สำเร็จ: '.mb_substr($e->getMessage(), 0, 200)];
             }
         }
+        $parsed['documentResults'] = array_values($documentResults);
 
         return $parsed;
     }

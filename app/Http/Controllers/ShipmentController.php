@@ -63,6 +63,10 @@ class ShipmentController extends Controller
         'PDF' => 'application/pdf',
         'GIF' => 'image/gif',
         'ZPL' => 'application/octet-stream',
+        // Staff-uploaded invoice attachments (see invoiceUpload).
+        'PNG' => 'image/png',
+        'JPG' => 'image/jpeg',
+        'JPEG' => 'image/jpeg',
     ];
 
     /** Payment method codes as stored: trimmed, de-duplicated, comma-separated ("QR,CARD"); none = null. */
@@ -666,6 +670,40 @@ class ShipmentController extends Controller
             );
         }
 
+        $mergeFailures = [];
+        $invoiceKey = $this->buildCombinedCommercialInvoiceStorageKey(
+            $result['trackingNumber'],
+            $result['commercialInvoiceBase64'] ?? null,
+            $result['commercialInvoiceFormat'] ?? null,
+            $shipment['uploadedInvoices'],
+            $mergeFailures,
+        );
+        // Per uploaded file: did the carrier really get it, and is it inside our merged PDF.
+        $invoiceUploadStatus = [];
+        foreach ($uploadKeys as $i => $key) {
+            $carrierResult = $result['documentResults'][$i] ?? ['sent' => false, 'error' => 'ไม่มีผลตอบกลับจาก Carrier สำหรับไฟล์นี้'];
+            $invoiceUploadStatus[] = [
+                'sent_to_carrier' => (bool) $carrierResult['sent'],
+                'carrier_error' => $carrierResult['error'] ?? null,
+                'in_merged_pdf' => $invoiceKey !== null && ! isset($mergeFailures['upload'.($i ?: '')]),
+            ];
+        }
+        $uploadWarnings = [];
+        foreach ($invoiceUploadStatus as $i => $status) {
+            if (! $status['sent_to_carrier']) {
+                $uploadWarnings[] = 'ไฟล์แนบ '.($i + 1).' ไม่ถึง '.$data['carrier'].' — '.$status['carrier_error'].' ต้องส่งเอกสารนี้ให้ '.$data['carrier'].' เอง';
+            } elseif (! $status['in_merged_pdf']) {
+                $uploadWarnings[] = 'ไฟล์แนบ '.($i + 1).' ถึง '.$data['carrier'].' แล้ว แต่รวมเข้า PDF "Open invoice" ของระบบไม่ได้ — เปิดไฟล์ต้นฉบับได้ที่ปุ่ม "ไฟล์แนบ '.($i + 1).'"';
+            }
+        }
+        if ($uploadWarnings) {
+            SystemAlert::record('booking_document', "Shipment {$result['trackingNumber']}: ".implode(' | ', $uploadWarnings), [
+                'tracking_number' => $result['trackingNumber'],
+                'carrier' => $data['carrier'],
+                'invoice_upload_status' => $invoiceUploadStatus,
+            ], 'warning');
+        }
+
         try {
             $record = Shipment::create($recordAttributes + [
                 'status' => 'booked',
@@ -675,12 +713,8 @@ class ShipmentController extends Controller
                 'waybill_storage_key' => $this->uploadShipmentDocument('waybill', $result['trackingNumber'], $result['waybillBase64'] ?? null, $result['waybillFormat'] ?? null),
                 // Page 1 = the carrier's own invoice (from the Shipment API response), page 2+ = the
                 // staff-uploaded invoice file, if any — merged into one PDF for both UPS and DHL.
-                'commercial_invoice_storage_key' => $this->buildCombinedCommercialInvoiceStorageKey(
-                    $result['trackingNumber'],
-                    $result['commercialInvoiceBase64'] ?? null,
-                    $result['commercialInvoiceFormat'] ?? null,
-                    $shipment['uploadedInvoices'],
-                ),
+                'commercial_invoice_storage_key' => $invoiceKey,
+                'invoice_upload_status' => $invoiceUploadStatus ?: null,
                 'raw_response' => $result['raw'],
                 'raw_request' => $result['rawRequest'] ?? null,
                 'carrier_http_status' => $result['httpStatus'] ?? null,
@@ -711,7 +745,8 @@ class ShipmentController extends Controller
             report($e);
         }
 
-        return response()->json($record);
+        // Shown on the booking-success screen — what really happened to the uploaded files.
+        return response()->json($record->toArray() + ['upload_warnings' => $uploadWarnings]);
     }
 
     /**
@@ -728,16 +763,10 @@ class ShipmentController extends Controller
             'file' => ['required', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:5120'],
         ]);
 
+        // Any PDF is accepted: the carrier gets the file as-is, and the original is kept on the
+        // shipment (commercial_invoice_upload_keys). Only our merged copy needs FPDI — a PDF it
+        // can't open is just left out of that copy (see buildCombinedCommercialInvoiceStorageKey).
         $file = $request->file('file');
-        // It's merged after the carrier's invoice at booking (FPDI) — refuse a PDF that can't be
-        // opened now, while staff can still re-save it, rather than lose it after booking.
-        if (strtolower($file->getClientOriginalExtension()) === 'pdf') {
-            try {
-                (new Mpdf())->setSourceFile($file->getRealPath());
-            } catch (\Throwable $e) {
-                return response()->json(['error' => 'ไฟล์ PDF นี้ระบบเปิดรวมกับ Invoice ไม่ได้ (บีบอัดแบบที่ไม่รองรับ) — กรุณาเปิดไฟล์แล้วสั่ง Print → Save as PDF ใหม่ หรืออัปโหลดเป็นรูป JPG/PNG แทน'], 422);
-            }
-        }
         $upload = $this->r2Service->upload(
             'manual-'.$file->getClientOriginalName(),
             $file->get(),
@@ -787,7 +816,7 @@ class ShipmentController extends Controller
      * no PDF conversion) when there's no staff upload to merge, to avoid changing existing
      * single-file behavior unnecessarily.
      */
-    private function buildCombinedCommercialInvoiceStorageKey(?string $trackingNumber, ?string $carrierBase64, ?string $carrierFormat, array $uploadedInvoices): ?string
+    private function buildCombinedCommercialInvoiceStorageKey(?string $trackingNumber, ?string $carrierBase64, ?string $carrierFormat, array $uploadedInvoices, array &$mergeFailures = []): ?string
     {
         if (! $uploadedInvoices) {
             return $this->uploadShipmentDocument('invoice', $trackingNumber, $carrierBase64, $carrierFormat);
@@ -816,13 +845,11 @@ class ShipmentController extends Controller
                     $failed[$source] = $e->getMessage();
                 }
             }
-            if ($failed) {
-                SystemAlert::record(
-                    'booking_document',
-                    "Shipment {$trackingNumber}: ".(isset($failed['carrier']) ? 'Invoice ของ Carrier' : 'ไฟล์ Invoice ที่แนบมา').' รวมเข้า Commercial Invoice ไม่ได้ — เก็บเฉพาะส่วนที่เปิดได้',
-                    ['tracking_number' => $trackingNumber, 'failed' => $failed],
-                    'warning',
-                );
+            // Only what this step itself knows: which files are missing from OUR merged PDF.
+            // Whether the carrier got them is recorded separately (invoice_upload_status).
+            $mergeFailures = $failed;
+            if (isset($failed['carrier'])) {
+                SystemAlert::record('booking_document', "Shipment {$trackingNumber}: รวม Invoice ของ Carrier เข้า PDF ของระบบไม่ได้ — เก็บไฟล์ของ Carrier ไว้แยกตามเดิม", ['tracking_number' => $trackingNumber, 'failed' => $failed], 'warning');
             }
             // The carrier's invoice couldn't be merged — keep it exactly as the carrier sent it.
             if (isset($failed['carrier']) || ! $addedAnyPage) {
@@ -1932,6 +1959,15 @@ class ShipmentController extends Controller
         $value = collect($items)->first(fn ($item) => (float) $item[0][4] > $labelX && abs((float) $item[0][5] - $labelY) < 2 && trim($item[1]) !== 'Waybill Number:');
 
         return $value && trim($value[1]) !== $tracking ? [(float) $value[0][4], (float) $value[0][5]] : null;
+    }
+
+    /** One of the staff-uploaded invoice files of this shipment, as uploaded (1-based). */
+    public function invoiceUpload(Shipment $shipment, int $number)
+    {
+        $key = ($shipment->commercial_invoice_upload_keys ?? [])[$number - 1] ?? null;
+        app(\App\Services\AuditLogger::class)->accessed('document_viewed', $shipment, ['document' => 'invoice_upload_'.$number]);
+
+        return $this->streamDocument($key, 'invoice-attachment-'.$number.'-'.$shipment->tracking_number, 'ไฟล์ Invoice ที่แนบ');
     }
 
     /**
