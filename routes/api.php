@@ -40,6 +40,7 @@ use App\Http\Controllers\KeyBillingReportController;
 use App\Http\Controllers\ChargeFixedOverrideController;
 use App\Http\Controllers\MarkupRuleController;
 use App\Http\Controllers\PickupController;
+use App\Http\Controllers\HsCodeController;
 use App\Http\Controllers\ProductWeightBandController;
 use App\Http\Controllers\ReceiptController;
 use App\Http\Controllers\ReceiptLineTemplateController;
@@ -297,6 +298,10 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
 
     // ---- Reference data used by the booking / receipt forms ----
     Route::get('product-weight-bands', [ProductWeightBandController::class, 'index']);
+    // HS Code lookup is open to everyone who fills a Commercial Invoice; managing the list isn't.
+    Route::get('hs-codes', [HsCodeController::class, 'index']);
+    Route::post('hs-codes/import', [HsCodeController::class, 'import'])->middleware('perm:config.hs_codes');
+    Route::apiResource('hs-codes', HsCodeController::class)->only(['store', 'update', 'destroy'])->middleware('perm:config.hs_codes');
     Route::apiResource('product-weight-bands', ProductWeightBandController::class)->only(['store', 'update', 'destroy'])->middleware('perm:config.weight_bands');
 
     Route::get('countries', [CountryController::class, 'index']);

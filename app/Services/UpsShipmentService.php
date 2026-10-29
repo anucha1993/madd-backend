@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Exceptions\UpsTokenExpiredException;
 use App\Services\Concerns\HasUpsOAuthToken;
+use App\Support\CommercialInvoiceCodes;
 use App\Support\StateCode;
 use App\Support\UpsOptionalServices;
 use Illuminate\Support\Facades\Http;
@@ -124,12 +125,14 @@ class UpsShipmentService
                 'ShipperNumber' => $account['username_acc'],
                 'Address' => $this->buildAddress($from),
             ],
-            'ShipTo' => [
+            'ShipTo' => array_filter([
                 'Name' => $to['contactName'] ?: ($to['company'] ?: 'Receiver'),
                 'AttentionName' => $to['contactName'] ?? null,
+                // Receiver's Tax ID / EORI / National ID — some destinations won't clear without it.
+                'TaxIdentificationNumber' => ($to['taxId'] ?? null) ?: null,
                 'Phone' => ['Number' => $to['phone'] ?: '0000000000'],
                 'Address' => $this->buildAddress($to),
-            ],
+            ], fn ($v) => $v !== null),
             'ShipFrom' => [
                 'Name' => $from['contactName'] ?: ($from['company'] ?: 'Shipper'),
                 'AttentionName' => $from['contactName'] ?? null,
@@ -187,12 +190,17 @@ class UpsShipmentService
             })->all(),
         ];
 
-        // International non-document shipments require an invoice/contents value declaration.
+        // International non-document shipments require an invoice/contents value declaration —
+        // the invoice lines' total in the invoice's currency when there are lines (same as the
+        // Commercial Invoice below), otherwise the packages' Declared Value as before.
         if ($isInternational && $hasNonDocument) {
-            $totalValue = collect($shipment['packages'])->sum(fn ($pkg) => (float) ($pkg['declaredValue'] ?? 0));
+            $invoiceLines = collect($shipment['invoiceLines'] ?? []);
+            $totalValue = $invoiceLines->isNotEmpty()
+                ? $invoiceLines->sum(fn ($line) => (float) ($line['quantity'] ?? 1) * (float) ($line['unit_value'] ?? 0))
+                : collect($shipment['packages'])->sum(fn ($pkg) => (float) ($pkg['declaredValue'] ?? 0));
             $shipmentNode['InvoiceLineTotal'] = [
-                'CurrencyCode' => $shipment['declaredValueCurrency'] ?? 'THB',
-                'MonetaryValue' => (string) ($totalValue > 0 ? $totalValue : 1),
+                'CurrencyCode' => $invoiceLines->isNotEmpty() ? $this->invoiceCurrency($shipment) : ($shipment['declaredValueCurrency'] ?? 'THB'),
+                'MonetaryValue' => (string) round($totalValue > 0 ? $totalValue : 1, 2),
             ];
         }
 
@@ -202,7 +210,7 @@ class UpsShipmentService
         // auto-generated one.
         $shipmentServiceOptions = array_merge(
             UpsOptionalServices::shipmentLevel($shipment['upsOptionalServiceCodes'] ?? []),
-            $isInternational && $hasNonDocument ? ['InternationalForms' => $this->buildInternationalForms($shipment, $shipment['declaredValueCurrency'] ?? 'THB')] : [],
+            $isInternational && $hasNonDocument ? ['InternationalForms' => $this->buildInternationalForms($shipment, $this->invoiceCurrency($shipment))] : [],
         );
         if ($shipmentServiceOptions !== []) {
             $shipmentNode['ShipmentServiceOptions'] = $shipmentServiceOptions;
@@ -230,6 +238,18 @@ class UpsShipmentService
      * non-document package otherwise. UPS renders the actual Commercial Invoice PDF itself from
      * this data (returned as ShipmentResults.Form) — no separate document upload needed.
      */
+    /** The invoice's own currency (customs values) — falls back to the Declared Value currency. */
+    private function invoiceCurrency(array $shipment): string
+    {
+        return $shipment['invoiceCurrency'] ?? $shipment['declaredValueCurrency'] ?? 'THB';
+    }
+
+    /** @return array<int, array{content: string, format: string}> uploadedInvoices, or the older single uploadedInvoice. */
+    public static function uploadedInvoices(array $shipment): array
+    {
+        return $shipment['uploadedInvoices'] ?? (empty($shipment['uploadedInvoice']) ? [] : [$shipment['uploadedInvoice']]);
+    }
+
     private function buildInternationalForms(array $shipment, string $currency): array
     {
         $from = $shipment['from'];
@@ -241,7 +261,7 @@ class UpsShipmentService
                 'Description' => $line['description'] ?: 'General Merchandise',
                 'Unit' => [
                     'Number' => (string) ($line['quantity'] ?? 1),
-                    'UnitOfMeasurement' => ['Code' => 'PCS'],
+                    'UnitOfMeasurement' => ['Code' => CommercialInvoiceCodes::upsUnit($line['unit'] ?? null)],
                     'Value' => number_format(((float) ($line['unit_value'] ?? 0)) ?: 1, 2, '.', ''),
                 ],
                 'OriginCountryCode' => $line['country_of_origin'] ?: $from['country'],
@@ -263,7 +283,7 @@ class UpsShipmentService
             'FormType' => '01', // Commercial Invoice
             'InvoiceNumber' => $shipment['refInvoiceNo'] ?: ('INV-'.now()->format('YmdHis')),
             'InvoiceDate' => now()->format('Ymd'),
-            'ReasonForExport' => 'SALE',
+            'ReasonForExport' => CommercialInvoiceCodes::upsReason($shipment['exportReason'] ?? null),
             'CurrencyCode' => $currency,
             'Product' => $products,
             // UPS rejects the whole ShipmentServiceOptions.InternationalForms block with a
@@ -285,8 +305,8 @@ class UpsShipmentService
         // UPLOAD mode (see createShipment) — reference the staff file uploaded to UPS's
         // Paperless Document API, so UPS's returned Form is backed by the actual file, not just
         // our auto-built Product lines.
-        if (! empty($shipment['uploadedInvoiceDocumentId'])) {
-            $form['UserCreatedForm'] = ['DocumentID' => [$shipment['uploadedInvoiceDocumentId']]];
+        if (! empty($shipment['uploadedInvoiceDocumentIds'])) {
+            $form['UserCreatedForm'] = ['DocumentID' => $shipment['uploadedInvoiceDocumentIds']];
         }
 
         return $form;
@@ -390,20 +410,15 @@ class UpsShipmentService
      */
     public function createShipment(string $token, array $account, array $shipment, ?string $mode = null): array
     {
-        if (! empty($shipment['uploadedInvoice'])) {
-            // Best-effort: UPS's Paperless Document upload is a separate, currently-unreliable
-            // API (see madd-notes.md) — a failure here must NOT block the actual booking. The
-            // uploaded file still gets merged into our own stored Commercial Invoice PDF
-            // (ShipmentController::buildCombinedCommercialInvoiceStorageKey) regardless of
-            // whether UPS accepted it via this endpoint.
+        // Best-effort, one Paperless upload per file: UPS's Paperless Document upload is a
+        // separate, currently-unreliable API (see madd-notes.md) — a failure here must NOT block
+        // the actual booking. The uploaded files still get merged into our own stored Commercial
+        // Invoice PDF (ShipmentController::buildCombinedCommercialInvoiceStorageKey) regardless
+        // of whether UPS accepted them via this endpoint.
+        $shipment['uploadedInvoiceDocumentIds'] = [];
+        foreach (self::uploadedInvoices($shipment) as $upload) {
             try {
-                $shipment['uploadedInvoiceDocumentId'] = $this->uploadPaperlessDocument(
-                    $token,
-                    $account,
-                    $mode,
-                    $shipment['uploadedInvoice']['content'],
-                    $shipment['uploadedInvoice']['format'],
-                );
+                $shipment['uploadedInvoiceDocumentIds'][] = $this->uploadPaperlessDocument($token, $account, $mode, $upload['content'], $upload['format']);
             } catch (\Throwable $e) {
                 report($e);
             }
@@ -436,9 +451,9 @@ class UpsShipmentService
         // Best-effort, same reasoning as the Upload call above: link the uploaded document to the
         // shipment we just booked so it actually shows the "EDI-IDIS" marking for customs, but
         // never let a failure here undo an otherwise-successful booking.
-        if (! empty($shipment['uploadedInvoiceDocumentId']) && ! empty($parsed['trackingNumber'])) {
+        foreach (empty($parsed['trackingNumber']) ? [] : $shipment['uploadedInvoiceDocumentIds'] as $documentId) {
             try {
-                $this->pushToImageRepository($token, $account, $mode, $shipment['uploadedInvoiceDocumentId'], $parsed['trackingNumber']);
+                $this->pushToImageRepository($token, $account, $mode, $documentId, $parsed['trackingNumber']);
             } catch (\Throwable $e) {
                 report($e);
             }

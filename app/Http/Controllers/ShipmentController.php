@@ -11,6 +11,7 @@ use App\Models\Country;
 use App\Models\Shipment;
 use App\Models\Supply;
 use App\Models\SystemAlert;
+use App\Support\CommercialInvoiceCodes;
 use App\Models\User;
 use App\Services\AccessService;
 use App\Services\DhlRateService;
@@ -310,6 +311,8 @@ class ShipmentController extends Controller
             'destination.contact_name' => ['nullable', 'string', 'max:255'],
             'destination.company' => ['nullable', 'string', 'max:255'],
             'destination.tax_id' => ['nullable', 'string', 'max:50'],
+            // What the receiver's number is (DHL registrationNumbers typeCode) — VAT by default.
+            'destination.tax_id_type' => ['nullable', 'string', 'in:'.implode(',', CommercialInvoiceCodes::TAX_ID_TYPES)],
             'destination.country' => ['required', 'string', 'size:2', 'not_in:TH'],
             'destination.city' => ['required', 'string', 'max:255'],
             'destination.state' => ['nullable', 'string', 'max:10'],
@@ -356,10 +359,19 @@ class ShipmentController extends Controller
             'invoice_lines.*.weight' => ['nullable', 'numeric', 'min:0'],
             'invoice_lines.*.country_of_origin' => ['nullable', 'string', 'max:2'],
             'invoice_lines.*.hs_code' => ['nullable', 'string', 'max:20'],
+            'invoice_lines.*.unit' => ['nullable', 'string', 'in:'.implode(',', array_keys(CommercialInvoiceCodes::UNITS))],
+            // Purpose of shipment (both carriers require one) and the invoice's currency — the
+            // customs values only; insurance / Declared Value stays in THB.
+            'export_reason' => ['nullable', 'string', 'in:'.implode(',', array_keys(CommercialInvoiceCodes::EXPORT_REASONS))],
+            'invoice_currency' => ['nullable', 'string', 'size:3', 'alpha'],
             // Storage key from POST /shipments/upload-commercial-invoice — sent to the carrier
             // as a supplementary document (DHL documentImages CIN) IN ADDITION to invoice_lines,
             // not as a replacement.
             'commercial_invoice_upload_key' => ['nullable', 'string', 'max:255'],
+            // Several supporting files (DHL documentImages / UPS Paperless) — the single key above
+            // is kept for older drafts.
+            'commercial_invoice_upload_keys' => ['nullable', 'array', 'max:5'],
+            'commercial_invoice_upload_keys.*' => ['string', 'max:255'],
             // DHL Optional Services (live-verified against DHL's own /reference-data serviceCode
             // dataset) — applied to both the rate check and the real booking so quoted/charged
             // amounts stay consistent.
@@ -467,6 +479,7 @@ class ShipmentController extends Controller
                 'address2' => $data['origin']['address2'] ?? null,
                 'address3' => $data['origin']['address3'] ?? null,
                 'phone' => $data['origin']['phone'] ?? null,
+                'taxId' => $data['origin']['tax_id'] ?? null,
             ],
             'to' => [
                 'contactName' => $data['destination']['contact_name'] ?? null,
@@ -480,6 +493,8 @@ class ShipmentController extends Controller
                 'address3' => $data['destination']['address3'] ?? null,
                 'phone' => $data['destination']['phone'] ?? null,
                 'email' => $data['destination']['email'] ?? null,
+                'taxId' => $data['destination']['tax_id'] ?? null,
+                'taxIdType' => $data['destination']['tax_id_type'] ?? null,
             ],
             'packages' => $packages,
             'declaredValueCurrency' => $data['declared_value_currency'] ?? 'THB',
@@ -490,6 +505,9 @@ class ShipmentController extends Controller
             // DHL mandates lineItems on every customs-declarable shipment (confirmed against
             // MyDHL+ portal). A supplementary file upload (see below) does NOT replace this.
             'invoiceLines' => $data['invoice_lines'] ?? [],
+            'exportReason' => $data['export_reason'] ?? null,
+            // Customs values on the invoice; Declared Value / insurance stays declaredValueCurrency.
+            'invoiceCurrency' => strtoupper($data['invoice_currency'] ?? '') ?: ($data['declared_value_currency'] ?? 'THB'),
             'optionalServiceCodes' => $data['dhl_optional_services'] ?? DhlRateService::DEFAULT_OPTIONAL_SERVICE_CODES,
             'upsOptionalServiceCodes' => $data['ups_optional_services'] ?? [],
             // Who pays freight/duty-tax (Payment Info step) — see UpsShipmentService::
@@ -505,17 +523,17 @@ class ShipmentController extends Controller
             'billDutyTaxThirdPartyPostalCode' => $data['bill_duty_tax_third_party_postal_code'] ?? null,
         ];
 
-        // Supplementary Commercial Invoice attachment — attached to the carrier request as
-        // documentImages typeCode CIN (DHL) IN ADDITION to invoiceLines, not as a replacement.
-        // Attached whenever the storage key is present, regardless of invoice_mode.
-        if (! empty($data['commercial_invoice_upload_key'])) {
-            $uploadKey = $data['commercial_invoice_upload_key'];
+        // Uploaded Commercial Invoice file(s) — sent to the carrier as the invoice document(s)
+        // (DHL documentImages CIN / UPS Paperless) IN ADDITION to invoiceLines, not instead.
+        $uploadKeys = array_values(array_unique(array_filter([...($data['commercial_invoice_upload_keys'] ?? []), $data['commercial_invoice_upload_key'] ?? null])));
+        $shipment['uploadedInvoices'] = array_map(function ($uploadKey) {
             $ext = strtoupper(pathinfo($uploadKey, PATHINFO_EXTENSION));
-            $shipment['uploadedInvoice'] = [
+
+            return [
                 'content' => base64_encode($this->r2Service->download($uploadKey)),
                 'format' => in_array($ext, ['JPG', 'JPEG']) ? 'JPEG' : ($ext === 'PNG' ? 'PNG' : 'PDF'),
             ];
-        }
+        }, $uploadKeys);
 
         // The browser only ever holds a sanitized copy of the quote (see
         // ShippingController::checkRate) — the full one (carrier cost, markup detail, raw) is
@@ -557,6 +575,9 @@ class ShipmentController extends Controller
             'addon_lines' => $data['addon_lines'] ?? [],
             'invoice_mode' => $data['invoice_mode'] ?? 'FORM',
             'invoice_lines' => $data['invoice_lines'] ?? [],
+            'export_reason' => $data['export_reason'] ?? null,
+            'invoice_currency' => $shipment['invoiceCurrency'],
+            'commercial_invoice_upload_keys' => $uploadKeys ?: null,
             'freight_amount' => $data['freight_amount'],
             'addon_total' => $data['addon_total'],
             'order_total' => $data['order_total'],
@@ -658,7 +679,7 @@ class ShipmentController extends Controller
                     $result['trackingNumber'],
                     $result['commercialInvoiceBase64'] ?? null,
                     $result['commercialInvoiceFormat'] ?? null,
-                    $shipment['uploadedInvoice'] ?? null,
+                    $shipment['uploadedInvoices'],
                 ),
                 'raw_response' => $result['raw'],
                 'raw_request' => $result['rawRequest'] ?? null,
@@ -766,9 +787,9 @@ class ShipmentController extends Controller
      * no PDF conversion) when there's no staff upload to merge, to avoid changing existing
      * single-file behavior unnecessarily.
      */
-    private function buildCombinedCommercialInvoiceStorageKey(?string $trackingNumber, ?string $carrierBase64, ?string $carrierFormat, ?array $uploadedInvoice): ?string
+    private function buildCombinedCommercialInvoiceStorageKey(?string $trackingNumber, ?string $carrierBase64, ?string $carrierFormat, array $uploadedInvoices): ?string
     {
-        if (! $uploadedInvoice) {
+        if (! $uploadedInvoices) {
             return $this->uploadShipmentDocument('invoice', $trackingNumber, $carrierBase64, $carrierFormat);
         }
 
@@ -781,7 +802,11 @@ class ShipmentController extends Controller
             // streams) is left out instead of losing the whole invoice — the carrier's own invoice
             // is the one customs needs.
             $failed = [];
-            foreach (['carrier' => [$carrierBase64, $carrierFormat], 'upload' => [$uploadedInvoice['content'], $uploadedInvoice['format']]] as $source => [$content, $format]) {
+            $sources = ['carrier' => [$carrierBase64, $carrierFormat]];
+            foreach ($uploadedInvoices as $i => $upload) {
+                $sources['upload'.($i ?: '')] = [$upload['content'], $upload['format']];
+            }
+            foreach ($sources as $source => [$content, $format]) {
                 if (! $content) {
                     continue;
                 }
@@ -794,7 +819,7 @@ class ShipmentController extends Controller
             if ($failed) {
                 SystemAlert::record(
                     'booking_document',
-                    "Shipment {$trackingNumber}: ".(isset($failed['upload']) ? 'ไฟล์ Invoice ที่แนบมา' : 'Invoice ของ Carrier').' รวมเข้า Commercial Invoice ไม่ได้ — เก็บเฉพาะส่วนที่เปิดได้',
+                    "Shipment {$trackingNumber}: ".(isset($failed['carrier']) ? 'Invoice ของ Carrier' : 'ไฟล์ Invoice ที่แนบมา').' รวมเข้า Commercial Invoice ไม่ได้ — เก็บเฉพาะส่วนที่เปิดได้',
                     ['tracking_number' => $trackingNumber, 'failed' => $failed],
                     'warning',
                 );
@@ -878,7 +903,11 @@ class ShipmentController extends Controller
      */
     public function show(Shipment $shipment)
     {
-        return $shipment->load('agentAccount.agent', 'createdBy');
+        $shipment->load('agentAccount.agent', 'createdBy');
+        // Proof of whether the carrier's insurance was really bought (see Shipment::carrierInsurance).
+        $shipment->setAttribute('carrier_insurance', $shipment->carrierInsurance());
+
+        return $shipment;
     }
 
     /**

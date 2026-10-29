@@ -342,6 +342,7 @@ return [
                 'insurance' => 'Insurance UPSC',
                 'supplies' => 'Packaging Supplies',
                 'weight_bands' => 'Weight Bands',
+                'hs_codes' => 'HS Code',
                 'manifest_options' => 'Manifest Options',
                 'receipt_templates' => 'Receipt Templates',
                 'insurance_import' => 'Insurance UPSC: นำเข้าไฟล์',
@@ -370,6 +371,7 @@ return [
             ],
             'action_hints' => [
                 'markup' => 'Mark-up / Charge Codes / สูตรค่าบริการ',
+                'hs_codes' => 'ฐานข้อมูล HS Code (เพิ่ม / แก้ / นำเข้า Excel) — ช่อง HS Code ใน Commercial Invoice ค้นหาได้ทุกคน',
                 'weight_markups' => 'ดูราคาบวกเพิ่ม (บาท/kg) ตามช่วงน้ำหนัก ราย Zone / ประเทศ',
                 'weight_markups_edit' => 'แก้ช่วงน้ำหนัก / ราคา Weight Markup — มีผลกับราคาขายทันที',
                 'shipment_layout' => 'ปุ่ม "จัดตำแหน่ง" ในหน้า Create Shipment — ลากสลับ / ปรับความกว้างช่อง Ship From / Ship To มีผลกับทุกบัญชี',

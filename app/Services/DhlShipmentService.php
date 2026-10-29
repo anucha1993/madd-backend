@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\CommercialInvoiceCodes;
 use Illuminate\Support\Facades\Http;
 
 /**
@@ -123,7 +124,9 @@ class DhlShipmentService
             ->sum(fn ($pkg) => (float) ($pkg['declaredValue'] ?? 0));
         $hasInsuredDocument = $insuredPackages
             ->contains(fn ($pkg) => ! empty($pkg['isDocument']) && (float) ($pkg['declaredValue'] ?? 0) > 0);
+        // Insurance (II) stays in the Declared Value currency; customs values use the invoice's.
         $currency = $shipment['declaredValueCurrency'] ?? 'THB';
+        $invoiceCurrency = $shipment['invoiceCurrency'] ?? $currency;
         // Customs declared value — MANDATORY whenever isCustomsDeclarable is true, regardless of
         // whether carrier insurance was purchased (DHL rejects the shipment entirely otherwise:
         // "required key [declaredValue] not found", confirmed live). Prefers the free-form
@@ -181,10 +184,14 @@ class DhlShipmentService
                     'postalAddress' => $this->buildPostalAddress($from),
                     'contactInformation' => $this->buildContactInformation($from),
                 ],
-                'receiverDetails' => [
+                'receiverDetails' => array_filter([
                     'postalAddress' => $this->buildPostalAddress($to),
                     'contactInformation' => $this->buildContactInformation($to),
-                ],
+                    // Receiver's Tax ID / EORI / National ID — required by some destinations.
+                    'registrationNumbers' => ! empty($to['taxId'])
+                        ? [['typeCode' => $to['taxIdType'] ?? 'VAT', 'number' => $to['taxId'], 'issuerCountryCode' => $to['country']]]
+                        : null,
+                ], fn ($v) => $v !== null),
             ],
             'content' => array_filter([
                 'packages' => $expandedPackages,
@@ -193,7 +200,7 @@ class DhlShipmentService
                 // null declaredValue ("expected type: String/Number, found: Null"), the key must
                 // be left out entirely when there's nothing to declare (domestic/documents-only).
                 'declaredValue' => $customsValue > 0 ? $customsValue : null,
-                'declaredValueCurrency' => $currency,
+                'declaredValueCurrency' => $invoiceCurrency,
                 // DHL has no literal "isDocument" flag anywhere in this schema (confirmed
                 // against DHL's own Rating/Shipment example payloads) — "Documents" here is
                 // just the conventional description text DHL's own examples use, no functional
@@ -205,7 +212,7 @@ class DhlShipmentService
                 // mandatory when provided product is dutiable" — confirmed live against the
                 // sandbox). Never included for a purely-documents/domestic shipment.
                 'exportDeclaration' => $isCustomsDeclarable
-                    ? $this->buildExportDeclaration($shipment, $currency)
+                    ? $this->buildExportDeclaration($shipment, $invoiceCurrency)
                     : null,
             ], fn ($v) => $v !== null),
             'valueAddedServices' => array_merge(
@@ -218,12 +225,13 @@ class DhlShipmentService
         // "UPLOAD" Commercial Invoice mode (see ShipmentController::store) \u2014 attach the
         // staff-provided file itself so DHL uses it as the Commercial Invoice (typeCode CIN)
         // instead of only relying on our own local copy.
-        if (! empty($shipment['uploadedInvoice'])) {
-            $request['documentImages'] = [[
+        $uploads = UpsShipmentService::uploadedInvoices($shipment);
+        if ($uploads !== []) {
+            $request['documentImages'] = array_map(fn ($upload) => [
                 'typeCode' => 'CIN',
-                'imageFormat' => $shipment['uploadedInvoice']['format'],
-                'content' => $shipment['uploadedInvoice']['content'],
-            ]];
+                'imageFormat' => $upload['format'],
+                'content' => $upload['content'],
+            ], $uploads);
         }
 
         return $request;
@@ -262,7 +270,7 @@ class DhlShipmentService
                     'description' => $line['description'] ?: 'General Merchandise',
                     'price' => $unitValue > 0 ? $unitValue : 1,
                     'priceCurrency' => $currency,
-                    'quantity' => ['value' => $qty, 'unitOfMeasurement' => 'PCS'],
+                    'quantity' => ['value' => $qty, 'unitOfMeasurement' => CommercialInvoiceCodes::dhlUnit($line['unit'] ?? null)],
                     'manufacturerCountry' => $line['country_of_origin'] ?: $from['country'],
                     // NOTE: intentionally NOT sending an HS/commodity code here — DHL's Shipment
                     // API (unlike the separate Landed Cost API) rejects any `commodityCode` key
@@ -298,9 +306,8 @@ class DhlShipmentService
                 'number' => $shipment['refInvoiceNo'] ?: ('INV-'.now()->format('YmdHis')),
                 'date' => now()->format('Y-m-d'),
             ]),
-            // 'permanent' covers the overwhelming majority of real commercial sales use — no UI
-            // field exists yet to choose otherwise (samples/returns/repair/temporary export).
-            'exportReasonType' => 'permanent',
+            // Purpose of shipment from the Commercial Invoice step; 'permanent' when none was chosen.
+            'exportReasonType' => CommercialInvoiceCodes::dhlReason($shipment['exportReason'] ?? null),
         ];
     }
 

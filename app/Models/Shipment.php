@@ -14,7 +14,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[Fillable([
     'agent_account_id', 'branch_id', 'created_by', 'carrier', 'service_code', 'service_label',
     'tracking_number', 'pieces', 'status', 'origin', 'destination', 'packages', 'addon_lines',
-    'invoice_mode', 'invoice_lines',
+    'invoice_mode', 'invoice_lines', 'export_reason', 'invoice_currency', 'commercial_invoice_upload_keys',
     'freight_amount', 'addon_total', 'order_total', 'currency', 'cost_amount', 'cost_currency',
     'customer_type', 'entity_type', 'payment_method', 'bill_transportation_to', 'bill_duty_tax_to',
     'bill_transportation_account_number', 'bill_transportation_third_party_country', 'bill_transportation_third_party_postal_code',
@@ -45,6 +45,7 @@ class Shipment extends Model
             'pieces' => 'array',
             'addon_lines' => 'array',
             'invoice_lines' => 'array',
+            'commercial_invoice_upload_keys' => 'array',
             'raw_response' => 'array',
             'raw_request' => 'array',
             'rate_quote' => 'array',
@@ -155,5 +156,49 @@ class Shipment extends Model
     public function getIsTestAttribute(): bool
     {
         return $this->agentAccount?->mode === 'test';
+    }
+
+    /**
+     * Whether the carrier's OWN insurance was really bought, read from what we sent (raw_request)
+     * and what the carrier answered (raw_response) rather than from our settings:
+     * - requested: Declared Value sent as carrier insurance (UPS PackageServiceOptions.DeclaredValue,
+     *   DHL valueAddedServices II); document_cover: DHL IB (documents);
+     * - charged: what UPS billed for it (ItemizedCharges code 400, shipment + package level) — DHL's
+     *   booking response has no charges, so it's null there.
+     * Null when the shipment was booked before raw_request was kept.
+     *
+     * @return array{requested: ?float, charged: ?float, document_cover: bool, currency: string}|null
+     */
+    public function carrierInsurance(): ?array
+    {
+        $request = $this->raw_request;
+        if (! $request) {
+            return null;
+        }
+        // UPS returns a lone object instead of a one-item list.
+        $list = fn ($value) => is_array($value) && array_is_list($value) ? $value : ($value ? [$value] : []);
+
+        if ($this->carrier === 'UPS') {
+            $requested = collect($list(data_get($request, 'ShipmentRequest.Shipment.Package')))
+                ->sum(fn ($pkg) => (float) data_get($pkg, 'PackageServiceOptions.DeclaredValue.MonetaryValue', 0));
+            $results = data_get($this->raw_response, 'ShipmentResponse.ShipmentResults') ?? data_get($this->raw_response, 'ShipmentResults') ?? $this->raw_response ?? [];
+            $charges = collect($list(data_get($results, 'ShipmentCharges.ItemizedCharges')));
+            foreach ($list(data_get($results, 'PackageResults')) as $piece) {
+                $charges = $charges->merge($list(data_get($piece, 'ItemizedCharges')));
+            }
+            $charged = $charges->filter(fn ($c) => (string) ($c['Code'] ?? '') === '400')->sum(fn ($c) => (float) ($c['MonetaryValue'] ?? 0));
+
+            return ['requested' => $requested ?: null, 'charged' => $charged ?: null, 'document_cover' => false, 'currency' => 'THB'];
+        }
+
+        $services = collect(data_get($request, 'valueAddedServices', []));
+        $insurance = $services->firstWhere('serviceCode', 'II');
+
+        return [
+            'requested' => isset($insurance['value']) ? (float) $insurance['value'] : null,
+            'charged' => null,
+            'document_cover' => $services->contains('serviceCode', 'IB'),
+            'currency' => $insurance['currency'] ?? 'THB',
+        ];
     }
 }

@@ -65,7 +65,7 @@ class CommercialInvoiceMergeTest extends TestCase
     public function test_an_unreadable_upload_is_left_out_and_the_carrier_invoice_kept(): void
     {
         $method = new ReflectionMethod(ShipmentController::class, 'buildCombinedCommercialInvoiceStorageKey');
-        $key = $method->invoke(app(ShipmentController::class), '1ZTEST', base64_encode($this->carrierPdf()), 'PDF', ['content' => base64_encode($this->xrefStreamPdf()), 'format' => 'PDF']);
+        $key = $method->invoke(app(ShipmentController::class), '1ZTEST', base64_encode($this->carrierPdf()), 'PDF', [['content' => base64_encode($this->xrefStreamPdf()), 'format' => 'PDF']]);
 
         $this->assertNotNull($key);
         $this->assertStringStartsWith('%PDF', $this->uploaded[0]);
