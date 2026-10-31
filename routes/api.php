@@ -11,6 +11,7 @@ use App\Http\Controllers\WordPressPluginController;
 use App\Http\Controllers\ZonePriceController;
 use App\Http\Controllers\PublicApi\RateController as PublicRateController;
 use App\Http\Controllers\PublicApi\TrackingController as PublicTrackingController;
+use App\Http\Controllers\PublicApi\RateBookController as PublicRateBookController;
 use App\Http\Controllers\PublicApi\PageViewController;
 use App\Http\Controllers\PublicApi\PublicStatsController;
 use App\Http\Controllers\PublicApi\AiAssistController as PublicAiAssistController;
@@ -77,6 +78,8 @@ Route::prefix('public/v1')->middleware('api.client')->group(function () {
     Route::post('rates', [PublicRateController::class, 'rates']);
     Route::get('countries', [PublicRateController::class, 'countries']);
     Route::get('tracking/{trackingNumber}', [PublicTrackingController::class, 'show']);
+    // The latest Rate Book as customer rate cards (selling prices only) — see PublicApi\RateBookController.
+    Route::get('rate-book', [PublicRateBookController::class, 'show']);
 });
 // Same tracking answer, called from the visitor's browser on a registered website (Origin, no key).
 Route::get('public/v1/web/tracking/{trackingNumber}', [PublicTrackingController::class, 'show'])->middleware('api.web:tracking');

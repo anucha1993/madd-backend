@@ -138,6 +138,7 @@ class ApiClientController extends Controller
             }],
             'allow_rates' => ['boolean'],
             'allow_tracking' => ['boolean'],
+            'allow_rate_book' => ['boolean'],
             'track_any_number' => ['boolean'],
             'external_tracking_daily_limit' => ['nullable', 'integer', 'min:0', 'max:100000'],
             'status' => ['boolean'],
