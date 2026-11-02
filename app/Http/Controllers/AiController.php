@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Exceptions\AiPaymentRequired;
 use App\Services\AccessService;
 use App\Services\ChargeMarkupService;
+use App\Services\DataCorpBillingService;
 use App\Services\DhlRateService;
 use App\Services\OpenAiService;
 use App\Services\QuotableAccountResolver;
@@ -103,6 +105,8 @@ class AiController extends Controller
 
         try {
             $fields = $this->openAi->chatJson($systemPrompt, $data['text']);
+        } catch (AiPaymentRequired $e) {
+            return $this->paymentRequired($request, $e);
         } catch (\RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 502);
         }
@@ -144,6 +148,8 @@ class AiController extends Controller
 
         try {
             $extracted = $this->openAi->chatJson($extractPrompt, $data['message']);
+        } catch (AiPaymentRequired $e) {
+            return $this->paymentRequired($request, $e);
         } catch (\RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 502);
         }
@@ -272,6 +278,8 @@ class AiController extends Controller
 
         try {
             $reply = $this->openAi->chatText($replyPrompt, "User question: {$data['message']}\n\nData: {$context}");
+        } catch (AiPaymentRequired $e) {
+            return $this->paymentRequired($request, $e);
         } catch (\RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 502);
         }
@@ -281,5 +289,32 @@ class AiController extends Controller
             'extracted' => $extracted,
             'quotes' => $topResults,
         ]);
+    }
+
+    /** Plan / credits / payment links of the AI key (DataCorp) — the pay buttons only for who manages integrations. */
+    public function plan(Request $request, DataCorpBillingService $billing, AccessService $access)
+    {
+        $s = $billing->status($request->boolean('fresh'));
+        if ($s === null) {
+            return response()->json(['enabled' => false]);
+        }
+        $canPay = $access->can($request->user(), 'config.integrations');
+        if (! $canPay) {
+            $s['upgrade_url'] = $s['pay_url'] = null;
+        }
+
+        return response()->json(['enabled' => true, 'can_pay' => $canPay] + $s);
+    }
+
+    /** 402 for an AI call refused by DataCorp (expired / credits used up / unpaid). */
+    private function paymentRequired(Request $request, AiPaymentRequired $e)
+    {
+        app(DataCorpBillingService::class)->forget();
+        $canPay = app(AccessService::class)->can($request->user(), 'config.integrations');
+
+        return response()->json([
+            'message' => $e->userMessage().($canPay ? '' : ' — กรุณาติดต่อผู้ดูแลระบบ'),
+            'payment' => ['reason' => $e->reason, 'title' => $e->userMessage(), 'detail' => $e->getMessage(), 'pay_url' => $canPay ? $e->payUrl : null],
+        ], 402);
     }
 }

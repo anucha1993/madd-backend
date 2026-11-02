@@ -63,7 +63,7 @@ class HsCodeController extends Controller
     {
         $request->validate(['file' => ['required', 'file', 'mimes:xlsx,xls,csv', 'max:10240']]);
         $file = $request->file('file');
-        $counts = $importer->import($file->getRealPath(), $file->getClientOriginalName());
+        $counts = $importer->import($file->getRealPath(), $file->getClientOriginalName(), $file->getClientOriginalExtension());
         if ($counts['created'] + $counts['updated'] === 0) {
             return response()->json(['error' => 'ไม่พบรายการ HS Code ในไฟล์ — ต้องมีคอลัมน์ "HS Code" (หรือ "HTS Code (10-digit)") และ "Description" (หรือ "Product Category")'], 422);
         }

@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Exceptions\AiPaymentRequired;
 use App\Models\IntegrationSetting;
 use Illuminate\Support\Facades\Http;
 
@@ -88,6 +89,7 @@ class OpenAiService
             ->post(rtrim(config('services.openai.base_url'), '/') . '/chat/completions', $payload);
 
         if (! $response->successful()) {
+            AiPaymentRequired::throwIfPaymentLink($response); // DataCorp: plan expired / credits used up / unpaid
             throw new \RuntimeException($response->json('error.message') ?? "OpenAI request failed (HTTP {$response->status()})");
         }
         $message = $response->json('choices.0.message');
@@ -122,6 +124,7 @@ class OpenAiService
             ->post(rtrim(config('services.openai.base_url'), '/') . '/chat/completions', $payload);
 
         if (! $response->successful()) {
+            AiPaymentRequired::throwIfPaymentLink($response);
             $message = $response->json('error.message') ?? "OpenAI request failed (HTTP {$response->status()})";
             throw new \RuntimeException($message);
         }

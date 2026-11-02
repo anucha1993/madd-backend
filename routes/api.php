@@ -291,6 +291,8 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
     // ai/settings GET stays open: every page reads `is_enabled` to show/hide AI features, and the
     // key itself is only ever returned masked.
     Route::get('ai/settings', [AiController::class, 'settings']);
+    // DataCorp plan / credits / pay links for the AI bar (pay links only for config.integrations)
+    Route::get('ai/plan', [AiController::class, 'plan']);
     Route::post('ai/parse-address', [AiController::class, 'parseAddress'])->middleware('perm:ai.parse_address');
     Route::post('ai/rate-chat', [AiController::class, 'rateChat'])->middleware('perm:ai.rate_chat');
     Route::middleware('perm:config.integrations')->group(function () {

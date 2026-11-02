@@ -44,6 +44,26 @@ class HsCodeTest extends TestCase
         $this->assertLessThanOrEqual(20, count($this->getJson('/api/hs-codes?lookup=1&q=8')->json()));
     }
 
+    public function test_the_hs_2022_list_adds_every_six_digit_code_and_keeps_inactive_ones_inactive(): void
+    {
+        $file = database_path('data/HS2022_UN_Comtrade.csv');
+        $first = app(HsCodeImporter::class)->import($file, 'HS 2022');
+        $this->assertGreaterThan(5500, $first['created']);
+        $this->assertSame(0, HsCode::whereRaw('length(code) < 6')->count());
+
+        $tshirt = HsCode::where('code', '610910')->first();
+        $this->assertSame('6109.10', $tshirt->code_formatted);
+        $this->assertSame('61', $tshirt->chapter);
+
+        $tshirt->update(['status' => false]);
+        $again = app(HsCodeImporter::class)->import($file, 'HS 2022');
+        $this->assertSame(0, $again['created']);
+        $this->assertFalse($tshirt->fresh()->status);
+
+        Sanctum::actingAs($this->user([]));
+        $this->assertContains('610990', array_column($this->getJson('/api/hs-codes?lookup=1&q=t-shirts')->json(), 'code'));
+    }
+
     public function test_managing_the_list_needs_the_permission(): void
     {
         Sanctum::actingAs($this->user([]));

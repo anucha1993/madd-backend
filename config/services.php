@@ -98,6 +98,9 @@ return [
         'api_key' => env('OPENAI_API_KEY'),
         'model' => env('OPENAI_MODEL', 'gpt-4o-mini'),
         'base_url' => env('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
+        // true = AI + OCR go through DataCorp (dca_sk_ key in Integrations, plan/credits + payment links);
+        // default: on when base_url is datacorpapi.com
+        'datacorp' => env('OPENAI_DATACORP'),
     ],
 
     // Cloudflare R2 (S3-compatible) credentials for storing shipment label files — see R2Service.

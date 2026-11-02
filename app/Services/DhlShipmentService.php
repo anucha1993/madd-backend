@@ -262,8 +262,9 @@ class DhlShipmentService
             $lineItems = $invoiceLines->map(function ($line, $index) use ($from, $currency, $fallbackPerLineWeight) {
                 $qty = (float) ($line['quantity'] ?? 1);
                 $unitValue = (float) ($line['unit_value'] ?? 0);
-                $lineWeight = (float) ($line['weight'] ?? 0);
-                $perLineWeight = $lineWeight > 0 ? $lineWeight : $fallbackPerLineWeight;
+                // `weight` is per piece (what staff weigh) — DHL wants the whole line: × quantity.
+                $pieceWeight = (float) ($line['weight'] ?? 0);
+                $perLineWeight = $pieceWeight > 0 ? round($pieceWeight * $qty, 3) : $fallbackPerLineWeight;
 
                 return array_filter([
                     'number' => $index + 1,

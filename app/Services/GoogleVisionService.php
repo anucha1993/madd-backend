@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Exceptions\AiPaymentRequired;
 use App\Models\IntegrationSetting;
 use Illuminate\Support\Facades\Http;
 
@@ -11,6 +12,9 @@ use Illuminate\Support\Facades\Http;
  * "call the REST API directly" approach used for Google Drive elsewhere in this project).
  * `files:annotate` accepts the whole PDF as base64 and is limited to 5 pages per request, so a
  * multi-page invoice is OCR'd in chunks of 5 and the text is concatenated back in page order.
+ *
+ * When the AI goes through DataCorp (DataCorpBillingService::enabled) the OCR goes there too with the same dca_sk_ key
+ * (POST {base}/vision/files:annotate, billed in credits per page) — no Google key needed.
  */
 class GoogleVisionService
 {
@@ -30,7 +34,12 @@ class GoogleVisionService
 
     public function isConfigured(): bool
     {
-        return (bool) $this->getApiKey();
+        return $this->viaDataCorp() || (bool) $this->getApiKey();
+    }
+
+    public function viaDataCorp(): bool
+    {
+        return app(DataCorpBillingService::class)->enabled();
     }
 
     /**
@@ -48,13 +57,22 @@ class GoogleVisionService
         for ($start = 1; $start <= $pageCount; $start += self::PAGES_PER_REQUEST) {
             $pages = range($start, min($start + self::PAGES_PER_REQUEST - 1, $pageCount));
 
-            $response = Http::timeout(120)->post('https://vision.googleapis.com/v1/files:annotate?key='.$this->getApiKey(), [
+            $body = [
                 'requests' => [[
                     'inputConfig' => ['mimeType' => 'application/pdf', 'content' => $base64],
                     'features' => [['type' => 'DOCUMENT_TEXT_DETECTION']],
                     'pages' => array_values($pages),
                 ]],
-            ]);
+            ];
+            if ($this->viaDataCorp()) {
+                $dc = app(DataCorpBillingService::class);
+                $response = Http::withToken($dc->apiKey())->acceptJson()->timeout(180)->post($dc->baseUrl().'/vision/files:annotate', $body);
+                if ($response->failed()) {
+                    AiPaymentRequired::throwIfPaymentLink($response);
+                }
+            } else {
+                $response = Http::timeout(120)->post('https://vision.googleapis.com/v1/files:annotate?key='.$this->getApiKey(), $body);
+            }
 
             if ($response->failed()) {
                 throw new \RuntimeException('Google Vision API error: '.$response->body());

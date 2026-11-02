@@ -97,6 +97,8 @@ class CommercialInvoiceDetailsTest extends TestCase
         $this->assertSame('USD', $dhl['content']['declaredValueCurrency']);
         $this->assertEquals(60, $dhl['content']['declaredValue']);
         $this->assertSame('PRS', $dhl['content']['exportDeclaration']['lineItems'][0]['quantity']['unitOfMeasurement']);
+        // 3 pieces × 0.5 kg each — DHL gets the whole line.
+        $this->assertEquals(['netValue' => 1.5, 'grossValue' => 1.5], $dhl['content']['exportDeclaration']['lineItems'][0]['weight']);
         $this->assertSame('USD', $dhl['content']['exportDeclaration']['lineItems'][0]['priceCurrency']);
         $this->assertSame([['typeCode' => 'EOR', 'number' => 'GB123456789000', 'issuerCountryCode' => 'GB']], $dhl['customerDetails']['receiverDetails']['registrationNumbers']);
         $this->assertCount(2, $dhl['documentImages']);

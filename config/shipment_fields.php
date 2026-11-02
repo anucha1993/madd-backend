@@ -46,7 +46,7 @@ return [
         'packages.*.description' => ['label' => 'รายละเอียดสินค้าของทุกกล่อง', 'form_label' => 'Description of Goods', 'group' => 'package', 'step' => 2],
 
         'invoice_lines.*.hs_code' => ['label' => 'HS Code ของทุกรายการ', 'form_label' => 'HS Code', 'group' => 'invoice', 'step' => 3],
-        'invoice_lines.*.weight' => ['label' => 'น้ำหนักของทุกรายการ', 'form_label' => 'Weight (kg)', 'group' => 'invoice', 'step' => 3],
+        'invoice_lines.*.weight' => ['label' => 'น้ำหนักต่อชิ้นของทุกรายการ', 'form_label' => 'Weight / ชิ้น (kg)', 'group' => 'invoice', 'step' => 3],
         'commercial_invoice_upload_key' => ['label' => 'ไฟล์ Commercial Invoice แนบ', 'form_label' => 'ไฟล์ Commercial Invoice (PDF/JPG/PNG)', 'group' => 'invoice', 'step' => 3],
 
         'payment_method' => ['label' => 'วิธีชำระเงิน', 'form_label' => 'Payment Method', 'group' => 'payment', 'step' => 5],
