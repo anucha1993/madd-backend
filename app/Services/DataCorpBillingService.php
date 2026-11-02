@@ -75,6 +75,8 @@ class DataCorpBillingService
                 'upgrade_plan' => $b['upgrade_plan'] ?? null,
                 'upgrade_price' => $b['upgrade_price_thb'] ?? null,
                 'pay_url' => $j['action_url'] ?? ($b['checkout_url'] ?? ($b['pay_url'] ?? null)),
+                // fallback when DataCorp gives no direct upgrade link: the plans page of the DataCorp portal (needs login)
+                'plans_url' => $b['plans_url'] ?? (preg_replace('#/v1$#', '', $this->baseUrl()).'/portal/plans'),
                 'days_left' => $b['days_left'] ?? null,
                 'renew_due' => (bool) ($b['renew_due'] ?? false),
                 'auto_renew' => (bool) ($b['auto_renew'] ?? false),

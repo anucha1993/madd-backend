@@ -15,6 +15,8 @@ class GoogleVisionController extends Controller
     {
         return response()->json([
             'is_configured' => $this->vision->isConfigured(),
+            // OCR goes through DataCorp with the OpenAI (dca_sk_) key — no Google key needed here
+            'via_datacorp' => $this->vision->viaDataCorp(),
         ]);
     }
 
