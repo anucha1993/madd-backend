@@ -301,6 +301,7 @@ class AiController extends Controller
         $canPay = $access->can($request->user(), 'config.integrations');
         if (! $canPay) {
             $s['upgrade_url'] = $s['pay_url'] = $s['plans_url'] = null;
+            $s['plans'] = [];
         }
 
         return response()->json(['enabled' => true, 'can_pay' => $canPay] + $s);
