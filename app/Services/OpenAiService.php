@@ -67,6 +67,37 @@ class OpenAiService
         return $this->chat($systemPrompt, $userMessage, null);
     }
 
+    /**
+     * One chat-completions call with a full message list and optional function tools; returns the
+     * assistant message (content and/or tool_calls) for the caller to run its own tool loop.
+     */
+    public function complete(array $messages, array $tools = [], float $temperature = 0.3): array
+    {
+        $apiKey = $this->getApiKey();
+        if (! $apiKey) {
+            throw new \RuntimeException('ยังไม่ได้ตั้งค่า OpenAI API Key');
+        }
+
+        $payload = ['model' => config('services.openai.model', 'gpt-4o-mini'), 'messages' => $messages, 'temperature' => $temperature];
+        if ($tools) {
+            $payload['tools'] = $tools;
+        }
+
+        $response = Http::withToken($apiKey)
+            ->timeout(45)
+            ->post(rtrim(config('services.openai.base_url'), '/') . '/chat/completions', $payload);
+
+        if (! $response->successful()) {
+            throw new \RuntimeException($response->json('error.message') ?? "OpenAI request failed (HTTP {$response->status()})");
+        }
+        $message = $response->json('choices.0.message');
+        if (! is_array($message)) {
+            throw new \RuntimeException('OpenAI ไม่ได้ส่งคำตอบกลับมา');
+        }
+
+        return $message;
+    }
+
     private function chat(string $systemPrompt, string $userMessage, ?array $responseFormat): string
     {
         $apiKey = $this->getApiKey();

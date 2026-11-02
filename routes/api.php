@@ -80,6 +80,8 @@ Route::prefix('public/v1')->middleware('api.client')->group(function () {
     Route::get('tracking/{trackingNumber}', [PublicTrackingController::class, 'show']);
     // The latest Rate Book as customer rate cards (selling prices only) — see PublicApi\RateBookController.
     Route::get('rate-book', [PublicRateBookController::class, 'show']);
+    // Website chat assistant (site content + live rates / tracking) — see PublicApi\AiChatController.
+    Route::post('ai-chat', [\App\Http\Controllers\PublicApi\AiChatController::class, 'chat']);
 });
 // Same tracking answer, called from the visitor's browser on a registered website (Origin, no key).
 Route::get('public/v1/web/tracking/{trackingNumber}', [PublicTrackingController::class, 'show'])->middleware('api.web:tracking');
