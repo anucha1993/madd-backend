@@ -1551,18 +1551,23 @@ class ShipmentController extends Controller
             // pre-OTL-shaped input for complex scripts (see Mpdf::Text() docblock: "Expects...RTL
             // reversed & OTL processed"), so Thai combining marks render as tofu boxes when drawn
             // this way; every other Text() line in this method is English-only for the same reason.
-            $qrPng = $this->buildTrackingQrPng($shipment);
-            if ($qrPng) {
-                $qrSize = 32;
+            // Second QR to its right: the website review form (buildReviewQrPng).
+            $qrSize = 32;
+            $qrX = $x;
+            foreach ([[$this->buildTrackingQrPng($shipment), 'Scan to track shipment'], [$this->buildReviewQrPng($shipment), 'Scan to review MADD']] as [$qrPng, $caption]) {
+                if (! $qrPng) {
+                    continue;
+                }
                 $tempQrPath = tempnam(sys_get_temp_dir(), 'dhl-waybill-qr-').'.png';
                 file_put_contents($tempQrPath, $qrPng);
                 try {
-                    $mpdf->Image($tempQrPath, $x, $y, $qrSize, $qrSize);
+                    $mpdf->Image($tempQrPath, $qrX, $y, $qrSize, $qrSize);
                     $mpdf->SetFont('dejavusans', '', 8);
-                    $mpdf->Text($x, $y + $qrSize + 4, 'Scan to track shipment');
+                    $mpdf->Text($qrX, $y + $qrSize + 4, $caption);
                 } finally {
                     unlink($tempQrPath);
                 }
+                $qrX += $qrSize + 8;
             }
 
             return $mpdf->Output('', 'S');
@@ -1750,6 +1755,32 @@ class ShipmentController extends Controller
         }
 
         $url = rtrim(config('services.madd.tracking_url'), '/').'/?tn='.urlencode($shipment->tracking_number);
+
+        return $this->buildMaddQrPng($url, $sizePx);
+    }
+
+    /**
+     * QR code (raw PNG binary) linking to the review form on the madd.co.th website, e.g.
+     * https://madd.co.th/review/?tn=8197657392&carrier=DHL — printed next to the tracking QR on the
+     * Shipper's Copy so the customer can rate MADD; the site keeps the tracking number with the
+     * review (staff can see which shipment it came from). Null without a tracking number.
+     */
+    private function buildReviewQrPng(Shipment $shipment, int $sizePx = 480): ?string
+    {
+        if (! $shipment->tracking_number || ! config('services.madd.review_url')) {
+            return null;
+        }
+
+        $url = rtrim(config('services.madd.review_url'), '/').'/?'.http_build_query(array_filter([
+            'tn' => $shipment->tracking_number,
+            'carrier' => $shipment->carrier,
+        ]));
+
+        return $this->buildMaddQrPng($url, $sizePx);
+    }
+
+    private function buildMaddQrPng(string $url, int $sizePx): string
+    {
         // HIGH (30% recoverable) error correction — needed headroom to cover the MADD mark
         // stamped over the center below, not just a "nice to have".
         $qrCode = new QrCode($url, QrCode::ERROR_CORRECTION_HIGH);
@@ -1805,23 +1836,26 @@ class ShipmentController extends Controller
     }
 
     /**
-     * "สแกนเพื่อติดตามพัสดุ" block (HTML) — QR code + caption, same visual pattern as the other
+     * "สแกนเพื่อติดตามพัสดุ" + "รีวิว MADD" block (HTML) — tracking QR and review QR side by side with captions, same visual pattern as the other
      * right-column blocks in buildUpsDiyWaybill (PAYMENT OF CHARGES / Tracking Numbers / TOTAL
-     * CHARGES), built from buildTrackingQrPng(). Returns '' if there's no tracking number yet.
+     * CHARGES), built from buildTrackingQrPng() / buildReviewQrPng(). Returns '' if there's no tracking number yet.
      */
     private function buildTrackingQrHtml(Shipment $shipment): string
     {
-        $png = $this->buildTrackingQrPng($shipment);
-        if (! $png) {
-            return '';
+        $cells = '';
+        foreach ([
+            [$this->buildTrackingQrPng($shipment), 'สแกนเพื่อติดตามพัสดุ / Scan to track'],
+            [$this->buildReviewQrPng($shipment), 'รีวิว MADD / Scan to review MADD'],
+        ] as [$png, $caption]) {
+            if ($png) {
+                $cells .= '<td style="width:50%;text-align:center;vertical-align:top;">'
+                    .'<img src="data:image/png;base64,'.base64_encode($png).'" style="width:32mm;height:32mm;">'
+                    .'<div style="font-family:garuda;font-size:8pt;">'.$caption.'</div>'
+                    .'</td>';
+            }
         }
 
-        $dataUri = 'data:image/png;base64,'.base64_encode($png);
-
-        return '<div style="text-align:center;">'
-            .'<img src="'.$dataUri.'" style="width:32mm;height:32mm;">'
-            .'<div style="font-family:garuda;font-size:8pt;">สแกนเพื่อติดตามพัสดุ / Scan to track</div>'
-            .'</div>';
+        return $cells === '' ? '' : '<table width="100%" cellpadding="0" cellspacing="0"><tr>'.$cells.'</tr></table>';
     }
 
 
