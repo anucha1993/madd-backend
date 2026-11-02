@@ -120,6 +120,21 @@ class PublicRateService
                 $options[$key] = $option;
             }
         }
+        // Hand-typed rate cards for this destination (e.g. SAGAWA → Japan), as in the staff Check Rate:
+        // already sell prices (no markup), quote only. Shown unless the key limits carriers without SAGAWA.
+        if (! $client->carriers || in_array('SAGAWA', $client->carriers, true)) {
+            foreach (\App\Support\ManualRateCards::quotes($country, $billedWeight) as $r) {
+                $options[$r['carrier'].'|'.$r['serviceCode']] = [
+                    'carrier' => (string) $r['carrier'],
+                    'service_code' => (string) $r['serviceCode'],
+                    'service_name' => strcasecmp((string) $r['carrier'], 'SAGAWA') === 0 ? 'SAGAWA Express' : (string) $r['carrier'],
+                    'price' => $this->round((float) $r['negotiated'], $client->price_rounding),
+                    'currency' => $r['currency'] ?? 'THB',
+                    'transit_days' => null,
+                    'estimated_delivery' => null,
+                ];
+            }
+        }
         $options = array_values($options);
         usort($options, fn ($a, $b) => $a['price'] <=> $b['price']);
 
