@@ -123,7 +123,8 @@ return [
         'tracking_url' => env('MADD_TRACKING_URL', 'https://madd.co.th/tracking/'),
         // Website review form — a second QR on the Shipper's Copy links here (?tn=…&carrier=…) so the
         // customer can rate MADD; the site opens its "Write a review" form with the tracking number kept.
-        'review_url' => env('MADD_REVIEW_URL', 'https://madd.co.th/review/'),
+        // Testing on the new site at demo.madd.co.th — change to https://madd.co.th/review/ when it goes live.
+        'review_url' => env('MADD_REVIEW_URL', 'https://demo.madd.co.th/review/'),
     ],
 
     // CLI php used by Rate Book's "Sync now" (RateBookLauncher). Set it where the site runs on
