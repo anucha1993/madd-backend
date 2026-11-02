@@ -93,6 +93,8 @@ Route::post('public/v1/web/hit', [PageViewController::class, 'store'])->middlewa
 Route::get('public/v1/web/stats', [PublicStatsController::class, 'show'])->middleware('api.web:view');
 // AI: a visitor's sentence → rate-quote form values (no prices). Own per-IP / per-day caps.
 Route::post('public/v1/web/ai-parse', [PublicAiAssistController::class, 'parse'])->middleware('api.web:rates');
+// Website chat assistant from the visitor's browser (form post, no preflight) — see PublicApi\AiChatController.
+Route::post('public/v1/web/ai-chat', [\App\Http\Controllers\PublicApi\AiChatController::class, 'chat'])->middleware('api.web:rates');
 // Customer Display banner images — the display page has no login.
 Route::get('customer-display/media/{id}', [CustomerDisplayController::class, 'media'])->whereNumber('id');
 // A customer display on another computer polls this (~1/s) — see CustomerDisplayController::live().

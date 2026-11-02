@@ -14,8 +14,9 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\RateLimiter;
 
 /**
- * POST /api/public/v1/ai-chat — the website's chat assistant (called server-to-server by the MADD
- * WordPress site with its API key; the visitor's IP comes in X-End-User-IP).
+ * POST /api/public/v1/web/ai-chat — the website's chat assistant, called from the visitor's browser
+ * on a registered site (Origin, no key; see AuthenticateWebOrigin). Also POST /api/public/v1/ai-chat,
+ * server-to-server with the site's API key (the visitor's IP in X-End-User-IP) as a fallback.
  *
  * The site sends the conversation plus a plain-text digest of its own pages ("knowledge"). The model
  * answers from that digest and, for live data, calls two tools that run the same code as the public
@@ -77,6 +78,11 @@ class AiChatController extends Controller
         }
         if (! $this->openAi->isEnabled()) {
             return $this->fail($log, 503, 'ai_disabled');
+        }
+        // From the browser (web/ai-chat) the conversation comes as a JSON string in a form post, so
+        // browsers send it without a CORS preflight — same as web/rates.
+        if (is_string($request->input('messages'))) {
+            $request->merge(['messages' => json_decode($request->input('messages'), true) ?: []]);
         }
         $data = $request->validate([
             'messages' => ['required', 'array', 'min:1', 'max:20'],
