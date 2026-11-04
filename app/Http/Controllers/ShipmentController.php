@@ -22,6 +22,7 @@ use App\Services\RateQuoteVault;
 use App\Services\SupplyStockService;
 use App\Services\UpsShipmentService;
 use App\Support\DocumentWeightLimit;
+use App\Support\PdfXrefRewriter;
 use App\Support\PieceWeightLimit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -468,6 +469,19 @@ class ShipmentController extends Controller
             }
         }
 
+        // UPS rejects a receiver tax number over 15 characters — say so here, before booking.
+        $upsTaxId = $data['carrier'] === 'UPS' ? CommercialInvoiceCodes::upsTaxId($data['destination']['tax_id'] ?? null) : null;
+        if ($upsTaxId !== null && mb_strlen($upsTaxId) > CommercialInvoiceCodes::UPS_TAX_ID_MAX) {
+            throw ValidationException::withMessages(['destination.tax_id' => 'UPS รับ Tax ID ผู้รับได้ไม่เกิน '.CommercialInvoiceCodes::UPS_TAX_ID_MAX.' ตัวอักษร (ไม่นับช่องว่าง / ขีด) — ตอนนี้ '.mb_strlen($upsTaxId).' ตัว']);
+        }
+
+        // The goods can't weigh more than the boxes they're packed in (weight is per piece × qty).
+        $goodsWeight = collect($data['invoice_lines'] ?? [])->sum(fn ($line) => (float) ($line['weight'] ?? 0) * (int) $line['quantity']);
+        $boxWeight = collect($data['packages'])->sum(fn ($pkg) => (float) $pkg['weight'] * max(1, (int) ($pkg['quantity'] ?? 1)));
+        if ($goodsWeight > $boxWeight + 0.0005) {
+            throw ValidationException::withMessages(['invoice_lines' => 'น้ำหนักสินค้ารวมใน Commercial Invoice ('.round($goodsWeight, 3).' kg) เกินน้ำหนักจริงของกล่อง ('.round($boxWeight, 3).' kg)']);
+        }
+
         if ($limitError = DocumentWeightLimit::error($data['carrier'], $packages) ?? PieceWeightLimit::error($data['carrier'], $packages)) {
             throw ValidationException::withMessages(['packages' => $limitError]);
         }
@@ -884,7 +898,20 @@ class ShipmentController extends Controller
         $tempPaths[] = $tempPath;
 
         if ($extension === 'pdf') {
-            $pageCount = $mpdf->setSourceFile($tempPath);
+            try {
+                $pageCount = $mpdf->setSourceFile($tempPath);
+            } catch (\setasign\Fpdi\PdfParser\CrossReference\CrossReferenceException $e) {
+                // PDF 1.5+ with a compressed xref (common for scanner / Office exports) — rewrite
+                // it with a plain xref table, which FPDI's free parser can open, and try again.
+                $rewritten = PdfXrefRewriter::rewrite((string) file_get_contents($tempPath));
+                if ($rewritten === null) {
+                    throw $e;
+                }
+                $tempPath .= '.plain.pdf';
+                file_put_contents($tempPath, $rewritten);
+                $tempPaths[] = $tempPath;
+                $pageCount = $mpdf->setSourceFile($tempPath);
+            }
             for ($page = 1; $page <= $pageCount; $page++) {
                 $templateId = $mpdf->importPage($page);
                 $size = $mpdf->getTemplateSize($templateId);
@@ -912,14 +939,20 @@ class ShipmentController extends Controller
         imagefilledrectangle($rgb, 0, 0, imagesx($src), imagesy($src), imagecolorallocate($rgb, 255, 255, 255));
         imagecopy($rgb, $src, 0, 0, 0, 0, imagesx($src), imagesy($src));
         imagedestroy($src);
-        $pngPath = $tempPath.'.png';
-        imagepng($rgb, $pngPath);
+        // JPEG, and referenced by path: a phone photo as a PNG data URI runs into mpdf's
+        // pcre.backtrack_limit ("The HTML code size is larger than …") and the page is lost.
+        $jpegPath = $tempPath.'.jpg';
+        imagejpeg($rgb, $jpegPath, 90);
         imagedestroy($rgb);
-        $tempPaths[] = $pngPath;
+        $tempPaths[] = $jpegPath;
 
-        $mpdf->AddPage();
-        $dataUri = 'data:image/png;base64,'.base64_encode(file_get_contents($pngPath));
-        $mpdf->WriteHTML('<div style="text-align:center;"><img src="'.$dataUri.'" style="max-width:190mm;max-height:270mm;"></div>');
+        // Fitted into an A4 page with 10 mm margins and centered — sized by hand, since an image
+        // taller than the HTML flow's printable area pushes itself onto a further page.
+        [$pixelsW, $pixelsH] = getimagesize($jpegPath);
+        $scale = min(190 / $pixelsW, 277 / $pixelsH);
+        [$w, $h] = [$pixelsW * $scale, $pixelsH * $scale];
+        $mpdf->AddPageByArray(['orientation' => 'P', 'sheet-size' => 'A4', 'margin-top' => 0, 'margin-bottom' => 0, 'margin-left' => 0, 'margin-right' => 0]);
+        $mpdf->Image($jpegPath, (210 - $w) / 2, 10, $w, $h, 'jpg', '', true, false);
 
         return true;
     }

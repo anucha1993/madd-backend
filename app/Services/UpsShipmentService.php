@@ -129,7 +129,7 @@ class UpsShipmentService
                 'Name' => $to['contactName'] ?: ($to['company'] ?: 'Receiver'),
                 'AttentionName' => $to['contactName'] ?? null,
                 // Receiver's Tax ID / EORI / National ID — some destinations won't clear without it.
-                'TaxIdentificationNumber' => ($to['taxId'] ?? null) ?: null,
+                'TaxIdentificationNumber' => CommercialInvoiceCodes::upsTaxId($to['taxId'] ?? null),
                 'Phone' => ['Number' => $to['phone'] ?: '0000000000'],
                 'Address' => $this->buildAddress($to),
             ], fn ($v) => $v !== null),

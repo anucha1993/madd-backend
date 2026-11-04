@@ -13,7 +13,7 @@ class UpsRateService
 {
     use HasUpsOAuthToken;
 
-    private const SERVICE_CODES = [
+    public const SERVICE_CODES = [
         '65' => 'Worldwide Saver',
         '07' => 'Worldwide Express',
         '08' => 'Worldwide Expedited',

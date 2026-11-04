@@ -58,24 +58,41 @@ class CommercialInvoiceDetailsTest extends TestCase
 
     private function book(): Shipment
     {
+        $response = $this->bookRequest()->assertOk();
+        $this->warnings = $response->json('upload_warnings');
+
+        return Shipment::find($response->json('id'));
+    }
+
+    /** One 2 kg box; the invoice line is 3 pieces × $pieceWeight kg. */
+    private function bookRequest(float $pieceWeight = 0.5)
+    {
         $quote = ['carrier' => 'DHL', 'accountId' => $this->account, 'serviceCode' => 'P', 'currency' => 'THB', 'negotiated' => 1000, 'costNegotiated' => 900, 'chargeBreakdown' => [['code' => 'BASE', 'amount' => 1000]]];
         $quote['quoteId'] = app(RateQuoteVault::class)->remember($quote, $this->staff);
 
-        $response = $this->postJson('/api/shipments', [
+        return $this->postJson('/api/shipments', [
             'agent_account_id' => $this->account, 'carrier' => 'DHL', 'service_code' => 'P',
             'origin' => ['contact_name' => 'Somchai', 'postcode' => '10110', 'city' => 'Bangkok', 'address' => '123 Test Road', 'phone' => '0800000000'],
             'destination' => ['contact_name' => 'Receiver', 'country' => 'GB', 'city' => 'LONDON', 'postcode' => 'SW1A 1AA', 'address' => '1 Test St', 'phone' => '2000000000', 'tax_id' => 'GB123456789000', 'tax_id_type' => 'EOR'],
             'packages' => [['weight' => 2, 'length' => 10, 'width' => 10, 'height' => 10, 'quantity' => 1, 'is_document' => false]],
-            'invoice_lines' => [['description' => 'Silk scarf', 'quantity' => 3, 'unit_value' => 20, 'unit' => 'PRS', 'weight' => 0.5, 'country_of_origin' => 'TH']],
+            'invoice_lines' => [['description' => 'Silk scarf', 'quantity' => 3, 'unit_value' => 20, 'unit' => 'PRS', 'weight' => $pieceWeight, 'country_of_origin' => 'TH']],
             'export_reason' => 'GIFT',
             'invoice_currency' => 'usd',
             'commercial_invoice_upload_keys' => ['inv-a.pdf', 'inv-b.png'],
             'freight_amount' => 1000, 'addon_total' => 0, 'order_total' => 1000, 'currency' => 'THB',
             'rate_quote' => $quote,
-        ])->assertOk();
-        $this->warnings = $response->json('upload_warnings');
+        ]);
+    }
 
-        return Shipment::find($response->json('id'));
+    public function test_goods_heavier_than_the_boxes_cannot_be_booked(): void
+    {
+        // 3 × 0.7 = 2.1 kg of goods in a 2 kg box.
+        $this->bookRequest(0.7)->assertStatus(422)->assertJsonValidationErrors('invoice_lines');
+        $this->assertNull($this->sent);
+        $this->assertSame(0, Shipment::count());
+
+        // Exactly the box weight is fine.
+        $this->bookRequest(2 / 3)->assertOk();
     }
 
     public function test_the_details_reach_both_carriers_requests_and_are_kept_on_the_shipment(): void
@@ -112,6 +129,32 @@ class CommercialInvoiceDetailsTest extends TestCase
         $this->assertSame('PRS', $forms['Product'][0]['Unit']['UnitOfMeasurement']['Code']);
         $this->assertSame(['CurrencyCode' => 'USD', 'MonetaryValue' => '60'], $node['InvoiceLineTotal']);
         $this->assertSame('GB123456789000', $node['ShipTo']['TaxIdentificationNumber']);
+    }
+
+    public function test_ups_gets_the_tax_id_without_separators_and_a_too_long_one_is_stopped_before_booking(): void
+    {
+        $to = ['contactName' => 'B', 'company' => null, 'country' => 'SG', 'city' => 'Singapore', 'postcode' => '018989', 'address' => 'y', 'phone' => '2', 'taxId' => ' M2-1234567-8 '];
+        $shipment = [
+            'from' => ['contactName' => 'A', 'company' => null, 'country' => 'TH', 'city' => 'Bangkok', 'postcode' => '10110', 'address' => 'x', 'phone' => '1'],
+            'to' => $to,
+            'packages' => [['weight' => 1, 'length' => 10, 'width' => 10, 'height' => 10, 'quantity' => 1, 'isDocument' => false]],
+            'declaredValueCurrency' => 'THB', 'serviceCode' => '65', 'refInvoiceNo' => null, 'description' => null,
+            'invoiceLines' => [['description' => 'Shirt', 'quantity' => 1, 'unit_value' => 100, 'country_of_origin' => 'TH']],
+        ];
+        $ups = (new ReflectionMethod(UpsShipmentService::class, 'buildShipmentRequest'))->invoke(new UpsShipmentService(), ['username_acc' => 'AX3173'], $shipment);
+        $this->assertSame('M212345678', $ups['ShipmentRequest']['Shipment']['ShipTo']['TaxIdentificationNumber']);
+
+        $agent = DB::table('agents')->insertGetId(['agent_name' => 'UPS', 'agent_code' => 'UPS', 'created_at' => now(), 'updated_at' => now()]);
+        $account = DB::table('agent_accounts')->insertGetId(['agent_id' => $agent, 'username_acc' => 'AX3173', 'status' => true, 'is_api_enabled' => true, 'created_at' => now(), 'updated_at' => now()]);
+        $this->mock(UpsShipmentService::class, fn ($m) => $m->shouldNotReceive('createShipment'));
+        $this->postJson('/api/shipments', [
+            'agent_account_id' => $account, 'carrier' => 'UPS', 'service_code' => '65',
+            'origin' => ['contact_name' => 'Somchai', 'postcode' => '10110', 'city' => 'Bangkok', 'address' => '123 Test Road', 'phone' => '0800000000'],
+            'destination' => ['contact_name' => 'Receiver', 'country' => 'SG', 'city' => 'Singapore', 'postcode' => '018989', 'address' => '1 Test St', 'phone' => '2000000000', 'tax_id' => 'SG-2023-1234567-ABCD'],
+            'packages' => [['weight' => 2, 'length' => 10, 'width' => 10, 'height' => 10, 'quantity' => 1, 'is_document' => false]],
+            'invoice_lines' => [['description' => 'Silk scarf', 'quantity' => 1, 'unit_value' => 20]],
+            'freight_amount' => 1000, 'addon_total' => 0, 'order_total' => 1000, 'currency' => 'THB',
+        ])->assertStatus(422)->assertJsonValidationErrors('destination.tax_id');
     }
 
     public function test_a_ups_paperless_failure_is_reported_per_file_not_hidden(): void

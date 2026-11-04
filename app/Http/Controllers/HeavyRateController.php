@@ -5,8 +5,10 @@ namespace App\Http\Controllers;
 use App\Models\ChargeCode;
 use App\Models\HeavyRateBand;
 use App\Models\IntegrationSetting;
+use App\Models\Shipment;
 use App\Services\ChargeMarkupService;
 use App\Services\HeavyRateService;
+use App\Services\UpsRateService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -25,6 +27,9 @@ class HeavyRateController extends Controller
                 ->map(fn ($b) => ['min_weight' => $b->min_weight, 'max_weight' => $b->max_weight, 'rates' => (object) ($b->rates ?? [])]),
             // Lines the Heavy Weight Rate replaces (the rest stay at their normal sell price).
             'replaced_codes' => HeavyRateService::storedReplacedCodes()[$carrier] ?? [],
+            // Services each special-country price is for ({"AU": ["65"]}; none = every service).
+            'country_services' => (object) (HeavyRateService::storedCountryServices()[$carrier] ?? []),
+            'services' => self::services($carrier),
             // Every line a quote can carry: the carrier's charge codes + our own lines.
             'codes' => [
                 ['code' => 'WEIGHT_MARKUP', 'label' => 'Weight Markup (บวกตามช่วงน้ำหนัก)'],
@@ -34,6 +39,27 @@ class HeavyRateController extends Controller
                     ->get(['code', 'label'])->map(fn ($c) => ['code' => (string) $c->code, 'label' => $c->label])->all(),
             ],
         ]);
+    }
+
+    /**
+     * Services to pick for a special-country price: UPS's fixed Rating codes; DHL's come from its
+     * API per quote, so the ones booked so far plus the usual Express Worldwide.
+     *
+     * @return list<array{code: string, label: string}>
+     */
+    private static function services(string $carrier): array
+    {
+        $services = $carrier === 'UPS'
+            ? UpsRateService::SERVICE_CODES
+            : ['P' => 'EXPRESS WORLDWIDE'] + Shipment::where('carrier', 'DHL')
+                ->whereNotNull('service_code')->distinct()->pluck('service_label', 'service_code')->filter()->all();
+        foreach (HeavyRateService::storedCountryServices()[$carrier] ?? [] as $codes) {
+            foreach ($codes as $code) {
+                $services[$code] ??= $code;
+            }
+        }
+
+        return collect($services)->map(fn ($label, $code) => ['code' => (string) $code, 'label' => (string) $label])->values()->all();
     }
 
     // Formula variables, never a line on a quote.
@@ -63,6 +89,9 @@ class HeavyRateController extends Controller
             'bands.*.max_weight' => ['nullable', 'numeric', 'min:0'],
             'bands.*.rates' => ['present', 'array'],
             'bands.*.rates.*' => ['nullable', 'numeric', 'min:0'],
+            'country_services' => ['sometimes', 'array'],
+            'country_services.*' => ['array'],
+            'country_services.*.*' => ['string', 'max:10'],
         ], ['bands.*.rates.*.numeric' => 'ราคาต้องเป็นตัวเลข (บาท/kg)', 'bands.*.rates.*.min' => 'ราคาต้องไม่ติดลบ']);
 
         $bands = collect($data['bands'])->sortBy('min_weight')->values();
@@ -81,6 +110,15 @@ class HeavyRateController extends Controller
                     return response()->json(['message' => "คอลัมน์ไม่ถูกต้อง: {$key}"], 422);
                 }
             }
+        }
+
+        if (array_key_exists('country_services', $data)) {
+            $all = HeavyRateService::storedCountryServices();
+            $all[$data['carrier']] = collect($data['country_services'])
+                ->filter(fn ($codes, $iso2) => preg_match('/^[A-Z]{2}$/', (string) $iso2) && $codes)
+                ->map(fn ($codes) => array_values(array_unique(array_map('strval', $codes))))
+                ->all();
+            IntegrationSetting::set(HeavyRateService::COUNTRY_SERVICES_KEY, json_encode($all));
         }
 
         DB::transaction(function () use ($data, $bands) {

@@ -20,6 +20,13 @@ class HeavyRateService
 {
     public const REPLACED_CODES_KEY = 'heavy_rate.replaced_codes';
 
+    // Which services a country's special price is for, per carrier: {"UPS": {"AU": ["65"]}}.
+    // No entry / empty list = every service. Another service falls back to the zone price.
+    public const COUNTRY_SERVICES_KEY = 'heavy_rate.country_services';
+
+    /** @var array<string, array<string, list<string>>>|null */
+    private ?array $countryServices = null;
+
     // Freight + fuel: what a per-kg price stands for. Everything else is still charged on top.
     public const DEFAULT_REPLACED_CODES = ['UPS' => ['BASE', '375'], 'DHL' => ['BASE', 'FF']];
 
@@ -33,7 +40,7 @@ class HeavyRateService
     private array $zones = [];
 
     /** @return array{rate: float, amount: float, weight: float, band: string, scope: string, zone: ?string}|null */
-    public function resolve(string $carrier, ?string $countryIso2, float $weight): ?array
+    public function resolve(string $carrier, ?string $countryIso2, float $weight, ?string $serviceCode = null): ?array
     {
         $carrier = strtoupper($carrier);
         $bands = $this->bands()->get($carrier);
@@ -50,6 +57,9 @@ class HeavyRateService
         $zone = $this->zone($carrier, $countryIso2);
         $rates = $band->rates ?? [];
         $countryRate = $countryIso2 ? ($rates['country:'.strtoupper($countryIso2)] ?? null) : null;
+        if ($countryRate !== null && ! $this->countryPriceCovers($carrier, strtoupper((string) $countryIso2), $serviceCode)) {
+            $countryRate = null;
+        }
         $zoneRate = $zone !== null ? ($rates['zone:'.$zone] ?? null) : null;
         [$rate, $scope] = match (true) {
             is_numeric($countryRate) => [(float) $countryRate, 'ราคาพิเศษ '.strtoupper($countryIso2)],
@@ -82,6 +92,22 @@ class HeavyRateService
         $this->replacedCodes ??= self::storedReplacedCodes();
 
         return $this->replacedCodes[strtoupper($carrier)] ?? [];
+    }
+
+    private function countryPriceCovers(string $carrier, string $iso2, ?string $serviceCode): bool
+    {
+        $this->countryServices ??= self::storedCountryServices();
+        $services = $this->countryServices[$carrier][$iso2] ?? [];
+
+        return $services === [] || ($serviceCode !== null && in_array((string) $serviceCode, $services, true));
+    }
+
+    /** @return array<string, array<string, list<string>>> */
+    public static function storedCountryServices(): array
+    {
+        $saved = json_decode((string) IntegrationSetting::get(self::COUNTRY_SERVICES_KEY), true);
+
+        return is_array($saved) ? $saved : [];
     }
 
     /** @return array<string, list<string>> */

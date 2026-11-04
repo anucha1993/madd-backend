@@ -214,7 +214,7 @@ class ChargeMarkupService
             // Heavy Weight Rate (e.g. 71 kg+ = 150 THB/kg): its line replaces the priced lines picked
             // for this carrier (freight + fuel by default) — the rest (remote area, demand surcharge …)
             // stays. Lines of ours it replaces (WEIGHT_MARKUP, a rule line like TOTAL) are skipped below.
-            $heavy = $heavyRates->resolve($carrier, $destinationCountry, self::chargeableWeight($result, $packages));
+            $heavy = $heavyRates->resolve($carrier, $destinationCountry, self::chargeableWeight($result, $packages), isset($result['serviceCode']) ? (string) $result['serviceCode'] : null);
             $replaced = $heavy ? array_map('strval', $heavyRates->replacedCodes($carrier)) : [];
             if ($heavy) {
                 $breakdown = array_values(array_filter($breakdown, function ($line) use ($replaced, &$delta) {

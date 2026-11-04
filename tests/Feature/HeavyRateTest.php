@@ -42,10 +42,10 @@ class HeavyRateTest extends TestCase
         Sanctum::actingAs($user);
     }
 
-    private function quote(float $billedWeight, string $country, array $extraLines = []): array
+    private function quote(float $billedWeight, string $country, array $extraLines = [], string $service = '65'): array
     {
         $result = [
-            'carrier' => 'UPS', 'accountId' => $this->account, 'negotiated' => 9000.0 + array_sum(array_column($extraLines, 'amount')), 'published' => 15000.0, 'billedWeight' => $billedWeight,
+            'carrier' => 'UPS', 'accountId' => $this->account, 'serviceCode' => $service, 'negotiated' => 9000.0 + array_sum(array_column($extraLines, 'amount')), 'published' => 15000.0, 'billedWeight' => $billedWeight,
             'chargeBreakdown' => [['code' => 'BASE', 'amount' => 8800.0], ['code' => '400', 'amount' => 200.0], ...$extraLines], 'error' => null,
         ];
 
@@ -145,6 +145,27 @@ class HeavyRateTest extends TestCase
         $this->assertSame(16000.0 + 200.0, $us['negotiated']);
         $this->assertSame('71+ kg · ราคาพิเศษ US', collect($us['chargeBreakdown'])->firstWhere('code', 'HEAVY_RATE')['markupNote']);
         $this->assertSame(12000.0 + 200.0, $this->quote(80, 'SG')['negotiated']);      // others: zone / default
+    }
+
+    public function test_a_country_special_price_can_be_limited_to_some_services(): void
+    {
+        $this->putJson('/api/heavy-rates', ['carrier' => 'UPS', 'bands' => [
+            ['min_weight' => 71, 'max_weight' => null, 'rates' => ['all' => 150, 'zone:5' => 160, 'country:US' => 200]],
+        ], 'country_services' => ['US' => ['65']]])->assertOk()
+            ->assertJsonPath('country_services.US', ['65'])
+            ->assertJsonFragment(['code' => '08', 'label' => 'Worldwide Expedited']);
+
+        $this->assertSame(16000.0 + 200.0, $this->quote(80, 'US', [], '65')['negotiated']); // Saver: the special price
+        $this->assertSame(12800.0 + 200.0, $this->quote(80, 'US', [], '08')['negotiated']); // Expedited: zone 5's
+
+        // Saved without country_services (old page) → the choice is kept; an empty list → every service again.
+        $this->putJson('/api/heavy-rates', ['carrier' => 'UPS', 'bands' => [
+            ['min_weight' => 71, 'max_weight' => null, 'rates' => ['all' => 150, 'zone:5' => 160, 'country:US' => 200]],
+        ]])->assertJsonPath('country_services.US', ['65']);
+        $this->putJson('/api/heavy-rates', ['carrier' => 'UPS', 'bands' => [
+            ['min_weight' => 71, 'max_weight' => null, 'rates' => ['all' => 150, 'zone:5' => 160, 'country:US' => 200]],
+        ], 'country_services' => ['US' => []]])->assertOk();
+        $this->assertSame(16000.0 + 200.0, $this->quote(80, 'US', [], '08')['negotiated']);
     }
 
     public function test_view_and_edit_are_separate_permissions(): void

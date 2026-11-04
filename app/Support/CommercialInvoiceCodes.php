@@ -37,6 +37,20 @@ class CommercialInvoiceCodes
     /** Receiver's tax / ID number type (DHL registrationNumbers typeCode). UPS takes the number alone. */
     public const TAX_ID_TYPES = ['VAT', 'EOR', 'NID', 'PAS', 'SSN', 'EIN', 'CNP'];
 
+    /** UPS ShipTo.TaxIdentificationNumber is at most this long (DHL registrationNumbers takes 35). */
+    public const UPS_TAX_ID_MAX = 15;
+
+    /**
+     * The receiver's tax number as UPS gets it: spaces, dashes, dots and slashes dropped
+     * (e.g. Singapore GST "M2-1234567-8" → "M212345678"), so a number typed with separators fits.
+     */
+    public static function upsTaxId(?string $taxId): ?string
+    {
+        $clean = preg_replace('#[\s\-./]+#u', '', (string) $taxId);
+
+        return $clean !== '' ? $clean : null;
+    }
+
     public static function upsReason(?string $reason): string
     {
         return self::EXPORT_REASONS[$reason ?? 'SALE'][0] ?? 'SALE';
