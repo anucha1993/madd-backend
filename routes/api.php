@@ -297,6 +297,9 @@ Route::middleware(['auth:sanctum', 'record.scope'])->group(function () {
     Route::get('ai/plan', [AiController::class, 'plan']);
     Route::post('ai/parse-address', [AiController::class, 'parseAddress'])->middleware('perm:ai.parse_address');
     Route::post('ai/rate-chat', [AiController::class, 'rateChat'])->middleware('perm:ai.rate_chat');
+    // ผู้ช่วย AI — Administrator only (checked in the controller), see AdminAssistantController.
+    Route::post('ai/admin-assistant', [\App\Http\Controllers\AdminAssistantController::class, 'chat']);
+    Route::post('ai/admin-assistant/confirm', [\App\Http\Controllers\AdminAssistantController::class, 'confirm']);
     Route::middleware('perm:config.integrations')->group(function () {
         Route::put('ai/settings', [AiController::class, 'updateSettings']);
         Route::put('ai/toggle', [AiController::class, 'toggleEnabled']);

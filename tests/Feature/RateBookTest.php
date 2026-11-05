@@ -167,6 +167,41 @@ class RateBookTest extends TestCase
         $this->assertEquals(400, $run->rows()->where('carrier', 'DHL')->where('package_type', 'document')->first()->sell);
     }
 
+    public function test_parallel_workers_quote_their_own_share_without_time_in_transit(): void
+    {
+        $this->mock(UpsRateService::class, function ($m) {
+            // 4th argument false: the Rate Book skips UPS's Time-in-Transit call.
+            $m->shouldReceive('quoteAccounts')->withArgs(fn ($a, $s, $codes, $withTransit = true) => $withTransit === false)
+                ->andReturnUsing(fn ($accounts) => [['carrier' => 'UPS', 'accountId' => $accounts[0]['id'], 'serviceCode' => '65', 'negotiated' => 100, 'chargeBreakdown' => [['code' => 'BASE', 'amount' => 100]], 'error' => null]]);
+        });
+        $this->mock(DhlRateService::class, fn ($m) => $m->shouldReceive('quoteAccounts')->andReturn([['carrier' => 'DHL', 'serviceCode' => 'P', 'negotiated' => 50, 'chargeBreakdown' => [], 'error' => null], ['carrier' => 'DHL', 'serviceCode' => 'D', 'negotiated' => 40, 'chargeBreakdown' => [], 'error' => null]]));
+
+        $run = RateBookRun::create(['status' => 'running', 'trigger' => 'manual', 'settings' => RateBookSettings::get()]);
+        $items = RateBookService::workItems($run->settings, RateBookService::accounts());
+
+        $seen = [];
+        foreach ([0, 1, 2] as $shard) {
+            \Illuminate\Support\Facades\Artisan::call('rate-book:quote-worker', ['run' => $run->id, 'shard' => $shard, 'shards' => 3]);
+            foreach (explode("\n", \Illuminate\Support\Facades\Artisan::output()) as $line) {
+                if (str_starts_with($line, RateBookService::WORKER_PREFIX)) {
+                    $message = json_decode(substr($line, strlen(RateBookService::WORKER_PREFIX)), true);
+                    $this->assertSame($shard, $message['i'] % 3);
+                    $this->assertNull($message['row']['error']);
+                    $seen[] = $message['i'];
+                }
+            }
+        }
+        sort($seen);
+        // Every job quoted exactly once across the workers; workers write nothing themselves.
+        $this->assertSame(array_keys(array_filter($items)), $seen);
+        $this->assertSame(0, $run->rows()->count());
+
+        // A run that is no longer running gets nothing from a late worker.
+        $run->update(['status' => 'failed']);
+        \Illuminate\Support\Facades\Artisan::call('rate-book:quote-worker', ['run' => $run->id, 'shard' => 0, 'shards' => 3]);
+        $this->assertStringNotContainsString(RateBookService::WORKER_PREFIX, \Illuminate\Support\Facades\Artisan::output());
+    }
+
     public function test_dead_runs_are_closed_and_running_ones_can_be_cancelled(): void
     {
         $this->actingWith(['report.rate_book', 'report.rate_book_settings']);

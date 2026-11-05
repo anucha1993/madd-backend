@@ -28,7 +28,7 @@ class RateBookLauncher
      * The CLI php: RATE_BOOK_PHP_BINARY if set (needed on PHP-FPM hosts like Plesk, where PHP_BINARY
      * is the fpm daemon and `php` on PATH may be a different PHP version), else this process's own.
      */
-    private static function phpBinary(): string
+    public static function phpBinary(): string
     {
         $configured = config('services.rate_book.php_binary');
         if ($configured) {

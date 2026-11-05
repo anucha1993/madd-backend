@@ -97,6 +97,8 @@ return [
     'openai' => [
         'api_key' => env('OPENAI_API_KEY'),
         'model' => env('OPENAI_MODEL', 'gpt-4o-mini'),
+        // ผู้ช่วย AI (/ai-assistant) reads code and traces prices — needs a stronger model than the chat widgets.
+        'assistant_model' => env('OPENAI_ASSISTANT_MODEL', 'gpt-5-mini'),
         'base_url' => env('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
         // true = AI + OCR go through DataCorp (dca_sk_ key in Integrations, plan/credits + payment links);
         // default: on when base_url is datacorpapi.com
@@ -131,6 +133,8 @@ return [
     // PHP-FPM (e.g. Plesk: /opt/plesk/php/8.3/bin/php); empty = auto-detect.
     'rate_book' => [
         'php_binary' => env('RATE_BOOK_PHP_BINARY'),
+        // Processes quoting at once during a sync (1 = one by one, like before).
+        'workers' => (int) env('RATE_BOOK_WORKERS', 5),
     ],
 
 ];

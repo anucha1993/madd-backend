@@ -6,7 +6,9 @@ use App\Models\AgentAccount;
 use App\Models\IntegrationSetting;
 use App\Models\RateBookRow;
 use App\Models\RateBookRun;
+use App\Support\RateBookLauncher;
 use App\Support\RateBookSettings;
+use Illuminate\Support\Facades\Process;
 
 /**
  * Builds one Rate Book snapshot: for every carrier × document/box × weight point × zone, asks
@@ -23,6 +25,13 @@ class RateBookService
 
     // Pause between rate requests so a sync never crowds out staff's own Check Rate calls.
     private const PAUSE_MICROSECONDS = 300_000;
+
+    // Worker processes quoting at once (RATE_BOOK_WORKERS overrides; 1 = the old one-by-one run).
+    // Each keeps the pause above, so carriers see a few requests at a time, not a burst.
+    public const WORKERS = 5;
+
+    // Marks a worker's result line on stdout (anything else it prints is ignored).
+    public const WORKER_PREFIX = '@@RATEBOOK@@';
 
     private const ORIGIN = ['country' => 'TH', 'city' => 'Bangkok', 'postcode' => '10110', 'address' => '1 Sukhumvit Road'];
 
@@ -148,65 +157,115 @@ class RateBookService
         return number_format($min, 2).($max !== null ? '-'.number_format($max, 2) : '+').' kg';
     }
 
-    public function run(RateBookRun $run): RateBookRun
+    public static function accounts()
     {
-        $settings = $run->settings;
-        $points = self::points($settings);
+        return AgentAccount::with('agent')->get()->keyBy('id');
+    }
+
+    /**
+     * Every point × column of a run, in row order — null where no account offers the service at
+     * that weight (counted as done, no row: Create Shipment wouldn't show a price either). The
+     * main process and each worker build this same list, so an index means the same job to both.
+     *
+     * @return list<array{point: array, zone: string, address: array, account_id: ?int, min_charge: ?float}|null>
+     */
+    public static function workItems(array $settings, $accounts): array
+    {
         $columnsByCarrier = [];
         foreach (RateBookSettings::CARRIERS as $carrier) {
             $columnsByCarrier[$carrier] = RateBookSettings::columns($settings, $carrier);
         }
-        $columnsOf = fn (array $point) => array_values(array_filter(
-            $columnsByCarrier[$point['carrier']],
-            fn ($c) => empty($point['columns']) || in_array($c['key'], $point['columns'], true),
-        ));
-        $total = collect($points)->sum(fn ($p) => count($columnsOf($p)));
-        $run->update(['total_points' => $total, 'started_at' => $run->started_at ?? now()]);
-
-        $accounts = AgentAccount::with('agent')->get()->keyBy('id');
-        $done = 0;
-        $errors = 0;
-        foreach ($points as $point) {
-            foreach ($columnsOf($point) as $column) {
+        $items = [];
+        foreach (self::points($settings) as $point) {
+            $columns = array_filter(
+                $columnsByCarrier[$point['carrier']],
+                fn ($c) => empty($point['columns']) || in_array($c['key'], $point['columns'], true),
+            );
+            foreach ($columns as $column) {
                 $accountId = self::accountFor($settings['carriers'][$point['carrier']]['account_rules'] ?? [], $column['zone'], $point['weight'], $point['account_id']);
                 // Same Check Rate weight ranges as /shipment/create (/config/agent-accounts, per account
                 // and per service): another account of the carrier if this one doesn't offer it, or no
                 // price at all when none does — Create Shipment wouldn't show one either.
                 $accountId = self::offeringAccount($accounts, $point, $accountId);
                 if ($accountId === false) {
-                    $done++;
+                    $items[] = null;
 
                     continue;
                 }
-                // Under the service's range with a minimum charge → priced at that weight.
-                $minCharge = $accountId ? $accounts->get($accountId)?->minChargeFor((string) $point['service_code'], (float) $point['weight']) : null;
-                if ($minCharge !== null) {
-                    $point['quote_weight'] = $minCharge;
-                }
-                $row = $this->quotePoint($point, $column['key'], $column['address'], $accounts->get($accountId));
-                unset($point['quote_weight']);
-                if ($row['error'] !== null && self::isTransient($row['error'])) {
-                    // Network blip (DNS / timeout / carrier 5xx) — one more try before giving up on the point.
-                    sleep(app()->runningUnitTests() ? 0 : 3);
-                    $row = $this->quotePoint($minCharge !== null ? ['quote_weight' => $minCharge] + $point : $point, $column['key'], $column['address'], $accounts->get($accountId));
-                }
+                $items[] = [
+                    'point' => $point,
+                    'zone' => $column['key'],
+                    'address' => $column['address'],
+                    'account_id' => $accountId,
+                    // Under the service's range with a minimum charge → priced at that weight.
+                    'min_charge' => $accountId ? $accounts->get($accountId)?->minChargeFor((string) $point['service_code'], (float) $point['weight']) : null,
+                ];
+            }
+        }
+
+        return $items;
+    }
+
+    /** One job's Rate Book row (asks the carrier; one retry on a network blip). */
+    public function quoteItem(array $item, $accounts): array
+    {
+        $point = $item['point'];
+        if ($item['min_charge'] !== null) {
+            $point['quote_weight'] = $item['min_charge'];
+        }
+        $account = $item['account_id'] ? $accounts->get($item['account_id']) : null;
+        $row = $this->quotePoint($point, $item['zone'], $item['address'], $account);
+        if ($row['error'] !== null && self::isTransient($row['error'])) {
+            // Network blip (DNS / timeout / carrier 5xx) — one more try before giving up on the point.
+            sleep(app()->runningUnitTests() ? 0 : 3);
+            $row = $this->quotePoint($point, $item['zone'], $item['address'], $account);
+        }
+
+        return $row;
+    }
+
+    /** Pause between one worker's rate requests, so staff's own Check Rate calls still get through. */
+    public static function pause(): void
+    {
+        usleep(app()->runningUnitTests() ? 0 : self::PAUSE_MICROSECONDS);
+    }
+
+    public function run(RateBookRun $run): RateBookRun
+    {
+        $accounts = self::accounts();
+        $items = self::workItems($run->settings, $accounts);
+        $run->update(['total_points' => count($items), 'started_at' => $run->started_at ?? now()]);
+
+        $done = 0;
+        $errors = 0;
+        // Rows go in strictly in job order (the table / Excel read them back by id).
+        $store = function (?array $row) use ($run, &$done, &$errors) {
+            if ($row !== null) {
                 RateBookRow::create(['rate_book_run_id' => $run->id] + $row);
-                usleep(app()->runningUnitTests() ? 0 : self::PAUSE_MICROSECONDS);
-                $done++;
                 if ($row['error'] !== null) {
                     $errors++;
                 }
-                // Progress (also the heartbeat closeStaleRuns() watches) + a chance to stop.
-                if ($done % 5 === 0) {
-                    $run->update(['done_points' => $done, 'error_points' => $errors]);
-                    if ((string) IntegrationSetting::get(RateBookSettings::CANCEL_KEY) === (string) $run->id) {
-                        IntegrationSetting::set(RateBookSettings::CANCEL_KEY, null);
-                        $run->update(['status' => 'failed', 'error' => 'ยกเลิกโดยผู้ใช้', 'finished_at' => now()]);
-
-                        return $run;
-                    }
-                }
             }
+            $done++;
+        };
+        // Progress (also the heartbeat closeStaleRuns() watches) + a chance to stop: true = cancelled.
+        $heartbeat = function () use ($run, &$done, &$errors): bool {
+            $run->update(['done_points' => $done, 'error_points' => $errors]);
+            if ((string) IntegrationSetting::get(RateBookSettings::CANCEL_KEY) !== (string) $run->id) {
+                return false;
+            }
+            IntegrationSetting::set(RateBookSettings::CANCEL_KEY, null);
+            $run->update(['status' => 'failed', 'error' => 'ยกเลิกโดยผู้ใช้', 'finished_at' => now()]);
+
+            return true;
+        };
+
+        $workers = app()->runningUnitTests() ? 1 : max(1, (int) config('services.rate_book.workers', self::WORKERS));
+        $cancelled = $workers > 1
+            ? $this->runInWorkers($run, $items, $workers, $accounts, $store, $heartbeat)
+            : $this->runHere($items, $accounts, $store, $heartbeat, fn () => $done);
+        if ($cancelled) {
+            return $run;
         }
 
         $run->update([
@@ -217,6 +276,87 @@ class RateBookService
         ]);
 
         return $run;
+    }
+
+    /** Every job one after another in this process. True = cancelled. */
+    private function runHere(array $items, $accounts, callable $store, callable $heartbeat, callable $done): bool
+    {
+        foreach ($items as $item) {
+            if ($item === null) {
+                $store(null);
+
+                continue;
+            }
+            $store($this->quoteItem($item, $accounts));
+            self::pause();
+            if ($done() % 5 === 0 && $heartbeat()) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * The jobs split over $workers `rate-book:quote-worker` processes (worker k takes jobs k, k+n,
+     * k+2n …), each asking the carriers at its own pace — several requests in flight at once
+     * instead of one. Workers only quote and print rows; this process writes them, in job order.
+     * A job a worker didn't deliver (it crashed) is quoted here at the end. True = cancelled.
+     */
+    private function runInWorkers(RateBookRun $run, array $items, int $workers, $accounts, callable $store, callable $heartbeat): bool
+    {
+        $processes = [];
+        for ($k = 0; $k < $workers; $k++) {
+            $processes[$k] = Process::path(base_path())->forever()
+                ->start([RateBookLauncher::phpBinary(), base_path('artisan'), 'rate-book:quote-worker', (string) $run->id, (string) $k, (string) $workers]);
+        }
+        $buffers = array_fill(0, $workers, '');
+        $results = [];
+        $next = 0;
+        $count = count($items);
+        $lastBeat = microtime(true);
+        do {
+            $running = false;
+            foreach ($processes as $k => $process) {
+                // running() before reading, so a worker's last lines are read on the final pass.
+                $running = $process->running() || $running;
+                $buffers[$k] .= $process->latestOutput();
+                while (($end = strpos($buffers[$k], "\n")) !== false) {
+                    $line = rtrim(substr($buffers[$k], 0, $end), "\r");
+                    $buffers[$k] = substr($buffers[$k], $end + 1);
+                    if (str_starts_with($line, self::WORKER_PREFIX)) {
+                        $message = json_decode(substr($line, strlen(self::WORKER_PREFIX)), true);
+                        if (is_array($message) && isset($message['i'], $message['row'])) {
+                            $results[(int) $message['i']] = $message['row'];
+                        }
+                    }
+                }
+            }
+            while ($next < $count && ($items[$next] === null || isset($results[$next]))) {
+                $store($items[$next] === null ? null : $results[$next]);
+                unset($results[$next]);
+                $next++;
+            }
+            if (microtime(true) - $lastBeat >= 3) {
+                $lastBeat = microtime(true);
+                if ($heartbeat()) {
+                    foreach ($processes as $process) {
+                        $process->running() && $process->stop(2);
+                    }
+
+                    return true;
+                }
+            }
+            if ($running) {
+                usleep(200_000);
+            }
+        } while ($running);
+
+        for (; $next < $count; $next++) {
+            $store($items[$next] === null ? null : ($results[$next] ?? $this->quoteItem($items[$next], $accounts)));
+        }
+
+        return false;
     }
 
     private function quotePoint(array $point, string $zone, array $address, ?AgentAccount $account): array
@@ -299,13 +439,14 @@ class RateBookService
     private function quote(string $carrier, AgentAccount $account, array $shipment, string $serviceCode): array
     {
         if ($carrier === 'UPS') {
+            // Prices only — the Rate Book has no use for UPS's Time-in-Transit call.
             $result = $this->upsRateService->quoteAccounts([[
                 'id' => $account->id,
                 'username_acc' => $account->username_acc,
                 'client_id' => $account->client_id,
                 'client_secret' => $account->client_secret,
                 'mode' => $account->mode,
-            ]], $shipment, [$serviceCode])[0] ?? null;
+            ]], $shipment, [$serviceCode], false)[0] ?? null;
         } else {
             $results = $this->dhlRateService->quoteAccounts([[
                 'id' => $account->id,

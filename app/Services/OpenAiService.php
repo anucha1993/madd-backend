@@ -72,20 +72,25 @@ class OpenAiService
      * One chat-completions call with a full message list and optional function tools; returns the
      * assistant message (content and/or tool_calls) for the caller to run its own tool loop.
      */
-    public function complete(array $messages, array $tools = [], float $temperature = 0.3): array
+    public function complete(array $messages, array $tools = [], float $temperature = 0.3, ?string $model = null): array
     {
         $apiKey = $this->getApiKey();
         if (! $apiKey) {
             throw new \RuntimeException('ยังไม่ได้ตั้งค่า OpenAI API Key');
         }
 
-        $payload = ['model' => config('services.openai.model', 'gpt-4o-mini'), 'messages' => $messages, 'temperature' => $temperature];
+        $model ??= config('services.openai.model', 'gpt-4o-mini');
+        $payload = ['model' => $model, 'messages' => $messages];
+        // GPT-5 models only take the default temperature.
+        if (! str_starts_with($model, 'gpt-5')) {
+            $payload['temperature'] = $temperature;
+        }
         if ($tools) {
             $payload['tools'] = $tools;
         }
 
         $response = Http::withToken($apiKey)
-            ->timeout(45)
+            ->timeout(str_starts_with($model, 'gpt-5') ? 120 : 45)
             ->post(rtrim(config('services.openai.base_url'), '/') . '/chat/completions', $payload);
 
         if (! $response->successful()) {

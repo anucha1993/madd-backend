@@ -344,8 +344,10 @@ class UpsRateService
      * firing all OAuth + rate requests concurrently via Http::pool (instead of
      * sequentially — with N accounts x M service codes x 2 (published/negotiated)
      * calls, sequential requests would take far too long).
+     *
+     * $withTransitTime = false skips the extra Time-in-Transit call (the Rate Book only needs prices).
      */
-    public function quoteAccounts(array $accounts, array $shipment, array $serviceCodes): array
+    public function quoteAccounts(array $accounts, array $shipment, array $serviceCodes, bool $withTransitTime = true): array
     {
         if (empty($accounts)) {
             return [];
@@ -536,7 +538,7 @@ class UpsRateService
         // Best-effort: transit time doesn't depend on the account, so one call
         // (using whichever account authenticated first) is enough for the whole
         // batch. Failures here must never break the price quotes themselves.
-        if (! empty($tokens)) {
+        if ($withTransitTime && ! empty($tokens)) {
             $firstIndex = array_key_first($tokens);
             try {
                 $transitByDescription = $this->getTimeInTransit($tokens[$firstIndex], $shipment, $accounts[$firstIndex]['mode'] ?? null);
